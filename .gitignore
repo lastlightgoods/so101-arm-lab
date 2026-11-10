@@ -45,3 +45,6 @@ infra/terraform/*.tfstate
 infra/terraform/*.tfstate.*
 infra/terraform/*.tfvars
 infra/terraform/backend.tf
+# hotspot passphrase and the watchdog confirm flag (jetson/hotspot.sh): never committed
+.hotspot_psk
+.hotspot_ok

@@ -152,3 +152,8 @@ so101-cams-health() { so101-cams-take; mkdir -p ~/so101/outputs/run; python3 ~/s
 # so101-cams-drift set|check : reference frames in ~/so101/calib/ref_<cam>.jpg; `check` reports the frame shift per camera and, for
 #   the top camera, the ArUco markers against top_table.json (camera moved vs mat moved). Arm at rest. Exit 1 when something moved.
 so101-cams-drift() { so101-cams-take; python3 ~/so101/cam_drift.py --no-busy "$@"; local rc=$?; so101-cams-release; return $rc; }
+# ---- lab hotspot (docs/hotspot.md) ----
+# so101-hotspot preflight|init|up|confirm|status|qr|revert|down|install|firewall|measure [--dry-run] : the Wi-Fi radio as the lab's own
+#   network (SSID so101-lab, 10.101.0.0/24) with the Ethernet cable to the hotspot device as uplink. `up` arms a 10 min watchdog that
+#   puts the home Wi-Fi back unless `confirm` runs; run it from an ssh session over the Ethernet address.
+so101-hotspot() { bash ~/so101/hotspot.sh "$@"; }

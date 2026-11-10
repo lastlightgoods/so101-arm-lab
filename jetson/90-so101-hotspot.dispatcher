@@ -1,0 +1,34 @@
+#!/bin/sh
+# 90-so101-hotspot · NetworkManager dispatcher: the SO-101 hotspot follows the Ethernet cable (docs/hotspot.md).
+#   enP8p1s0 up (with carrier)  -> `so101-hotspot` profile up (the radio stops being a client of the home Wi-Fi)
+#   enP8p1s0 down               -> hotspot down, home Wi-Fi profile back, so an unplugged cable never strands the box
+# NetworkManager runs this as root with $1 = interface, $2 = action; it must be root-owned, mode 755, not group/world
+# writable, or NM silently ignores it. `hotspot.sh install` stages a copy with the names below filled in and prints:
+#   sudo install -m 755 -o root -g root ~/so101/outputs/hotspot/90-so101-hotspot /etc/NetworkManager/dispatcher.d/90-so101-hotspot
+# Logs: journalctl -t so101-hotspot. Undo: sudo rm /etc/NetworkManager/dispatcher.d/90-so101-hotspot
+# No user paths here on purpose: root's ~ is not TC's, and the profile holds its own key (wifi-sec.psk-flags 0).
+ETH=enP8p1s0
+CON=so101-hotspot
+CLIENT=super-net
+NFT=/etc/so101-hotspot.nft
+IFACE="${1:-}"; ACTION="${2:-}"
+[ "$IFACE" = "$ETH" ] || exit 0
+log() { logger -t so101-hotspot "$*" 2>/dev/null; echo "so101-hotspot: $*"; }
+active() { nmcli -t -f NAME con show --active 2>/dev/null | grep -qx "$1"; }
+case "$ACTION" in
+  up)
+    carrier="${SO101_SYSFS_NET:-/sys/class/net}/$ETH/carrier"   # why: NM says `up` once the link is configured; the carrier file is the belt to that brace
+    if [ -r "$carrier" ] && [ "$(cat "$carrier")" != 1 ]; then log "$ETH up without carrier: not starting $CON"; exit 0; fi
+    if active "$CON"; then log "$ETH up, $CON already active"; exit 0; fi
+    log "$ETH up: starting $CON"
+    nmcli --wait 30 con up "$CON" || { log "$CON failed to start; leaving $CLIENT alone"; exit 0; }
+    [ -r "$NFT" ] && command -v nft >/dev/null 2>&1 && { nft -f "$NFT" && log "applied $NFT" || log "nft -f $NFT failed"; }
+    ;;
+  down)
+    log "$ETH down: $CON off, $CLIENT back"
+    command -v nft >/dev/null 2>&1 && nft delete table inet so101_hotspot 2>/dev/null
+    nmcli con down "$CON" >/dev/null 2>&1
+    nmcli --wait 30 con up "$CLIENT" || log "$CLIENT failed to come back; ssh over the cable once it is plugged in again"
+    ;;
+esac
+exit 0

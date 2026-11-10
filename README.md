@@ -47,6 +47,10 @@ Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend,
 - [`docs/mlops/tracking.md`](docs/mlops/tracking.md): MLflow tracking. One run per pick (`so101-picks`),
   per written calibration file (`so101-calibration`) and per recording session (`so101-recordings`), the
   LAN server, and how every logger degrades to a silent no-op when the server is not there.
+- [`docs/hotspot.md`](docs/hotspot.md): the Jetson's Wi-Fi radio as the iPad's network at a show
+  (`so101-hotspot`, NetworkManager AP + shared mode over an Ethernet uplink, a 10-minute revert
+  watchdog, a cable-follows dispatcher and a one-port firewall). Written against fake tools; not yet
+  run on the hardware.
 
 ## Hardware
 
