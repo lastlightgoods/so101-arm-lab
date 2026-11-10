@@ -138,6 +138,25 @@ def test_json_responses_have_content_length_and_no_store(http):
         assert st == 200 and hdr["Content-Length"] == str(len(body)) and hdr["Cache-Control"] == "no-store", path
 
 
+def test_manifest_is_served_from_here_as_manifest_json(srv, http, tmp_path):
+    assert http.get("/manifest.webmanifest")[0] == 404, "no file under HERE: 404, never a crash"
+    (tmp_path / "manifest.webmanifest").write_text(json.dumps({"name": "SO-101 Lab", "display": "fullscreen", "orientation": "landscape", "start_url": "/"}))
+    st, hdr, body = http.get("/manifest.webmanifest")
+    assert st == 200 and hdr["Content-Type"] == "application/manifest+json" and hdr["Cache-Control"] == "no-cache" and hdr["Content-Length"] == str(len(body))
+    assert json.loads(body) == {"name": "SO-101 Lab", "display": "fullscreen", "orientation": "landscape", "start_url": "/"}
+
+
+def test_real_manifest_and_icons_exist_next_to_index(srv):
+    d = os.path.dirname(os.path.abspath(srv.__file__))
+    m = json.load(open(os.path.join(d, "manifest.webmanifest")))
+    assert m["name"] == "SO-101 Lab" and m["display"] == "fullscreen" and m["orientation"] == "landscape" and m["start_url"] == "/"
+    assert m["theme_color"] == m["background_color"] == "#050607", "the tempest --bg token"
+    for ic in m["icons"]: assert os.path.isfile(os.path.join(d, ic["src"].lstrip("/"))), ic
+    html = open(os.path.join(d, "index.html")).read()
+    for need in ('<link rel="manifest" href="/manifest.webmanifest">', 'apple-mobile-web-app-capable" content="yes"', 'apple-mobile-web-app-status-bar-style" content="black-translucent"', "viewport-fit=cover", "user-scalable=no", "env(safe-area-inset-", "-webkit-touch-callout:none"):
+        assert need in html, need
+
+
 def test_server_bind_skips_fqdn_and_reports_port(srv):
     s = srv.Srv(("127.0.0.1", 0), srv.H)
     try: assert s.server_name == "localhost" and s.server_port == s.server_address[1] > 0 and s.daemon_threads

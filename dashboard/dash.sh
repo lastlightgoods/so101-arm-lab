@@ -1,5 +1,6 @@
 #!/bin/zsh
-# dash.sh start|stop|open|url  — SO-101 lab dashboard: local server + Chrome kiosk on monitor 2
+# dash.sh start|stop|open|url|pad [port]|phone [port]  — SO-101 lab dashboard: local server + Chrome kiosk on monitor 2;
+# `pad` / `phone` also start the LAN gateway (phone.py) and print its one-time link (docs/ipad-panel.md)
 PORT=8765; TPORT=8766; UDD=/tmp/so101-dash-chrome; PY=$HOME/so101/.venv/bin/python; DIR=$HOME/so101/dashboard
 geom() { $PY - <<'PY'
 import ctypes, ctypes.util
@@ -12,8 +13,12 @@ b = ext[0] if ext else cg.CGDisplayBounds(main); print(int(b.x), int(b.y), int(b
 PY
 }
 case "$1" in
-  stop) pkill -f "dashboard/server.py"; pkill -f "ttyd -p $TPORT"; pkill -f "user-data-dir=$UDD"; echo stopped;;
+  stop) pkill -f "dashboard/server.py"; pkill -f "dashboard/phone.py"; pkill -f "ttyd -p $TPORT"; pkill -f "user-data-dir=$UDD"; echo stopped;;
   url)  echo "http://127.0.0.1:$PORT";;
+  pad|phone) MODE=$1; GPORT="${2:-$([ "$MODE" = pad ] && echo 8780 || echo 8770)}"   # pad: the full dashboard for an iPad; phone: the small read-only page. Both need the server up.
+    pgrep -f "dashboard/server.py" >/dev/null || { cd $DIR && nohup $PY $DIR/server.py $PORT > /tmp/so101_dash.log 2>&1 & echo "server started (pid $!), log /tmp/so101_dash.log"; sleep 1.5; }
+    pkill -f "dashboard/phone.py --$MODE" 2>/dev/null; cd $DIR && nohup $PY $DIR/phone.py --$MODE $GPORT > /tmp/so101_$MODE.log 2>&1 &
+    sleep 1; cat /tmp/so101_$MODE.log; echo "(gateway log /tmp/so101_$MODE.log · token in $DIR/.phone_token, delete it to rotate · so101-dash stop ends it)";;
   beat) bpm="${2:-100}"; secs="${3:-34}"; cd $DIR && [ -f beat_$bpm.wav ] || python3 beat.py $bpm $secs >/dev/null; afplay beat_$bpm.wav & echo "beat $bpm bpm";;
   open|*)
     pgrep -f "ttyd -p $TPORT" >/dev/null || { nohup ttyd -p $TPORT -i 127.0.0.1 -W -t fontSize=17 -t disableLeaveAlert=true -t titleFixed=jetson -t cursorBlink=true \

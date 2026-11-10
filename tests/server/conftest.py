@@ -25,6 +25,10 @@ How the outside world is kept out
 import copy, importlib.util, json, os, queue, subprocess, sys, threading, time, urllib.error, urllib.request
 import pytest
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gatewayhelpers as _g  # noqa: E402  (phone.py gateway fixtures: gw, upstream, dash_root, gateway; test files import its constants directly)
+globals().update({_k: _v for _k, _v in vars(_g).items() if not _k.startswith("__")})
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SERVER_PY = os.path.join(ROOT, "dashboard", "server.py")
 BOGUS_JETSON = "so101-test-no-such-host.invalid"

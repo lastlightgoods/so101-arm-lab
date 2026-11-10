@@ -1199,6 +1199,11 @@ class H(http.server.SimpleHTTPRequestHandler):
         elif self.path.startswith("/api/calib"): self.send_json(api_calib())
         elif self.path.startswith("/api/locate"): self.send_json(api_locate(self.query()))
         elif self.path.startswith("/api/ik"): self.send_json(api_ik(self.query()))
+        elif self.path.startswith("/manifest.webmanifest"):   # PWA manifest for the iPad panel (docs/ipad-panel.md); phone.py --pad serves the same file
+            try:
+                with open(os.path.join(HERE, "manifest.webmanifest"), "rb") as f: body = f.read()
+            except OSError: self.send_response(404); self.end_headers(); return
+            self.send_response(200); self.send_header("Content-Type", "application/manifest+json"); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-cache"); self.end_headers(); self.wfile.write(body)
         elif self.path.startswith("/api/gallery"):
             imgs = sorted(os.path.relpath(p, HERE) for p in glob.glob(os.path.join(HERE, "img", "*", "*.jpg")))
             body = json.dumps(imgs).encode(); self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
