@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); HOME = os.path.expanduser("~"
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
 JETSON = os.environ.get("SO101_JETSON", "jetson")
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2", JETSON]
-state = {"jetson": {"online": False, "last": 0}, "mac": {}, "training": {}, "datasets": {}, "policies": {}, "procs": [], "events": [], "arms": {}, "spotify": {"running": False}}
+state = {"jetson": {"online": False, "last": 0}, "mac": {}, "training": {}, "datasets": {}, "policies": {}, "procs": [], "events": [], "arms": {}, "spotify": {"running": False}, "policy": {}}   # policy: the Jetson's DEPLOYED.json (so101-policy deploy), served at /api/policy
 lock = threading.RLock()
 def log(*a): print(time.strftime("%H:%M:%S"), *a, flush=True)
 def event(msg):
@@ -74,7 +74,8 @@ echo "###procs"; ps -eo pid,etime,args | grep -E "lerobot-(record|train|teleoper
 for f in ~/so101/outputs/train/*/train.log ~/so101/outputs/train/*.log; do [ -f "$f" ] && echo "###trainlog $f" && tail -n 300 "$f"; done
 for d in ~/so101/outputs/train/*/checkpoints; do [ -d "$d" ] && echo "###ckpts $d" && ls "$d"; done
 for f in ~/.cache/huggingface/lerobot/lastlight/*/meta/info.json; do [ -f "$f" ] && echo "###dataset $f" && stat -c %Y "$f" 2>/dev/null && cat "$f"; done
-for f in ~/so101/policies/*/train_config.json ~/so101/outputs/train/*/checkpoints/last/pretrained_model/train_config.json; do [ -f "$f" ] && echo "###policy $f" && stat -c %Y "$f" 2>/dev/null && cat "$f"; done
+for f in ~/so101/policies/*/train_config.json ~/so101/policies/*/current/train_config.json ~/so101/outputs/train/*/checkpoints/last/pretrained_model/train_config.json; do [ -f "$f" ] && echo "###policy $f" && stat -c %Y "$f" 2>/dev/null && cat "$f"; done
+f=~/so101/policies/DEPLOYED.json; [ -f "$f" ] && echo "###deployed $f" && cat "$f"
 echo "###end"'''
 STEP = re.compile(r"step:\s*([\d.]+)([KM]?)"); LOSS = re.compile(r"loss:\s*([\d.]+)"); LR = re.compile(r"lr:\s*([\d.e+-]+)")
 def num(s, suf): return float(s) * {"K": 1e3, "M": 1e6}.get(suf, 1)
@@ -117,6 +118,9 @@ def parse_probe(text, host):
                 out["policies"][name] = {"host": host, "type": c.get("policy", {}).get("type", "?"), "steps": c.get("steps", 0), "dataset": (c.get("dataset", {}) or {}).get("repo_id", "?"),
                                          "device": c.get("policy", {}).get("device", "?"), "mtime": int(float(mtime)) if mtime.strip().isdigit() else 0}
             except Exception as e: log("policy parse", arg, e)
+        elif tag == "deployed":   # why: only present when the file exists, so a probe without it parses to the same dict as before
+            try: d = json.loads(body); out["deployed"] = {k: d.get(k) for k in ("name", "version", "run_id", "sha256", "when", "by", "action", "path")} | {"host": host, "history": len(d.get("history") or [])}
+            except Exception as e: log("deployed parse", arg, e)
     return out
 def probe_loop():
     seen = {}
@@ -135,7 +139,7 @@ def probe_loop():
                     for name, v in results.get(host, {}).get(k, {}).items(): merged[f"{name}@{host}" if name in merged else name] = v
                 state[k] = merged
             state["procs"] = sum((results.get(h, {}).get("procs", []) for h in ("mac", "jetson")), [])
-            if "jetson" in results: state["jetson"].update({"mode": results["jetson"]["mode"], "uptime": results["jetson"]["uptime"], "disk": results["jetson"]["disk"]})
+            if "jetson" in results: state["jetson"].update({"mode": results["jetson"]["mode"], "uptime": results["jetson"]["uptime"], "disk": results["jetson"]["disk"]}); state["policy"] = {**results["jetson"].get("deployed", {}), "probed": time.time()}   # why: cached here; /api/policy never opens its own ssh
             vm = psutil.virtual_memory(); du = psutil.disk_usage(HOME)
             state["mac"] = {"cpu": psutil.cpu_percent(interval=None), "ram_used": vm.used // 2**20, "ram_total": vm.total // 2**20, "disk_pct": du.percent, "disk_free_gb": du.free / 2**30}
             for name, d in state["datasets"].items():
@@ -1196,6 +1200,8 @@ class H(http.server.SimpleHTTPRequestHandler):
             if png: self.send_response(200); self.send_header("Content-Type", "image/png"); self.send_header("Content-Length", str(len(png))); self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(png)
             else: self.send_json({"ok": False, "err": SCENE["err"] or "no scene yet"})
         elif self.path.startswith("/api/scene"): self.send_json(api_scene())
+        elif self.path.startswith("/api/policy"):
+            with lock: self.send_json(state["policy"])
         elif self.path.startswith("/api/calib"): self.send_json(api_calib())
         elif self.path.startswith("/api/locate"): self.send_json(api_locate(self.query()))
         elif self.path.startswith("/api/ik"): self.send_json(api_ik(self.query()))

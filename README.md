@@ -14,11 +14,11 @@ Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend,
 | --- | --- |
 | `jetson/` | Jetson side. `jetson_setup.sh` (JetPack 6.2 + CUDA torch + LeRobot), `env.sh` with every `so101-*` command, `cam_calib.py` (camera and arm calibration), `cam_lock.py` / `cam_health.py` / `cam_drift.py` (camera settings lock, frame-rate and drift checks), `goto.py` / `pick_seq.py` (scripted motion), `calib/` (the live calibration files), `JETSON_RUNBOOK.md` |
 | `dashboard/` | The wall dashboard: `server.py` (stdlib HTTP, SSH streams, calibration and scene APIs), `index.html` (gauges, live feeds, 3D arm and cameras, mat map, skins), `phone.py` (the LAN gateway: a phone page, or the full panel on an iPad with `so101-dash pad`, [`docs/ipad-panel.md`](docs/ipad-panel.md)), `scene_detect.py` (objects on the mat from the overhead camera), `skins/`, `urdf/` |
-| `tools/` | Mac-side helpers: `jog_capture.py` (jog-and-fit of the arm base), `pick_loop.py` (iterative pick-and-place learning), `cams.sh` / `cams_avf.py` (camera wall on monitor 2), `teleop_robust.py` (teleop that survives a stalled bus), `ping_arm.py` (raw servo ping), `clean_dataset.py` / `trim_dataset.py` (dataset repair), `film.py` (episode films), `mlflow_backfill.py` / `mlflow_ui.sh` (MLflow), `cf_token.py` (Cloudflare token helper) |
+| `tools/` | Mac-side helpers: `jog_capture.py` (jog-and-fit of the arm base), `pick_loop.py` (iterative pick-and-place learning), `cams.sh` / `cams_avf.py` (camera wall on monitor 2), `teleop_robust.py` (teleop that survives a stalled bus), `ping_arm.py` (raw servo ping), `clean_dataset.py` / `trim_dataset.py` (dataset repair), `film.py` (episode films), `mlflow_backfill.py` / `mlflow_ui.sh` (MLflow), `so101_policy.py` (model registry and Jetson deployment, [`docs/mlops/registry-and-deploy.md`](docs/mlops/registry-and-deploy.md)), `cf_token.py` (Cloudflare token helper) |
 | `plugins/` | LeRobot plugins: `lerobot-robot-busheal` (bus recovery, gripper limits, state relay), `lerobot-camera-avf` (AVFoundation cameras by name), `lerobot-policy-actasync` (ACT with the async engine) |
 | `sim/` | Simulation rounds: ACT on a simulated pick task, cloud training notes, success tables |
 | `tests/` | 600 tests, all synthetic (rendered boards and markers, fake `v4l2-ctl`, fake bus, stub HTTP server). `python -m pytest tests -q`, about 3 minutes |
-| `docs/` | The four guides below, plus CNC panel notes from a side project |
+| `docs/` | The guides below, the MLflow field guide, plus CNC panel notes from a side project |
 | `env.sh` | Mac shell commands (`so101-train`, `so101-finetune`, `so101-dash`, ...) |
 | `NEXT_STEPS.md` | The running log: what works, what broke and why, what is next |
 | `pyproject.toml`, `requirements-dev.txt`, `.github/workflows/tests.yml` | Lint (ruff) and test configuration; CI runs `ruff check .` and the suite on every push |
@@ -39,6 +39,10 @@ Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend,
 - [`docs/mat-scene.md`](docs/mat-scene.md): the live map of the mat. Background model, kinematic arm
   mask from the follower's joints, marker-based drift refit, persistence filter, and the APIs the
   dashboard draws from.
+- [`docs/mlops/registry-and-deploy.md`](docs/mlops/registry-and-deploy.md): checkpoints into the MLflow Model
+  Registry (`so101-policy register`, local or from the Hub), `candidate` and `jetson` aliases, versioned deployment to
+  `~/so101/policies/<name>/v<N>/` with a `current` symlink and `DEPLOYED.json`, one-command rollback, and what
+  `so101-run` and the dashboard do with it.
 
 ## Hardware
 

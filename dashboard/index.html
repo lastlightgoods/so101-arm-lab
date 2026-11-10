@@ -272,8 +272,9 @@ async function refresh(){fetch('/api/hist',{cache:'no-store'}).then(r=>r.json())
  const totE=ds.reduce((a,[,d])=>a+d.episodes,0),totH=ds.reduce((a,[,d])=>a+d.hours,0);$('#ds_sub').textContent=ds.length?`${totE} episodes · ${(totH*60).toFixed(0)} min`:'';
  // policies
  const pol=Object.entries(s.policies).sort((a,b)=>b[1].mtime-a[1].mtime);
- $('#pol tbody').innerHTML=pol.map(([n,p])=>`<tr><td>${n.replace('@jetson','')}<span class="tag ${p.host}">${p.host}</span></td><td style="color:var(--dim);font-size:14px">${p.dataset.replace(/^[^/]+\//,'')}</td><td class="num">${fmt(p.steps)}</td></tr>`).join('')||'<tr><td class="empty" colspan=3>no trained policies</td></tr>';
- $('#pol_sub').textContent=pol.length?`${pol.length} ${pol[0][1].type.toUpperCase()}`:'';
+ const DEP=window.deployedPolicy||{};   // why: /api/policy (the Jetson's DEPLOYED.json, polled below) marks the registry-deployed one: "name v<version>"
+ $('#pol tbody').innerHTML=pol.map(([n,p])=>`<tr><td>${n.replace('@jetson','')}${DEP.name&&n.replace('@jetson','')===DEP.name&&p.host==='jetson'?` <b>v${DEP.version}</b>`:''}<span class="tag ${p.host}">${p.host}</span></td><td style="color:var(--dim);font-size:14px">${p.dataset.replace(/^[^/]+\//,'')}</td><td class="num">${fmt(p.steps)}</td></tr>`).join('')||'<tr><td class="empty" colspan=3>no trained policies</td></tr>';
+ $('#pol_sub').textContent=[pol.length?`${pol.length} ${pol[0][1].type.toUpperCase()}`:'',DEP.name?`JETSON · ${DEP.name} v${DEP.version}`:''].filter(Boolean).join(' · ');
  // events
  $('#events').innerHTML=s.events.slice(0,9).map(e=>`<div><b>${new Date(e.t*1000).toLocaleTimeString([],{hour12:false})}</b>${e.msg}</div>`).join('')||'<div class="empty">quiet</div>';
 }
@@ -362,6 +363,8 @@ async function cams(){let live=[];try{live=await(await fetch('/api/cams',{cache:
  const any=live.length>0;$('#live').style.display=any?'':'none';layout();
  for(const n of ['top','front','wrist']){const im=$('#cam_'+n),on=live.includes(n);im.parentElement.style.display=on?'':'none';if(on&&!liveOn[n]){liveOn[n]=1;pump(n)}if(!on&&liveOn[n]){liveOn[n]=0;im.removeAttribute('src')}}}
 cams();setInterval(cams,5000);
+async function policyPoll(){try{const d=await(await fetch('/api/policy',{cache:'no-store'})).json();window.deployedPolicy=d&&d.name?d:{}}catch(e){}}   // why: a stub or an old server without /api/policy leaves the listing as it was
+policyPoll();setInterval(policyPoll,15000);
 /* ---- feed calibration overlays: mat grid, marker centres and arm base projected through each camera's inverse homography; tap to measure ---- */
 // /api/calib gives a px -> table mm homography per camera: the overhead one (homography_px_to_table_mm, raw 640x360 px) and the FRONT camera's
 // (camera.front.homography_px_to_table_mm, derived from its solved pose: mat surface only, no orientation assumed; the view is oblique). Each

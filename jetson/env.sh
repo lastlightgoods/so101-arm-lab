@@ -54,10 +54,20 @@ so101-train() { local ds="$1" job="${2:-act_$1}" steps="${3:-40000}"
   lerobot-train --dataset.repo_id=lastlight/$ds --policy.type=act --output_dir=$HOME/so101/outputs/train/$job --job_name=$job \
     --policy.device=cuda --policy.push_to_hub=false --wandb.enable=false --steps=$steps --save_freq=5000 --batch_size=8 --num_workers=2 \
     2>&1 | tee -a $HOME/so101/outputs/train/$job.log; }   # train.log feeds the Mac dashboard's loss chart
+# ---- deployed policies (so101-policy on the Mac, docs/mlops/registry-and-deploy.md): ~/so101/policies/<name>/v<N>/ + current -> v<N>, DEPLOYED.json ----
+# so101-policy-current [name] [type] : path of the deployed checkpoint (~/so101/policies/<name>/current); name defaults to $SO101_POLICY, then DEPLOYED.json.
+#   With a type (act|smolvla) only a matching checkpoint counts. Prints nothing and returns 1 when nothing fitting is deployed.
+so101-policy-current() { local n="${1:-$SO101_POLICY}" p t
+  [ -z "$n" ] && n=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/so101/policies/DEPLOYED.json")))["name"])' 2>/dev/null)
+  p="$HOME/so101/policies/$n/current"; { [ -n "$n" ] && [ -L "$p" ] && [ -f "$p/model.safetensors" ]; } || return 1
+  if [ -n "$2" ]; then t=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("type",""))' "$p/config.json" 2>/dev/null); [ "$t" = "$2" ] || return 1; fi; echo "$p"; }
+# so101-policy-banner <ckpt> : one line saying which policy (and deployed version) is about to run
+so101-policy-banner() { if [ -L "$1" ]; then echo "policy: $(basename "$(dirname "$1")") $(readlink "$1") ($1)"; else echo "policy: $1 (not a registry deployment)"; fi; }
 # so101-run [seconds] [checkpoint-dir]  -> run a trained policy (ACT temporal ensembling). Async alt: --inference.type=rtc
 # Mac-trained policies copied to ~/so101/policies/act_jar_pocket and ~/so101/policies/act_bottle_pick
 # so101-run [seconds] [checkpoint-dir] ["task text"]   (SO101_TASK env also works)
-so101-run() { local dur="${1:-60}" ckpt="${2:-$HOME/so101/policies/act_lighter}" task="${3:-${SO101_TASK:-Pick up the lighter and hand it to the person}}"; so101-cams-take
+# default checkpoint: the deployed ACT policy (so101-policy-current "" act) when one exists, else ~/so101/policies/act_lighter as before
+so101-run() { local dur="${1:-60}" ckpt="${2:-$(so101-policy-current "" act)}" task="${3:-${SO101_TASK:-Pick up the lighter and hand it to the person}}"; ckpt="${ckpt:-$HOME/so101/policies/act_lighter}"; so101-policy-banner "$ckpt"; so101-cams-take
   lerobot-rollout --strategy.type=base --inference.type=sync --policy.temporal_ensemble_coeff=0.01 --policy.n_action_steps=1 --policy.path="$ckpt" --policy.device=cuda \
     --robot.type=so101_follower --robot.port=$FOLLOWER --robot.id=$FOLLOWER_ID --robot.cameras="${SO101_RUN_CAMS:-$SO101_CAMS_2}" \
     --task="$task" --duration=$dur --display_data=false; so101-cams-release; }
@@ -91,7 +101,7 @@ so101-scripted() { so101-cams-take; python ~/so101/scripted_record.py "$@"; so10
 # so101-run-async [s] [ckpt] [queue_threshold] ["task"] : rollout with background inference (rtc engine + actasync shim).
 # The loop holds 30 Hz regardless of inference time; a fresh chunk replaces the queue whenever it drops to the threshold
 # (chunk 100 -> 90, chunk 50 -> 40 = re-plan every ~10 steps). Sync inference only managed 13 Hz on the Jetson (15 Oct).
-so101-run-async() { local dur="${1:-60}" ckpt="${2:-$HOME/so101/policies/act_lighter}" qt="${3:-90}" task="${4:-${SO101_TASK:-Pick up the lighter and hand it to the person}}"; so101-cams-take
+so101-run-async() { local dur="${1:-60}" ckpt="${2:-$(so101-policy-current "" act)}" qt="${3:-90}" task="${4:-${SO101_TASK:-Pick up the lighter and hand it to the person}}"; ckpt="${ckpt:-$HOME/so101/policies/act_lighter}"; so101-policy-banner "$ckpt"; so101-cams-take
   lerobot-rollout --strategy.type=base --inference.type=rtc --inference.queue_threshold=$qt --policy.path="$ckpt" --policy.device=cuda \
     --robot.type=so101_follower --robot.port=$FOLLOWER --robot.id=$FOLLOWER_ID --robot.cameras="${SO101_RUN_CAMS:-$SO101_CAMS_2}" \
     --task="$task" --duration=$dur --display_data=false; so101-cams-release; }
@@ -110,7 +120,8 @@ so101-replay-hub() { local ds="${1:-lerobot/svla_so101_pickplace}" ep="${2:-0}";
 # so101-dance [bpm] [seconds] [energy 0-1.3] : the arm dances to a tempo (safe pose above the mat); play the beat on the Mac: so101-dash beat <bpm>
 so101-dance() { so101-arms-take; python ~/so101/dance.py --bpm "${1:-100}" --seconds "${2:-30}" --energy "${3:-1.0}"; so101-arms-release; }
 # so101-run-vla [s] [ckpt] ["task"] : run a SmolVLA checkpoint (cameras renamed top->camera1, wrist->camera2 as in training), async rtc inference.
-so101-run-vla() { export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True; local dur="${1:-60}" ckpt="${2:-$HOME/so101/policies/smolvla_lighter}" task="${3:-${SO101_TASK:-Pick up the lighter and hand it to the person}}"; so101-cams-take
+# default checkpoint: the deployed SmolVLA policy ($SO101_VLA_POLICY or DEPLOYED.json, type smolvla) when one exists, else ~/so101/policies/smolvla_lighter
+so101-run-vla() { export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True; local dur="${1:-60}" ckpt="${2:-$(so101-policy-current "$SO101_VLA_POLICY" smolvla)}" task="${3:-${SO101_TASK:-Pick up the lighter and hand it to the person}}"; ckpt="${ckpt:-$HOME/so101/policies/smolvla_lighter}"; so101-policy-banner "$ckpt"; so101-cams-take
   lerobot-rollout --strategy.type=base --inference.type=rtc --inference.rtc.execution_horizon=10 --inference.queue_threshold=40 --policy.path="$ckpt" --policy.device=cuda \
     --rename_map="{\"observation.images.top\": \"observation.images.camera1\", \"observation.images.wrist\": \"observation.images.camera2\"}" \
     --robot.type=so101_follower --robot.port=$FOLLOWER --robot.id=$FOLLOWER_ID --robot.cameras="${SO101_RUN_CAMS:-$SO101_CAMS_2}" \

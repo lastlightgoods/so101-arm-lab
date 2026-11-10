@@ -59,6 +59,8 @@ so101-sim-train() { local name="${1:-so101_sim_pick_v1}" job="${2:-act_sim_$1}" 
     --output_dir=$HOME/so101/outputs/train/$job --job_name=$job --steps=$steps --batch_size=8 --save_freq=2500 --log_freq=100 --num_workers=2 --wandb.enable=false 2>&1 | tee -a $HOME/so101/outputs/train/$job.log; }
 # so101-sim-eval <pretrained_model dir> [episodes] : success rate on unseen layouts (+ GIFs in sim/rollouts)
 so101-sim-eval() { local ckpt="$1" n="${2:-50}"; mkdir -p $HOME/so101/sim/rollouts; (cd $SIM && python eval_sim.py --policy "$ckpt" --episodes $n --seed 9100 --goal-thresh 0.04 --overhead-margin 0.04 --gif-dir $HOME/so101/sim/rollouts 2>&1 | grep -vE "warn|Warn|deprecat"); }
+# so101-policy register|list|deploy|rollback|status : model registry (MLflow) -> Jetson deployment, docs/mlops/registry-and-deploy.md
+so101-policy() { $HOME/so101/.venv/bin/python $HOME/so101/tools/so101_policy.py "$@"; }
 # so101-film live <seconds> [out.mp4] | dataset <name> [episode|all] [out.mp4]   (--audio file.wav, --no-screen)
 # multi-camera film: command center (kiosk screen) left, overhead + front + wrist right, 1920x1080 -> ~/so101/films/
 so101-film() { $HOME/so101/.venv/bin/python $HOME/so101/tools/film.py "$@"; }
