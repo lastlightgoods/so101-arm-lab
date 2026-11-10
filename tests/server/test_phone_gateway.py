@@ -21,7 +21,7 @@ def test_unauthenticated_is_401_everywhere(gateway, mode, upstream):
     c = gateway(mode)
     for path in ("/", "/api/state", "/cam/top.jpg", "/skins/x.css", "/manifest.webmanifest"):
         assert c.get(path)[0] == 401, path
-    assert c.get("/", cookie="wrong-token")[0] == 401 and c.get(f"/?k=nope")[0] == 401
+    assert c.get("/", cookie="wrong-token")[0] == 401 and c.get("/?k=nope")[0] == 401
     st, _, body = c.post("/api/arm/stop", b"", headers={"X-SO101": "1"})
     assert st == 401, "an unauthenticated write is refused before anything is forwarded"
     assert upstream.hits == []
