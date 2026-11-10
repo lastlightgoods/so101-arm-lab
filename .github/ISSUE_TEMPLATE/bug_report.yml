@@ -1,0 +1,31 @@
+name: Bug report
+description: Something in the lab code does the wrong thing
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, what you got. Paste the exact error text in a code block.
+    validations: { required: true }
+  - type: input
+    id: command
+    attributes:
+      label: Command or API call
+      placeholder: so101-calib table --layout calib/top_layout.json ...
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where it ran
+      options: [Mac (dashboard, tools, tests), Jetson (arm, cameras, calibration), CI]
+    validations: { required: true }
+  - type: textarea
+    id: env
+    attributes:
+      label: Versions
+      description: "Output of: python --version; python -c 'import cv2, numpy; print(cv2.__version__, numpy.__version__)'; lerobot version if relevant; camera model and USB id if a camera is involved."
+  - type: textarea
+    id: tests
+    attributes:
+      label: Does the test suite pass?
+      description: "`python -m pytest tests -q` output tail. If you can write a failing test for the bug, link or paste it; every fix in this repo ships with one."

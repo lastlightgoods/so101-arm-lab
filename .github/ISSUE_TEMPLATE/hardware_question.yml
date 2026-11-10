@@ -1,0 +1,20 @@
+name: Hardware or setup question
+description: Cameras, mat, markers, Jetson, SO-101 wiring, calibration numbers
+labels: [question]
+body:
+  - type: textarea
+    id: q
+    attributes:
+      label: Question
+      description: Say what you are trying to do and what you have measured so far. Numbers beat adjectives.
+    validations: { required: true }
+  - type: input
+    id: hw
+    attributes:
+      label: Hardware
+      placeholder: SO-ARM101 follower, Jetson Orin Nano 8 GB, Logitech C920 046d:08e5, ...
+  - type: textarea
+    id: docs
+    attributes:
+      label: Which doc did you follow?
+      description: docs/camera-calibration.md, docs/camera-settings.md, docs/mat-scene.md, docs/ipad-panel.md ...
