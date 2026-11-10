@@ -694,6 +694,9 @@ def cmd_campose(a):
     k = UNIT_MM[a.units]; P = pose["position_mm"]
     print(json.dumps({"saved": saved, "position_" + a.units: [round(v / k, 2) for v in P], "height_" + a.units: round(P[2] / k, 2), "tilt_deg": round(pose["tilt_deg"], 1),
                       "axis_hits_" + a.units: [round(v / k, 2) for v in pose["axis_hits_mm"]], "hfov_deg": round(hfov, 2), "reproj_rms_px": round(pose["reproj_rms_px"], 2), "source": src}))
+    track_calib("campose", a.name, {"layout": a.layout or os.path.join(a.calib_dir, f"{a.name}_layout.json"), "markers": ",".join(map(str, pose.get("markers_used", []))), "units": a.units, "hfov_source": src,
+                                    "lens_height": a.lens_height, "source": str(a.source), "image_size": f"{w}x{h}", "out": saved},
+                {"height_mm": P[2], "tilt_deg": pose["tilt_deg"], "hfov_deg": hfov, "reproj_rms_px": pose["reproj_rms_px"], "markers": len(pose.get("markers_used", []))}, [saved])
 
 
 def cmd_fk(a):
@@ -736,6 +739,8 @@ def cmd_armfit(a):
     if calib.get("units", "mm") != "mm": out[f"arm_base_{calib['units']}"] = [round(v, 3) for v in in_units(calib, base)]; out[f"residual_{calib['units']}_max"] = round(in_units(calib, float(res.max())), 3)
     print(json.dumps(out))
     if res.max() > 10: log("warning: a jogged point is more than 10 mm off the rigid fit; re-jog it or check that the tip was over the marker centre")
+    track_calib("armfit", a.name, {"pairs_file": os.path.abspath(a.pairs), "units": calib.get("units", "mm"), "markers": ",".join(map(str, calib.get("markers_used", []))), "out": path},
+                {**{f"residual_mm_{i}": float(r) for i, r in enumerate(res)}, "residual_mm_max": float(res.max()), "pairs": len(tab), "arm_yaw_deg": yaw, "arm_base_x_mm": base[0], "arm_base_y_mm": base[1]}, [path, a.pairs])
 
 
 # ---------------------------------------------------------------- wrist camera: hand-eye calibration
@@ -1125,6 +1130,11 @@ def cmd_handeye(a):
                       "marker_angles_deg": {k: round(v, 1) for k, v in res["marker_angles_deg"].items()}, "views_used": res["views_used"], "markers_used": res["markers_used"]}))
     if loo and max(loo.values()) > 15: log("warning: a held-out view predicts worse than 15 px; re-capture it with the follower still (torque on, wait a second) or add views")
     if not a.intrinsics: log("note: fx and the distance along the optical axis trade off with single-marker views; a checkerboard intrinsics file (--intrinsics) pins both")
+    track_calib("handeye", "wrist", {"views_dir": res["source"]["views_dir"], "layout": res["source"]["layout"], "table": res["source"]["table"], "intrinsics": res["source"]["intrinsics"] or "none", "units": calib.get("units", "mm"),
+                                     "markers": ",".join(map(str, res["markers_used"])), "views": ",".join(res["views_used"]), "pose_sigma_deg": a.pose_sigma_deg, "free_centre": a.free_centre, "overhead": a.overhead or "none", "out": out_path},
+                {"reproj_rms_px": res["reproj_rms_px"], "reproj_rms_px_corrected": res["reproj_rms_px_corrected"], "off_axis_mm": res["off_axis_mm"], "tilt_from_gripper_axis_deg": res["tilt_from_gripper_axis_deg"], "hfov_deg": res["hfov_deg"],
+                 "views": len(res["views_used"]), "markers": len(res["markers_used"]), "points_used": res["points_used"], "dropped_corners": len(res.get("dropped_corners", [])),
+                 **{f"per_view_px_{k}": v for k, v in res["per_view_px"].items()}, **{f"leave_one_out_px_{k}": v for k, v in loo.items()}}, [out_path])
     return 0
 
 
@@ -1192,6 +1202,18 @@ def save_json(path, data):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w") as f: json.dump(data, f, indent=1)
     return path
+
+
+def track_calib(kind, camera, params, metrics, files):
+    """One MLflow run in experiment `so101-calibration` for a calibration file just written (jetson/labtrack.py; docs/mlops/tracking.md).
+    Called after the result is saved and printed, only by commands that write a file; a no-op without a tracking server; never raises."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("labtrack", os.path.join(os.path.dirname(os.path.abspath(__file__)), "labtrack.py")); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        with m.LabTrack("so101-calibration").run(f"{kind}-{camera}-{time.strftime('%Y%m%d-%H%M%S')}", tags={"kind": kind, "camera": camera}) as r:
+            r.params({"camera": camera, **params}); r.metrics(metrics)
+            for f in files: r.artifact(f, "calib")
+    except Exception as e: log(f"tracking skipped: {e}")
 
 
 def cmd_board(a):
@@ -1267,6 +1289,10 @@ def cmd_table(a):
     print(json.dumps({"saved": path, "check_image": shot, "markers_used": res["markers_used"], "residual_mm_max": round(res["residual_mm_max"], 2),
                       "camera_position_mm": [round(v, 1) for v in res["camera_position_mm"]] if "camera_position_mm" in res else None}))
     if res["residual_mm_max"] > 5: log("warning: a marker lands more than 5 mm off; re-measure the layout positions or add markers")
+    track_calib("table", a.name, {"layout": a.layout or os.path.join(a.calib_dir, f"{a.name}_layout.json"), "markers": ",".join(map(str, res["markers_used"])), "units": res["units"], "intrinsics": intr_path if intr else "none",
+                                  "source": str(a.source), "image_size": "x".join(map(str, res["image_size"])), "arm_fit": (res.get("arm_fit") or {}).get("carried_over_from") or "none", "out": path},
+                {**{f"residual_mm_{k}": v for k, v in res["residual_mm"].items()}, "residual_mm_max": res["residual_mm_max"], "reproj_rms_px": res.get("reproj_rms_px"), "points_used": res["points_used"], "markers": len(res["markers_used"]),
+                 "camera_height_mm": res["camera_position_mm"][2] if "camera_position_mm" in res else None, "arm_fit_rms_mm": (res.get("arm_fit") or {}).get("rms_mm")}, [path, shot])
 
 
 def cmd_check(a):

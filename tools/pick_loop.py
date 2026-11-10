@@ -8,6 +8,8 @@ one bus session, then measure where the nut landed. Stops when the nut is not fo
 
   tools/pick_loop.py --runs 4 [--target 9 6] [--state jetson/calib/pick_state.json]
 State (biases, place offset, history) persists in --state so later sessions start where this one ended.
+Every pick is also one MLflow run in experiment `so101-picks` (jetson/labtrack.py: params, landing error, per-waypoint sag,
+the overhead frame at landing, the plan and the state file); with no tracking server the loop runs exactly as before.
 """
 import argparse, json, math, os, subprocess, time, urllib.request
 import cv2, numpy as np
@@ -30,9 +32,19 @@ def cam_calib():
     spec = importlib.util.spec_from_file_location("cam_calib", os.path.join(ROOT, "jetson", "cam_calib.py")); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 
 
-def find_nut(cc, table, near_in, radius_px=70):
-    """Dark blob nearest to `near_in` (mat inches) in a fresh overhead frame -> (mat_in, pixel, area) or None."""
-    img = cv2.imdecode(np.frombuffer(urllib.request.urlopen(DASH + f"/cam/top.jpg?t={time.time():f}", timeout=5).read(), np.uint8), cv2.IMREAD_COLOR)
+def labtrack():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("labtrack", os.path.join(ROOT, "jetson", "labtrack.py")); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m.LabTrack("so101-picks")
+
+
+def fetch_top():
+    """One fresh overhead JPEG from the dashboard (bytes)."""
+    return urllib.request.urlopen(DASH + f"/cam/top.jpg?t={time.time():f}", timeout=5).read()
+
+
+def find_nut(cc, table, near_in, radius_px=70, jpeg=None):
+    """Dark blob nearest to `near_in` (mat inches) in a fresh overhead frame (or the given JPEG bytes) -> (mat_in, pixel, area) or None."""
+    img = cv2.imdecode(np.frombuffer(fetch_top() if jpeg is None else jpeg, np.uint8), cv2.IMREAD_COLOR)
     g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY); cu, cv_ = cc.table_to_pixel(table, near_in[0] * 25.4, near_in[1] * 25.4)
     x0, y0 = max(0, int(cu) - radius_px), max(0, int(cv_) - radius_px); roi = g[y0:y0 + 2 * radius_px, x0:x0 + 2 * radius_px]
     m = (roi < 60).astype(np.uint8); n, lab, st, cen = cv2.connectedComponentsWithStats(m)
@@ -73,9 +85,10 @@ def main():
     ap.add_argument("--runs", type=int, default=4); ap.add_argument("--target", type=float, nargs=2, default=[9.0, 6.0]); ap.add_argument("--max-deg-s", type=float, default=80.0)
     ap.add_argument("--state", default=os.path.join(ROOT, "jetson", "calib", "pick_state.json")); ap.add_argument("--gain", type=float, default=0.7); ap.add_argument("--outcome-gain", type=float, default=0.5)
     ap.add_argument("--alt", type=float, nargs=2, default=[6.0, 5.0], help="second target; runs alternate alt, target, alt, target ... so every pick and place is unambiguous; the LAST run always goes to --target")
-    a = ap.parse_args(); cc = cam_calib(); table = json.load(open(os.path.join(ROOT, "jetson", "calib", "top_table.json")))
+    a = ap.parse_args(); cc = cam_calib(); table = json.load(open(os.path.join(ROOT, "jetson", "calib", "top_table.json"))); track = labtrack()
     state = json.load(open(a.state)) if os.path.exists(a.state) else {"biases": {}, "place_offsets_in": {}, "history": []}
     state.setdefault("place_offsets_in", {}); near = state["history"][-1]["landed_in"] if state["history"] and state["history"][-1].get("landed_in") else list(a.target)
+    session = time.strftime("%Y%m%d-%H%M%S")
     for run in range(1, a.runs + 1):
         tgt = list(a.target) if (run == a.runs or run % 2 == 0) else list(a.alt); key = f"{tgt[0]:.2f},{tgt[1]:.2f}"
         off = state["place_offsets_in"].setdefault(key, [0.0, 0.0])
@@ -83,27 +96,32 @@ def main():
         if not found: print(json.dumps({"run": run, "stop": "nut not found near", "near": near})); break
         nut_in, nut_px, area = found
         place_in = [tgt[0] + off[0], tgt[1] + off[1]]
-        plan = build_plan(nut_in, place_in, state["biases"]); t0 = time.time(); rows = run_plan(plan, a.max_deg_s); dt = time.time() - t0
-        # learn the servo sag per waypoint: bias += gain * (target - reached), capped
-        desired = {w["name"]: w["desired"] for w in plan["waypoints"]}
-        for r in rows:
-            if r["wp"] in ("close", "open"): continue
-            b = state["biases"].setdefault(r["wp"], {})
-            for k in ARM: b[k] = max(-6.0, min(6.0, b.get(k, 0.0) + a.gain * (desired[r["wp"]][k] - r["reached"][k])))   # drive DESIRED - reached to zero, not command - reached
-            r["max_err_deg"] = round(max(abs(desired[r["wp"]][k] - r["reached"][k]) for k in ARM), 2)
-        time.sleep(1.0)
-        landed = find_nut(cc, table, place_in, radius_px=60)
-        before_mm = math.hypot(nut_in[0] - tgt[0], nut_in[1] - tgt[1]) * 25.4
-        err_mm = math.hypot(landed[0][0] - tgt[0], landed[0][1] - tgt[1]) * 25.4 if landed else None
-        picked = landed is not None and (err_mm < before_mm - 5.0 or before_mm < 40.0)   # it got closer, or it was already there and stayed within the search radius
-        if landed and picked:
-            off[0] = max(-0.6, min(0.6, off[0] + a.outcome_gain * (tgt[0] - landed[0][0]))); off[1] = max(-0.6, min(0.6, off[1] + a.outcome_gain * (tgt[1] - landed[0][1])))
-        rec = {"run": run, "target_in": tgt, "nut_in": [round(v, 2) for v in nut_in], "picked": picked, "landed_in": [round(v, 2) for v in landed[0]] if landed else None, "err_mm": round(err_mm, 1) if err_mm is not None else None,
-               "seconds": round(dt, 1), "sag_deg": {r["wp"]: r["max_err_deg"] for r in rows}, "place_offset_in": [round(v, 3) for v in off], "t": time.strftime("%H:%M:%S")}
-        state["history"].append(rec); json.dump(state, open(a.state, "w"), indent=1); print(json.dumps(rec), flush=True)
-        if not landed: print(json.dumps({"run": run, "stop": "nut not found near the target after placing; it may have been dropped elsewhere"})); break
-        if not picked: print(json.dumps({"run": run, "stop": "nut did not get closer to the target; grasp probably missed"})); break
-        near = landed[0]
+        with track.run(f"pick-{session}-r{run}", tags={"host": "mac", "run": run, "nut_in": f"{nut_in[0]:.2f},{nut_in[1]:.2f}", "target_in": key, "session": session}) as tr:   # why: one MLflow run per pick; a no-op when there is no server
+            tr.params({"target_in": f"{a.target[0]:.2f},{a.target[1]:.2f}", "alt_in": f"{a.alt[0]:.2f},{a.alt[1]:.2f}", "place_in": f"{place_in[0]:.3f},{place_in[1]:.3f}", "gain": a.gain, "outcome_gain": a.outcome_gain,
+                       "max_deg_s": a.max_deg_s, "runs": a.runs, "state": os.path.relpath(a.state, ROOT) if a.state.startswith(ROOT) else a.state, "dash": DASH})
+            plan = build_plan(nut_in, place_in, state["biases"]); tr.json(plan, "plan.json"); t0 = time.time(); rows = run_plan(plan, a.max_deg_s); dt = time.time() - t0
+            # learn the servo sag per waypoint: bias += gain * (target - reached), capped
+            desired = {w["name"]: w["desired"] for w in plan["waypoints"]}
+            for r in rows:
+                if r["wp"] in ("close", "open"): continue
+                b = state["biases"].setdefault(r["wp"], {})
+                for k in ARM: b[k] = max(-6.0, min(6.0, b.get(k, 0.0) + a.gain * (desired[r["wp"]][k] - r["reached"][k])))   # drive DESIRED - reached to zero, not command - reached
+                r["max_err_deg"] = round(max(abs(desired[r["wp"]][k] - r["reached"][k]) for k in ARM), 2)
+            time.sleep(1.0)
+            landing_jpg = fetch_top(); landed = find_nut(cc, table, place_in, radius_px=60, jpeg=landing_jpg)
+            before_mm = math.hypot(nut_in[0] - tgt[0], nut_in[1] - tgt[1]) * 25.4
+            err_mm = math.hypot(landed[0][0] - tgt[0], landed[0][1] - tgt[1]) * 25.4 if landed else None
+            picked = landed is not None and (err_mm < before_mm - 5.0 or before_mm < 40.0)   # it got closer, or it was already there and stayed within the search radius
+            if landed and picked:
+                off[0] = max(-0.6, min(0.6, off[0] + a.outcome_gain * (tgt[0] - landed[0][0]))); off[1] = max(-0.6, min(0.6, off[1] + a.outcome_gain * (tgt[1] - landed[0][1])))
+            rec = {"run": run, "target_in": tgt, "nut_in": [round(v, 2) for v in nut_in], "picked": picked, "landed_in": [round(v, 2) for v in landed[0]] if landed else None, "err_mm": round(err_mm, 1) if err_mm is not None else None,
+                   "seconds": round(dt, 1), "sag_deg": {r["wp"]: r["max_err_deg"] for r in rows}, "place_offset_in": [round(v, 3) for v in off], "t": time.strftime("%H:%M:%S")}
+            state["history"].append(rec); json.dump(state, open(a.state, "w"), indent=1); print(json.dumps(rec), flush=True)
+            tr.metrics({"landing_err_mm": err_mm, "before_mm": before_mm, "seconds": dt, "picked": int(picked), "found_at_landing": int(landed is not None), **{f"sag_{r['wp']}": r["max_err_deg"] for r in rows if "max_err_deg" in r}})
+            tr.file("landing.jpg", landing_jpg, "frames"); tr.json(rows, "waypoints.json"); tr.artifact(a.state, "state")
+            if not landed: print(json.dumps({"run": run, "stop": "nut not found near the target after placing; it may have been dropped elsewhere"})); break
+            if not picked: print(json.dumps({"run": run, "stop": "nut did not get closer to the target; grasp probably missed"})); break
+            near = landed[0]
 
 
 if __name__ == "__main__": main()

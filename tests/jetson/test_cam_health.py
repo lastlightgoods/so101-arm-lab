@@ -206,6 +206,17 @@ def test_main_no_busy_and_threshold_overrides(ch, tmp_path, capsys):
     assert code == 1 and "fps 22.3 < 28.0" in capsys.readouterr().out
 
 
+def test_main_save_writes_the_json_report_beside_the_table(ch, tmp_path, capsys):
+    """env.sh's so101-cams-health saves the report to outputs/run/cam_health.json so record_track.py can attach it to the recording's run."""
+    saved = tmp_path / "run" / "cam_health.json"
+    code = ch.main(["2", "--warmup", "0.2", "--cams", "wrist", "--no-busy", "--save", str(saved)], opener=opener(fps=30))
+    out = capsys.readouterr().out; rep = json.loads(saved.read_text())
+    assert code == 0 and "all cameras healthy" in out and rep["ok"] and set(rep["cameras"]) == {"wrist"} and rep["cameras"]["wrist"]["stats"]["fps"] > 28
+    (tmp_path / "blocker").write_text("")   # a file where the folder should be: makedirs fails
+    code = ch.main(["2", "--warmup", "0.2", "--cams", "wrist", "--no-busy", "--save", str(tmp_path / "blocker" / "x.json")], opener=opener(fps=30))
+    cap = capsys.readouterr(); assert code == 0 and "all cameras healthy" in cap.out and "could not save" in cap.err, "an unwritable --save path is reported, never fatal"
+
+
 def test_main_rejects_unknown_camera(ch, capsys):
     assert ch.main(["1", "--cams", "side", "--no-busy"], opener=opener()) == 2
     assert ch.main(["1", "--device", "nose=/dev/x", "--no-busy"], opener=opener()) == 2

@@ -59,6 +59,7 @@ PY
 # -- 5. plugins copied from the Mac (avf camera plugin is macOS-only, skipped) --
 [ -d ~/so101/plugins/lerobot-robot-busheal ]    && pip install -e ~/so101/plugins/lerobot-robot-busheal
 [ -d ~/so101/plugins/lerobot-policy-actasync ]  && pip install -e ~/so101/plugins/lerobot-policy-actasync
+pip install mlflow-skinny   # the client only (no server/UI/pandas): labtrack.py logs calibration + recording runs to the Mac (docs/mlops/tracking.md); optional
 mkdir -p ~/.cache/huggingface/lerobot/calibration
 grep -q 'so101/env.sh' ~/.bashrc || echo '[ -f ~/so101/env.sh ] && source ~/so101/env.sh' >> ~/.bashrc
 echo "== devices =="; ls -l /dev/so101_* 2>/dev/null || echo "servo boards not plugged in yet"

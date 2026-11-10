@@ -12,7 +12,7 @@ Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend,
 
 | Path | What |
 | --- | --- |
-| `jetson/` | Jetson side. `jetson_setup.sh` (JetPack 6.2 + CUDA torch + LeRobot), `env.sh` with every `so101-*` command, `cam_calib.py` (camera and arm calibration), `cam_lock.py` / `cam_health.py` / `cam_drift.py` (camera settings lock, frame-rate and drift checks), `goto.py` / `pick_seq.py` (scripted motion), `calib/` (the live calibration files), `JETSON_RUNBOOK.md` |
+| `jetson/` | Jetson side. `jetson_setup.sh` (JetPack 6.2 + CUDA torch + LeRobot), `env.sh` with every `so101-*` command, `cam_calib.py` (camera and arm calibration), `cam_lock.py` / `cam_health.py` / `cam_drift.py` (camera settings lock, frame-rate and drift checks), `goto.py` / `pick_seq.py` (scripted motion), `labtrack.py` / `record_track.py` (MLflow logging for picks, calibration and recording sessions), `calib/` (the live calibration files), `JETSON_RUNBOOK.md` |
 | `dashboard/` | The wall dashboard: `server.py` (stdlib HTTP, SSH streams, calibration and scene APIs), `index.html` (gauges, live feeds, 3D arm and cameras, mat map, skins), `phone.py` (the LAN gateway: a phone page, or the full panel on an iPad with `so101-dash pad`, [`docs/ipad-panel.md`](docs/ipad-panel.md)), `scene_detect.py` (objects on the mat from the overhead camera), `skins/`, `urdf/` |
 | `tools/` | Mac-side helpers: `jog_capture.py` (jog-and-fit of the arm base), `pick_loop.py` (iterative pick-and-place learning), `cams.sh` / `cams_avf.py` (camera wall on monitor 2), `teleop_robust.py` (teleop that survives a stalled bus), `ping_arm.py` (raw servo ping), `clean_dataset.py` / `trim_dataset.py` (dataset repair), `film.py` (episode films), `mlflow_backfill.py` / `mlflow_ui.sh` (MLflow), `so101_policy.py` (model registry and Jetson deployment, [`docs/mlops/registry-and-deploy.md`](docs/mlops/registry-and-deploy.md)), `cf_token.py` (Cloudflare token helper) |
 | `infra/` | The MLflow server as containers (`docker-compose.yml`, `Dockerfile.mlflow`, `migrate_sqlite.sh` for the SQLite store) and the same shape on AWS (`terraform/`: S3, RDS, one Fargate task), nothing applied: [`docs/mlops/infra.md`](docs/mlops/infra.md) |
@@ -44,6 +44,9 @@ Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend,
   Registry (`so101-policy register`, local or from the Hub), `candidate` and `jetson` aliases, versioned deployment to
   `~/so101/policies/<name>/v<N>/` with a `current` symlink and `DEPLOYED.json`, one-command rollback, and what
   `so101-run` and the dashboard do with it.
+- [`docs/mlops/tracking.md`](docs/mlops/tracking.md): MLflow tracking. One run per pick (`so101-picks`),
+  per written calibration file (`so101-calibration`) and per recording session (`so101-recordings`), the
+  LAN server, and how every logger degrades to a silent no-op when the server is not there.
 
 ## Hardware
 

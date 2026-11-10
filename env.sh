@@ -44,6 +44,10 @@ so101-train() { local ds="$1" job="${2:-act_$1}" steps="${3:-40000}"
     --policy.device=mps --policy.push_to_hub=false --wandb.enable=false --steps=$steps --save_freq=5000 2>&1 | tee -a $HOME/so101/outputs/train/$job.log; }
 # lab dashboard on monitor 2:  so101-dash | so101-dash stop   (http://127.0.0.1:8765)
 alias so101-dash='$HOME/so101/dashboard/dash.sh'
+# MLflow tracking server (docs/mlops/tracking.md): so101-mlflow start [--lan] | stop | status | uri. Mac tools log straight into the
+# SQLite store by default; ~/so101/.mlflow_uri (one line, the server URL) makes them log through the server instead, like the Jetson.
+alias so101-mlflow='$HOME/so101/tools/mlflow_ui.sh'
+[ -s ~/so101/.mlflow_uri ] && export SO101_MLFLOW_URI="$(head -n1 ~/so101/.mlflow_uri)"
 # so101-finetune <dataset> <checkpoint-dir> [job] [steps]  -> continue training from a pretrained_model dir (ACT config comes from it).
 so101-finetune() { local ds="$1" ckpt="$2" job="${3:-ft_$1}" steps="${4:-8000}"
   lerobot-train --dataset.repo_id=lastlight/$ds --policy.path="$ckpt" --output_dir=$HOME/so101/outputs/train/$job --job_name=$job \

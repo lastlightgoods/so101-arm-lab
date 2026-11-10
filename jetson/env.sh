@@ -28,9 +28,14 @@ so101-cams-check()   { python3 ~/so101/cam_lock.py check "$@"; }              # 
 so101-cams-guard()   { mkdir -p ~/so101/outputs/run; (nohup python3 ~/so101/cam_lock.py guard >> ~/so101/outputs/run/cam_lock_guard.log 2>&1 &) }   # resident re-locker (no-op if one runs)
 so101-cams-locked-or-bail() { python3 ~/so101/cam_lock.py check --strict && { so101-cams-guard; return 0; }
   echo "REFUSING TO RECORD: cameras are not locked (see the line above). Run so101-cams-lock, or so101-cams-capture for a new lighting session, then retry." >&2; return 1; }
+# MLflow tracking (docs/mlops/tracking.md): ~/so101/.mlflow_uri holds the Mac server's URL on one line (written once by
+# `tools/mlflow_ui.sh uri | ssh jetson 'cat > ~/so101/.mlflow_uri'`); absent = nothing is logged and nothing waits.
+[ -s ~/so101/.mlflow_uri ] && export SO101_MLFLOW_URI="$(head -n1 ~/so101/.mlflow_uri)"
+so101-track() { [ -f ~/so101/record_track.py ] && python3 ~/so101/record_track.py "$@"; return 0; }   # one run per recording session; never blocks or fails a recording
 # so101-record <dataset-name> "<task description>" [num_episodes]   -> local dataset, no upload
 so101-record() {
   local name="$1" task="$2" n="${3:-10}"; so101-cams-locked-or-bail || return 1; so101-cams-take
+  so101-track start --repo-id lastlight/$name --task "$task" --episodes $n
   lerobot-record \
     --robot.type=so101_follower --robot.port=$FOLLOWER --robot.id=$FOLLOWER_ID \
     --robot.cameras="$SO101_CAMS" \
@@ -38,16 +43,17 @@ so101-record() {
     --display_data=false --play_sounds=true \
     --dataset.repo_id=lastlight/$name --dataset.single_task="$task" \
     --dataset.num_episodes=$n --dataset.episode_time_s=${SO101_EP_S:-25} --dataset.reset_time_s=${SO101_RESET_S:-10} --dataset.streaming_encoding=true --dataset.encoder_threads=2 --dataset.rgb_encoder.vcodec=h264 \
-    --dataset.push_to_hub=false; so101-cams-release
+    --dataset.push_to_hub=false; so101-track finish --rc $?; so101-cams-release
 }
 # so101-record-more <dataset-folder-name> <num_more_episodes>   -> resume an existing local dataset
 so101-record-more() { local ds="lastlight/$1" n="${2:-10}" task="${3:-${SO101_TASK:-Pick up the lighter and hand it to the person}}"; so101-cams-locked-or-bail || return 1; so101-cams-take
+  so101-track start --repo-id $ds --task "$task" --episodes $n --resume --root $HOME/.cache/huggingface/lerobot/$ds
   lerobot-record --robot.type=so101_follower --robot.port=$FOLLOWER --robot.id=$FOLLOWER_ID --robot.cameras="$SO101_CAMS" \
     --teleop.type=so101_leader --teleop.port=$LEADER --teleop.id=$LEADER_ID --display_data=false --play_sounds=true \
     --resume=true --dataset.repo_id=$ds --dataset.root=$HOME/.cache/huggingface/lerobot/$ds \
     --dataset.single_task="$task" --dataset.num_episodes=$n \
     --dataset.episode_time_s=${SO101_EP_S:-25} --dataset.reset_time_s=${SO101_RESET_S:-10} --dataset.streaming_encoding=true --dataset.encoder_threads=2 --dataset.rgb_encoder.vcodec=h264 \
-    --dataset.push_to_hub=false; so101-cams-release; }
+    --dataset.push_to_hub=false; so101-track finish --rc $?; so101-cams-release; }
 # NOTE (ssh recording): no viewer window and no arrow-key shortcuts; episodes end on the timer. SO101_EP_S / SO101_RESET_S override.
 # so101-train <dataset-folder-name> [job-name] [steps]  -> ACT on the Orin GPU (run so101-perf first)
 so101-train() { local ds="$1" job="${2:-act_$1}" steps="${3:-40000}"
@@ -141,7 +147,8 @@ alias so101-calib='python ~/so101/cam_calib.py'
 # ---- camera health (docs/camera-health.md) ----
 # so101-cams-health [seconds] : all three cameras open together at the recording settings; fps, frame-interval p50/p95/max,
 #   duplicates, stalls, negotiated size/fourcc, CPU load. Exit 1 on fps < 28, a stall > 250 ms or a wrong size. `--json` for machines.
-so101-cams-health() { so101-cams-take; python3 ~/so101/cam_health.py --no-busy "$@"; local rc=$?; so101-cams-release; return $rc; }
+#   The JSON report is also saved to ~/so101/outputs/run/cam_health.json; a so101-record within 10 min attaches it to its MLflow run.
+so101-cams-health() { so101-cams-take; mkdir -p ~/so101/outputs/run; python3 ~/so101/cam_health.py --no-busy --save ~/so101/outputs/run/cam_health.json "$@"; local rc=$?; so101-cams-release; return $rc; }
 # so101-cams-drift set|check : reference frames in ~/so101/calib/ref_<cam>.jpg; `check` reports the frame shift per camera and, for
 #   the top camera, the ArUco markers against top_table.json (camera moved vs mat moved). Arm at rest. Exit 1 when something moved.
 so101-cams-drift() { so101-cams-take; python3 ~/so101/cam_drift.py --no-busy "$@"; local rc=$?; so101-cams-release; return $rc; }

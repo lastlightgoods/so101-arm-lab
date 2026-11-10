@@ -247,6 +247,7 @@ def build_parser():
     p.add_argument("--max-stall-ms", type=float, default=THRESHOLDS["max_stall_ms"])
     p.add_argument("--dup-mad", type=float, default=0.0, help="also count near-identical frames (strided mean abs diff <= this; default 0 = bit-identical only)")
     p.add_argument("--json", action="store_true", help="print the JSON report instead of the table")
+    p.add_argument("--save", metavar="PATH", help="also write the JSON report to this file (env.sh: outputs/run/cam_health.json, picked up by record_track.py)")
     p.add_argument("--no-busy", action="store_true", help="do not touch ~/so101/.cams_busy")
     p.add_argument("--busy-flag", default=BUSY_FLAG)
     return p
@@ -265,6 +266,11 @@ def main(argv=None, opener=CvSource):
     th = {"min_fps": a.min_fps, "stall_ms": a.stall_ms, "max_stall_ms": a.max_stall_ms}
     with BusyFlag(a.busy_flag, not a.no_busy):
         report = run(cams, a.seconds, a.warmup, opener, th, a.dup_mad)
+    if a.save:
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(a.save)), exist_ok=True)
+            with open(a.save, "w") as f: json.dump(report, f, indent=1)
+        except OSError as e: log(f"could not save the report to {a.save}: {e}")   # why: the verdict on the console still counts; a full disk must not hide it
     print(json.dumps(report, indent=1) if a.json else format_text(report))
     return exit_code(report)
 
