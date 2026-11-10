@@ -29,7 +29,9 @@ Both `env.sh` files export `SO101_MLFLOW_URI` from `~/so101/.mlflow_uri` when th
 Jetson points at the Mac without an address living in the repo. A client that writes straight into the SQLite file
 puts artifacts in `~/so101/mlflow/artifacts/<experiment>/` beside it (not in `./mlruns`, which is MLflow's default
 and depends on the cwd that first created the experiment); a client that goes through the server ships artifacts to
-the server, which keeps them under the same `artifacts/` root. The UI serves both.
+the server, which keeps them under the same `artifacts/` root. The UI serves both. The one exception is `so101-act`:
+the backfill created it with MLflow's default location before this wrapper existed, so its artifacts are in
+`~/so101/mlruns/1` (which is why `docs/mlops/infra.md` lists both folders for the bare server).
 
 ## What each run carries
 
@@ -96,8 +98,10 @@ ssh jetson 'cd ~/so101 && source env.sh && python labtrack.py'
 ```
 
 Use an IP address in `.mlflow_uri`, not a `.local` name: the 1 s probe cannot bound a DNS lookup. The Mac's own tools
-(`pick_loop.py`, the backfill) write straight into the SQLite file by default; put the same URL in the Mac's
-`~/so101/.mlflow_uri` if you would rather they go through the server too.
+write straight into the SQLite file by default. `pick_loop.py` goes through `labtrack.py`, so the Mac's
+`~/so101/.mlflow_uri` (or `SO101_MLFLOW_URI`) sends it through the server instead; `tools/mlflow_backfill.py` and
+`tools/so101_policy.py` do not use the wrapper and read `MLFLOW_TRACKING_URI` only, so set that to the same URL if
+you want the backfill or the registry to go through the server too.
 
 ## Looking at it
 
@@ -170,7 +174,7 @@ SO101_MLFLOW_URI=sqlite:///$HOME/scratch/mlflow.db ~/so101/.venv/bin/python ~/so
 
 # check what a store holds without the UI
 ~/so101/.venv/bin/python - <<'PY'
-import mlflow; c = mlflow.MlflowClient("sqlite:////Users/you/so101/mlflow/mlflow.db")
+import mlflow, os; c = mlflow.MlflowClient("sqlite:///" + os.path.expanduser("~/so101/mlflow/mlflow.db"))
 for e in c.search_experiments(): print(e.name, len(c.search_runs([e.experiment_id])))
 PY
 

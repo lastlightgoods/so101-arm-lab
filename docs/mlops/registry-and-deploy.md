@@ -19,7 +19,7 @@ train ──► register ──► candidate ──► deploy ──► jetson �
 
 | Place | What |
 | --- | --- |
-| `~/so101/mlflow/mlflow.db` (Mac) | the registry and the `so101-registry` experiment, same SQLite file as `so101-act`; `MLFLOW_TRACKING_URI` overrides (an `http://` server works too) |
+| `~/so101/mlflow/mlflow.db` (Mac) | the registry and the `so101-registry` experiment, same SQLite file as `so101-act`; `MLFLOW_TRACKING_URI` overrides (an `http://` server works too). This tool does not read `SO101_MLFLOW_URI` or `~/so101/.mlflow_uri`, which the loggers in `tracking.md` use; to send the registry through the server, set `MLFLOW_TRACKING_URI` to the same URL |
 | `~/so101/mlflow/artifacts/so101-registry/<run>/artifacts/model/` (Mac) | the registered checkpoint, byte for byte (`SO101_MLFLOW_ARTIFACTS` overrides the root) |
 | `~/so101/policies_hub/<owner>__<repo>/` (Mac) | Hub snapshots pulled by `register --from-hf`; `policies_hub/registry/<name>/v<N>/` is the download cache when the store is remote |
 | `~/so101/policies/<name>/v<N>/` (Jetson) | one deployed version: `config.json`, `model.safetensors`, `train_config.json`, processors. The last 3 versions of each model stay |

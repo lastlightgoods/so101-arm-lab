@@ -35,7 +35,10 @@ tools/mlflow_ui.sh down              # stop; the data stays in the docker volume
 
 The UI is at `http://127.0.0.1:5050` as before, so the field guide and `MLFLOW_TRACKING_URI=http://127.0.0.1:5050` stay
 true. The bare server and the stack both want port 5050: `tools/mlflow_ui.sh stop` first, or set `MLFLOW_PORT` in `.env`.
-Docker Desktop or OrbStack must be installed; `up` says so if not.
+Docker Desktop or OrbStack must be installed; `up` says so if not (neither is installed on the Mac as of 10 Nov 2026, so
+the stack has not been run here yet; `tests/infra` validates the files). One difference from the bare server: a compose
+port mapping `"5050:5050"` publishes on every interface, the same as `start --lan`, so the no-auth caveat in `tracking.md`
+applies to the stack as soon as it is up; write `"127.0.0.1:${MLFLOW_PORT}:5050"` in the compose file to keep it Mac-only.
 
 ## Where the data lives
 
