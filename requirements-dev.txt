@@ -1,7 +1,7 @@
 # What `python -m pytest tests -q` and `ruff check .` need (versions = the Mac venv on 10 Nov 2026).
 # The hardware/runtime stack (lerobot 0.6.1, torch, pyobjc, mujoco) is deliberately NOT here; mlflow is, for the registry and tracking tests: the tests are synthetic.
 # Optional: `pip install "lerobot[feetech]==0.6.1"` also runs tests/busheal (74 tests against the real motor-bus classes); without it that folder is skipped.
-numpy==2.2.6
+numpy==2.5.4
 opencv-python-headless==4.13.0.92
 scipy==1.18.1
 psutil==7.2.2
