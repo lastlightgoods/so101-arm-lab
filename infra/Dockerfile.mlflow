@@ -1,0 +1,20 @@
+# so101 MLflow tracking server image: one image for the local compose stack and for ECS Fargate (infra/terraform).
+# Build:  docker build --build-arg MLFLOW_VERSION=3.17.2 -t so101-mlflow:3.17.2 -f infra/Dockerfile.mlflow infra
+# why: MLFLOW_VERSION is a build arg so the image always matches the Mac venv (requirements note in docs/mlops/infra.md); the
+# clients and the server must agree on the store schema, and `mlflow db upgrade` is the only tool that moves it forward.
+ARG MLFLOW_VERSION=3.17.2
+FROM python:3.12-slim
+ARG MLFLOW_VERSION
+# why: psycopg2-binary = the Postgres driver mlflow needs for postgresql:// store URIs; boto3 = the S3 client for --artifacts-destination s3://
+# (RustFS locally, real S3 on AWS). Both are mlflow extras, pinned to the versions on PyPI on 10 Nov 2026.
+RUN pip install --no-cache-dir "mlflow==${MLFLOW_VERSION}" "psycopg2-binary==2.9.13" "boto3==1.43.127" \
+ && useradd --create-home --uid 10001 mlflow
+WORKDIR /app
+COPY entrypoint.sh healthcheck.py s3_init.py /app/
+RUN chmod 0755 /app/entrypoint.sh
+# why: MLFLOW_PORT is the port inside the container; compose and the task definition publish it. The agent hint is a dev-only banner.
+ENV MLFLOW_PORT=5050 PYTHONUNBUFFERED=1 MLFLOW_DISABLE_AGENT_HINT=1
+USER mlflow
+EXPOSE 5050
+# why: CMD not ENTRYPOINT, so the one-shot s3-init service can run a different script from the same image
+CMD ["/app/entrypoint.sh"]

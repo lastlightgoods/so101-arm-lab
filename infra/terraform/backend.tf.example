@@ -1,0 +1,12 @@
+# Remote state: copy to backend.tf (gitignored), create the bucket once by hand, then `terraform init -migrate-state`.
+# why: state holds the RDS password and every resource id; a versioned private bucket is safer than a tfstate file on one laptop.
+# Terraform 1.10+ locks state with S3 conditional writes (use_lockfile), so no DynamoDB table is needed.
+terraform {
+  backend "s3" {
+    bucket       = "so101-terraform-state-CHANGE-ME"
+    key          = "mlflow/terraform.tfstate"
+    region       = "us-west-2"
+    encrypt      = true
+    use_lockfile = true
+  }
+}

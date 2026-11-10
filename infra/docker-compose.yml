@@ -1,0 +1,105 @@
+# so101 MLflow stack: the server the lab runs bare today (tools/mlflow_ui.sh start) in containers, with Postgres and an S3 store in
+# place of SQLite and a folder. Settings come from infra/.env (copy .env.example). Drive it with tools/mlflow_ui.sh up|down|logs.
+#
+# why no MinIO: MinIO archived its repository in April 2026 and removed its Docker Hub images in September 2026 (pulls of minio/minio
+# now fail). RustFS 1.0 is a maintained S3-compatible store with the same shape (S3 API on 9000, console on 9001, one data volume);
+# the mlflow container only ever speaks S3, so AWS swaps in real S3 with no change to the image. Swap the image for pgsty/silo
+# (community MinIO fork, MINIO_ROOT_* variables) if the MinIO console is wanted back.
+#
+# Published ports come from .env: MLFLOW_PORT 5050 keeps tools/mlflow_ui.sh and docs/mlflow_field_guide.html true.
+services:
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+      args:
+        MLFLOW_VERSION: ${MLFLOW_VERSION}
+    image: so101-mlflow:${MLFLOW_VERSION}
+    restart: unless-stopped
+    ports:
+      - "${MLFLOW_PORT}:5050"
+    environment:
+      MLFLOW_PORT: "5050"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MLFLOW_ARTIFACT_BUCKET: ${MLFLOW_ARTIFACT_BUCKET}
+      MLFLOW_S3_ENDPOINT_URL: http://s3:9000
+      MLFLOW_BOTO_CLIENT_ADDRESSING_STYLE: path
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "/app/healthcheck.py"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  s3:
+    image: rustfs/rustfs:1.0.4
+    restart: unless-stopped
+    ports:
+      - "${S3_PORT}:9000"
+      - "${S3_CONSOLE_PORT}:9001"
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY}
+    volumes:
+      - s3data:/data
+      - s3logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  s3-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+      args:
+        MLFLOW_VERSION: ${MLFLOW_VERSION}
+    image: so101-mlflow:${MLFLOW_VERSION}
+    restart: "no"
+    command: ["python", "/app/s3_init.py"]
+    environment:
+      MLFLOW_ARTIFACT_BUCKET: ${MLFLOW_ARTIFACT_BUCKET}
+      MLFLOW_S3_ENDPOINT_URL: http://s3:9000
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+    depends_on:
+      s3:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  s3data:
+  s3logs:

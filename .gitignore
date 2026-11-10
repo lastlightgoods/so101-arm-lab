@@ -37,3 +37,11 @@ dashboard/.phone_token
 site/.wrangler/
 site/node_modules/
 .wrangler/
+
+# infra: local settings with passwords, terraform state, providers and the per-account backend/tfvars
+infra/.env
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/*.tfvars
+infra/terraform/backend.tf
