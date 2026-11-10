@@ -212,7 +212,7 @@ p:last-child { margin-bottom: 0; }
 .dot::after {
   content: ""; position: absolute; inset: -4px; border-radius: 50%;
   border: 1px solid var(--accent); opacity: 0;
-  animation: ping 2.4s ease-out infinite;
+  /* static: the chip is a dated snapshot, not live (TC, handoff doc 32) */
 }
 @keyframes ping {
   0% { transform: scale(0.5); opacity: 0.9; }
