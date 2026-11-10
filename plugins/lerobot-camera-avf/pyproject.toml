@@ -1,0 +1,13 @@
+[project]
+name = "lerobot_camera_avf"
+version = "0.1.0"
+description = "LeRobot camera backend for macOS that selects USB cameras by device name/format via AVFoundation (never by index)"
+requires-python = ">=3.10"
+dependencies = ["pyobjc-framework-AVFoundation", "pyobjc-framework-Quartz", "pyobjc-framework-CoreMedia", "pyobjc-framework-libdispatch", "numpy", "opencv-python"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["lerobot_camera_avf*"]

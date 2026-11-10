@@ -1,0 +1,9 @@
+{
+ "units": "in",
+ "dictionary": "DICT_4X4_50",
+ "marker_size": 2.0,
+ "markers": {"0": [16, 10], "1": [2, 10], "2": [15, 4], "3": [3, 4]},
+ "arm_base": [9, -3],
+ "arm_yaw_deg": 90,
+ "_note": "Fiskars 18x12 in mat re-squared 9 Nov 2026 evening; printed grid now matches this frame (origin = arm-side left corner, X along the 18 in edge, Y away from the arm). Marker CENTRES read off the printed grid by TC. arm_base/yaw are the starting guess until jog_capture --fit --keep-offsets replaces them."
+}

@@ -1,0 +1,21 @@
+# SO-101: resident camera-lock guard. The lab's C920s (046d:08e5) re-derive their exposure at every stream start even in
+# Manual Mode and forget everything on a USB re-plug, so a one-shot apply is not enough: this unit runs
+# `cam_lock.py guard`, which re-applies ~/so101/calib/cam_settings.json within a second of any drift and logs each fix
+# (journalctl --user -u so101-cam-lock). The udev rule (99-so101-cams.rules) is the fast path for re-plugs.
+# systemd --user unit; no sudo needed to install it:
+#   mkdir -p ~/.config/systemd/user && cp ~/so101/so101-cam-lock.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now so101-cam-lock.service
+#   systemctl --user status so101-cam-lock.service
+# Without lingering the user manager only starts at the first login; for it to run at boot TC must run once:
+#   sudo loginctl enable-linger tc
+[Unit]
+Description=SO-101 cameras: keep exposure / white balance / focus frozen to ~/so101/calib/cam_settings.json
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/so101/cam_lock.py guard
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

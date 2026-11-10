@@ -1,0 +1,192 @@
+/* DYSTOPIAN — Lastlight Goods sub-brand skin for the SO-101 wall dashboard. Facility signage.
+   Hex-locked: silver #aeb4bb, dusk #3d3b49, ink #1a191f, sand #f0e9dc (text), paper #fdfbf6 (one small plate),
+   clay #b45c40 for warning/critical. Silver only, never gold. JetBrains Mono everywhere. Scoped to html[data-skin="dystopian"]. */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&display=swap');
+
+html[data-skin="dystopian"]{
+  --bg:#1a191f;--panel:#3d3b49;--line:rgba(174,180,187,.32);--rim:rgba(174,180,187,.10);
+  --ink:#f0e9dc;--dim:#aeb4bb;--acc:#aeb4bb;--acc2:#aeb4bb;--warn:#c9765a;--bad:#b45c40;
+  --font:"JetBrains Mono","SF Mono",Menlo,monospace;--mono:"JetBrains Mono","SF Mono",Menlo,monospace;--disp:"JetBrains Mono","SF Mono",Menlo,monospace;
+  --glow:none;
+  --silver:#aeb4bb;--dusk:#3d3b49;--inkbg:#1a191f;--sand:#f0e9dc;--paper:#fdfbf6;--clay:#b45c40;
+  --hazard:repeating-linear-gradient(135deg,#aeb4bb 0 12px,#1a191f 12px 24px);
+}
+html[data-skin="dystopian"] body::before,html[data-skin="dystopian"] body::after{display:none}
+html[data-skin="dystopian"] body{background:var(--inkbg);color:var(--sand)}
+
+/* ---- header: stencil wordmark, flat clock ---- */
+html[data-skin="dystopian"] header{border-bottom:1px solid var(--silver);box-shadow:none;padding-bottom:12px}
+html[data-skin="dystopian"] h1{font:800 44px/1 var(--mono);letter-spacing:.3em;color:var(--silver);text-shadow:none;text-transform:uppercase}
+html[data-skin="dystopian"] h1 small{font:800 14px/1 var(--mono);letter-spacing:.42em;color:var(--silver);text-shadow:none;margin-bottom:12px}
+html[data-skin="dystopian"] h1 em{font:600 14px/1 var(--mono);letter-spacing:.3em;color:var(--silver);opacity:.75;text-transform:uppercase}
+html[data-skin="dystopian"] #deck.playing~h1 em{color:var(--sand);text-shadow:none;opacity:1}
+html[data-skin="dystopian"] #clock{font:800 40px/1 var(--mono);letter-spacing:.06em;color:var(--silver);text-shadow:none}
+html[data-skin="dystopian"] #clock small{font:600 13px/1.4 var(--mono);letter-spacing:.22em;color:var(--silver);opacity:.8}
+html[data-skin="dystopian"] #clock small.rpm{opacity:.8}
+html[data-skin="dystopian"] #label{color:var(--inkbg)}
+html[data-skin="dystopian"] #lamp.on{background:var(--clay);box-shadow:none}
+html[data-skin="dystopian"] #lockbtn{font:800 11px/1 var(--mono);color:var(--silver);border:1px solid var(--silver);border-radius:2px}
+html[data-skin="dystopian"] #lockbtn:hover{background:var(--silver);color:var(--inkbg)}
+html[data-skin="dystopian"] kbd.key{color:var(--silver);border-color:var(--line);border-radius:2px}
+html[data-skin="dystopian"] #clock small.sp button{color:var(--silver);border-color:var(--silver);border-radius:2px}
+html[data-skin="dystopian"] #clock small.sp i{color:var(--silver)}
+
+/* ---- panels as signage plates ---- */
+html[data-skin="dystopian"] .panel{background:var(--dusk);border:1px solid var(--silver);border-radius:3px;box-shadow:none;padding:18px 22px 20px}
+html[data-skin="dystopian"] .panel h2{font:800 14px/1 var(--mono);letter-spacing:.32em;color:var(--silver);text-transform:uppercase;align-items:center;gap:14px;margin:0 0 16px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+html[data-skin="dystopian"] .panel h2 span{color:var(--sand);font-weight:600;letter-spacing:.12em;margin-left:auto}
+html[data-skin="dystopian"] .panel h2::after{flex:none;font:800 10px/1 var(--mono);letter-spacing:.3em;padding:4px 8px 3px;background:var(--silver);color:var(--inkbg);border-radius:1px}
+html[data-skin="dystopian"] #statusp h2::after{content:"SECTOR 01"}
+html[data-skin="dystopian"] #jetsonp h2::after{content:"SECTOR 01 · COMPUTE"}
+html[data-skin="dystopian"] #armp h2::after{content:"ARM BAY"}
+html[data-skin="dystopian"] .panel h2:has(#tr_sub)::after{content:"DATA VAULT"}
+html[data-skin="dystopian"] .panel h2:has(#ds_sub)::after{content:"DATA VAULT"}
+html[data-skin="dystopian"] .panel h2:has(#pol_sub)::after{content:"DATA VAULT"}
+html[data-skin="dystopian"] main>section.panel.wide:last-child h2::after{content:"SECTOR 01 · LOG"}
+html[data-skin="dystopian"] #shell .termbar,html[data-skin="dystopian"] #term .termbar{font:800 13px/1 var(--mono);letter-spacing:.32em;color:var(--silver);text-shadow:none;background:var(--inkbg);border-bottom:1px solid var(--line);padding:12px 18px 10px}
+html[data-skin="dystopian"] .termbar .dim{color:var(--silver);opacity:.7;font-weight:600;letter-spacing:.1em;text-transform:none}
+html[data-skin="dystopian"] #shell,html[data-skin="dystopian"] #term{background:var(--inkbg)!important}
+html[data-skin="dystopian"] #termframe{background:var(--inkbg)}
+html[data-skin="dystopian"] #shellbody{font-size:13px}
+html[data-skin="dystopian"] .sc .d{color:var(--silver);text-shadow:none}
+html[data-skin="dystopian"] .sc .d i{color:var(--silver);opacity:.6}
+html[data-skin="dystopian"] .sc .c{color:var(--sand)}
+html[data-skin="dystopian"] .sc .c::before{color:var(--silver)}
+html[data-skin="dystopian"] .sc .o{color:var(--silver);border-left:2px solid var(--line)}
+html[data-skin="dystopian"] .sc.run .d::after{color:var(--sand)}
+
+/* ---- status ---- */
+html[data-skin="dystopian"] .badge{font:800 24px/1 var(--mono);letter-spacing:.2em;padding:18px 28px;border-radius:2px;background:var(--inkbg);color:var(--silver);border:1px solid var(--silver);box-shadow:none}
+html[data-skin="dystopian"] .badge.hot{background:var(--silver);color:var(--inkbg);border-color:var(--silver);box-shadow:none;animation:none}
+html[data-skin="dystopian"] .badge.off{background:var(--inkbg);color:var(--clay);border-color:var(--clay);box-shadow:none}
+html[data-skin="dystopian"] #status .meta{color:var(--silver);font-size:16px}
+html[data-skin="dystopian"] #status .meta b{color:var(--sand)}
+
+/* ---- gauges: big numerals silver on ink ---- */
+html[data-skin="dystopian"] .gauges{background:var(--inkbg);border:1px solid var(--line);border-radius:2px;padding:12px 8px 6px}
+html[data-skin="dystopian"] .g .v{font:800 30px/1 var(--mono);letter-spacing:0;color:var(--silver);text-shadow:none}
+html[data-skin="dystopian"] .g .l{font:600 12px/1 var(--mono);letter-spacing:.25em;color:var(--silver);opacity:.75}
+html[data-skin="dystopian"] body.compact .g .v{font-size:24px}
+html[data-skin="dystopian"] .cores{height:34px;gap:4px}
+html[data-skin="dystopian"] .cores div{background:var(--silver);box-shadow:none;border-radius:0;opacity:.85}
+
+/* ---- arm bay: mode deck, transport, hazard strip ---- */
+html[data-skin="dystopian"] .modes .grp{background:var(--inkbg);border:1px solid var(--line);border-radius:2px;box-shadow:none}
+html[data-skin="dystopian"] .modes .grp::before{color:var(--silver);opacity:.7}
+html[data-skin="dystopian"] .modes button{font:800 10.5px/1 var(--mono);letter-spacing:.16em;color:var(--silver);background:var(--inkbg);border:1px solid var(--line);border-radius:2px}
+html[data-skin="dystopian"] .modes button::before{background:var(--line)}
+html[data-skin="dystopian"] .modes button:hover{color:var(--sand);border-color:var(--silver)}
+html[data-skin="dystopian"] .modes button.on{color:var(--inkbg);background:var(--silver);border-color:var(--silver);text-shadow:none}
+html[data-skin="dystopian"] .modes button.on::before{background:var(--inkbg);box-shadow:none}
+html[data-skin="dystopian"] .modes button.on kbd.key{color:var(--inkbg);border-color:rgba(26,25,31,.5)}
+html[data-skin="dystopian"] .modes button.stop{color:var(--clay);border-color:var(--clay)}
+html[data-skin="dystopian"] .modes button.stop:hover{background:var(--clay);color:var(--inkbg)}
+html[data-skin="dystopian"] .transport .rec{font:800 11px/1 var(--mono);letter-spacing:.2em;color:var(--clay);background:var(--inkbg);border:1px solid var(--clay);border-radius:2px}
+html[data-skin="dystopian"] .transport .rec:hover{background:var(--clay);color:var(--inkbg)}
+html[data-skin="dystopian"] #recidle{border:1px dashed var(--line);border-radius:2px;color:var(--silver);opacity:.85;font:600 10.5px/1 var(--mono);letter-spacing:.2em}
+html[data-skin="dystopian"] #recidle .dot{background:var(--inkbg);box-shadow:inset 0 0 0 1px var(--line)}
+html[data-skin="dystopian"] #recstrip{position:relative;overflow:hidden;border:1px solid var(--silver);border-radius:2px;background:var(--inkbg);color:var(--sand);font:800 12px/1 var(--mono);letter-spacing:.14em;padding:14px 12px 9px;text-transform:uppercase}
+html[data-skin="dystopian"] #recstrip::before{content:"";position:absolute;left:0;right:0;top:0;height:5px;background:var(--hazard);background-size:34px 34px}
+html[data-skin="dystopian"] #recstrip.paused{background:repeating-linear-gradient(135deg,rgba(174,180,187,.16) 0 12px,var(--inkbg) 12px 24px)}
+html[data-skin="dystopian"] #recstrip.paused .dot{opacity:.5}
+html[data-skin="dystopian"] #recstrip .dot{background:var(--clay);box-shadow:none;border-radius:1px;width:10px;height:10px}
+html[data-skin="dystopian"] #recstrip.reset .dot{background:var(--warn);box-shadow:none}
+html[data-skin="dystopian"] #recstrip.done .dot{background:var(--silver);box-shadow:none}
+html[data-skin="dystopian"] #recstrip .bar{background:var(--dusk);border-radius:0;height:6px}
+html[data-skin="dystopian"] #recstrip .bar i{background:var(--clay);box-shadow:none}
+html[data-skin="dystopian"] #recstrip.reset .bar i{background:var(--warn)}
+html[data-skin="dystopian"] #recstrip.done .bar i{background:var(--silver)}
+html[data-skin="dystopian"] #recstrip button{font:800 10px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--silver);border:1px solid var(--silver);border-radius:2px;background:var(--inkbg)}
+html[data-skin="dystopian"] #recstrip button:hover{background:var(--silver);color:var(--inkbg)}
+html[data-skin="dystopian"] #recstrip #recnext,html[data-skin="dystopian"] #recstrip #recredo,html[data-skin="dystopian"] #recstrip #recpause{color:var(--silver);border-color:var(--silver)}
+html[data-skin="dystopian"] #recstrip #recstop{color:var(--clay);border-color:var(--clay)}
+html[data-skin="dystopian"] #recstrip #recstop:hover{background:var(--clay);color:var(--inkbg)}
+html[data-skin="dystopian"] #arm3d{background:var(--inkbg);border-radius:2px;border:1px solid var(--line)}
+html[data-skin="dystopian"] #arm3d canvas{filter:grayscale(1) brightness(1.05)}   /* the wireframe colours are set in the page's 3D module; silver-only via filter */
+html[data-skin="dystopian"] .armctl button{font:800 10px/1 var(--mono);letter-spacing:.15em;color:var(--silver);background:var(--inkbg);border:1px solid var(--line);border-radius:2px}
+html[data-skin="dystopian"] .armctl button:hover{color:var(--sand);border-color:var(--silver)}
+html[data-skin="dystopian"] .armctl button.on{color:var(--inkbg);background:var(--silver);border-color:var(--silver);text-shadow:none}
+html[data-skin="dystopian"] .armhint{color:var(--silver);opacity:.45}
+html[data-skin="dystopian"] #joints td.num:nth-child(3){color:var(--silver)!important}
+
+/* ---- tables ---- */
+html[data-skin="dystopian"] table{font-family:var(--mono);font-size:16px}
+html[data-skin="dystopian"] th{font:800 11px/1.3 var(--mono);letter-spacing:.28em;color:var(--silver)}
+html[data-skin="dystopian"] td{color:var(--sand)}
+html[data-skin="dystopian"] td.num{color:var(--sand)}
+html[data-skin="dystopian"] .bar{background:var(--inkbg);border-radius:0}
+html[data-skin="dystopian"] .bar i{background:var(--silver);box-shadow:none}
+html[data-skin="dystopian"] .tag,html[data-skin="dystopian"] .tag.jetson,html[data-skin="dystopian"] .tag.mac{font:800 9px/1 var(--mono);letter-spacing:.2em;color:var(--silver);background:var(--inkbg);border:1px solid var(--line);border-radius:1px;padding:3px 6px}
+html[data-skin="dystopian"] #pol td[style]{color:var(--silver)!important}
+html[data-skin="dystopian"] .empty{color:var(--silver);font-style:normal;opacity:.7}
+
+/* ---- charts: the loss series colours are fixed in the page script; render them as greys ---- */
+html[data-skin="dystopian"] canvas.chart{filter:grayscale(1) brightness(1.08)}
+html[data-skin="dystopian"] .legend{color:var(--silver);font-size:12px}
+html[data-skin="dystopian"] .legend i{filter:grayscale(1) brightness(1.08)}
+
+/* ---- log ---- */
+html[data-skin="dystopian"] #events{color:var(--silver);font-size:15px}
+html[data-skin="dystopian"] #events b{color:var(--silver);text-shadow:none;font-weight:800;margin-right:16px}
+html[data-skin="dystopian"] #events div:first-child{color:var(--sand)}
+
+/* ---- live feeds ---- */
+html[data-skin="dystopian"] #live{border:1px solid var(--silver)}
+html[data-skin="dystopian"] .feed span{font:800 11px/1 var(--mono);letter-spacing:.24em;border-radius:1px;border:1px solid var(--line);background:rgba(26,25,31,.8)}
+html[data-skin="dystopian"] .feed span::before{background:var(--clay);border-radius:1px}
+
+/* ---- attract (gallery) ---- */
+html[data-skin="dystopian"] #gallery{background:var(--inkbg);border:1px solid var(--silver);border-radius:3px}
+html[data-skin="dystopian"] #simview{background:var(--inkbg);color:var(--sand)}
+html[data-skin="dystopian"] #simview h3{font:800 11px/1 var(--mono);letter-spacing:.34em;color:var(--silver)}
+html[data-skin="dystopian"] #simview h3 span,html[data-skin="dystopian"] #simview td.pct,html[data-skin="dystopian"] #simview .simstat .run{color:var(--silver)}
+html[data-skin="dystopian"] #simview tr.best td.pct{color:var(--sand);text-shadow:none}
+html[data-skin="dystopian"] #simview .bar{background:var(--silver);box-shadow:none;border-radius:0}
+html[data-skin="dystopian"] #simview .simgif .tag.ok{color:var(--sand);text-shadow:none}
+html[data-skin="dystopian"] #simview .simgif .tag.fail{color:var(--clay)}
+html[data-skin="dystopian"] #simview .simgif img{border-color:var(--line);border-radius:2px;background:var(--inkbg)}
+html[data-skin="dystopian"] #simview td,html[data-skin="dystopian"] #simview th{border-bottom-color:var(--line)}
+
+/* ---- record modal ---- */
+html[data-skin="dystopian"] #recmodal{background:rgba(26,25,31,.82)}
+html[data-skin="dystopian"] #recmodal form{background:var(--dusk);border:1px solid var(--silver);border-radius:3px;box-shadow:none}
+html[data-skin="dystopian"] #recmodal h2{font:800 16px/1 var(--mono);letter-spacing:.32em;color:var(--silver);text-shadow:none}
+html[data-skin="dystopian"] #recmodal label{color:var(--silver)}
+html[data-skin="dystopian"] #recmodal input[type=text],html[data-skin="dystopian"] #recmodal input[type=number]{font:600 17px/1.3 var(--mono);color:var(--sand);background:var(--inkbg);border:1px solid var(--line);border-radius:2px}
+html[data-skin="dystopian"] #recmodal input:focus{border-color:var(--silver)}
+html[data-skin="dystopian"] #recmodal .radio,html[data-skin="dystopian"] #recmodal .radio label{font:600 14px var(--mono);color:var(--sand)}
+html[data-skin="dystopian"] #recmodal .hint{font:500 13px/1.5 var(--mono);color:var(--silver)}
+html[data-skin="dystopian"] #recmodal .hint b{color:var(--clay)}
+html[data-skin="dystopian"] #recmodal .btns button{border-radius:2px;color:var(--silver);border-color:var(--silver)}
+html[data-skin="dystopian"] #recmodal .btns button.go{color:var(--inkbg);background:var(--clay);border-color:var(--clay);box-shadow:none}
+
+/* ---- lock screen: badge reader with the silver ridge mark ---- */
+html[data-skin="dystopian"] #lockscreen{background:var(--inkbg);gap:22px}
+html[data-skin="dystopian"] #lockscreen::before,html[data-skin="dystopian"] #lockscreen::after{content:"";position:absolute;left:0;right:0;height:12px;background:var(--hazard);background-size:34px 34px}
+html[data-skin="dystopian"] #lockscreen::before{top:0}html[data-skin="dystopian"] #lockscreen::after{bottom:0}
+html[data-skin="dystopian"] #lockscreen .brand{font:800 18px/1 var(--mono);letter-spacing:.5em;color:var(--silver);text-shadow:none;top:44px;left:48px}
+html[data-skin="dystopian"] #lockscreen .brand small{font:600 12px/1 var(--mono);letter-spacing:.3em;color:var(--silver);opacity:.7;margin-top:10px}
+html[data-skin="dystopian"] #lockscreen .dyst-mark{width:min(520px,34vw);height:auto;display:block;flex:none;margin-bottom:6px}
+html[data-skin="dystopian"] #lockscreen .dyst-mark polyline{fill:none;stroke:var(--silver);stroke-width:40.5;stroke-linecap:round;stroke-linejoin:round}
+html[data-skin="dystopian"] #scanner .feed{box-shadow:0 0 0 1px var(--silver);background:var(--inkbg)}   /* size untouched: the page positions the eye box against a 420 px feed */
+html[data-skin="dystopian"] #scanner .feed img{filter:grayscale(1) contrast(1.2) brightness(.9)}
+html[data-skin="dystopian"] #scanner .feed .eye{border:2px solid var(--silver);box-shadow:none;border-radius:2px}
+html[data-skin="dystopian"] #scanner .feed .beam{background:linear-gradient(90deg,transparent,var(--silver),transparent);box-shadow:none}
+html[data-skin="dystopian"] #scanner .ring{stroke:rgba(174,180,187,.3)}
+html[data-skin="dystopian"] #scanner .ticks{stroke:rgba(174,180,187,.55)}
+html[data-skin="dystopian"] #scanner .arc{display:none}
+html[data-skin="dystopian"] #scanner .prog{stroke:var(--silver);filter:none}
+html[data-skin="dystopian"] #scanner svg path{stroke:rgba(174,180,187,.5)}
+html[data-skin="dystopian"] #scanner.ok .prog{stroke:var(--sand);filter:none}
+html[data-skin="dystopian"] #scanner.ok .eye{border-color:var(--sand);filter:none}
+html[data-skin="dystopian"] #lockscreen h1{flex:none;font:800 34px/1 var(--mono);letter-spacing:.34em;color:var(--silver);text-shadow:none}   /* the page's h1{flex:1} would stretch it down the column */
+html[data-skin="dystopian"] #lockscreen .st{font:800 20px/1.4 var(--mono);letter-spacing:.3em;color:var(--sand);text-shadow:none}
+html[data-skin="dystopian"] #lockscreen.okay .st{color:var(--sand);text-shadow:none}
+html[data-skin="dystopian"] #lockscreen .hint{font:600 13px/1 var(--mono);letter-spacing:.3em;color:var(--silver);opacity:.75;bottom:44px}
+html[data-skin="dystopian"] #lockscreen .dyst-plate{position:absolute;right:48px;top:44px;font:800 12px/1 var(--mono);letter-spacing:.3em;padding:8px 12px 7px;background:var(--paper);color:var(--inkbg);border-radius:1px}   /* the one small light block */
+
+/* ---- landscape: the lock screen column must fit 1440 px tall ---- */
+@media (orientation: landscape){
+  html[data-skin="dystopian"] #lockscreen{gap:14px}
+  html[data-skin="dystopian"] #lockscreen .dyst-mark{width:min(380px,22vw)}
+}

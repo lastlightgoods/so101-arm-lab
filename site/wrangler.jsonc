@@ -1,0 +1,14 @@
+{
+  // so101 arm lab — static site served via Cloudflare Workers static assets.
+  // No Worker script, no bindings, no secrets, no KV. Just files in ./public.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "so101-arm-lab",
+  "compatibility_date": "2026-11-10",
+  "assets": {
+    "directory": "./public",
+    // Serve public/404.html (if present) with a 404 status for unknown paths.
+    "not_found_handling": "404-page",
+    // Use the default /path -> /path.html and /path/ -> /path/index.html resolution.
+    "html_handling": "auto-trailing-slash"
+  }
+}

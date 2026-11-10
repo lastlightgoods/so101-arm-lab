@@ -1,0 +1,213 @@
+/* Mission Control skin: a 1969 flight-controller console. Charcoal surfaces, cream phosphor ink, GO green / NO-GO red /
+   amber caution, IBM Plex Mono for text and Share Tech Mono (letter-spaced) as the seven-segment readout face.
+   Everything is scoped under html[data-skin="missioncontrol"]; the page's gauge()/spark() read the tokens below at draw time. */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
+
+html[data-skin="missioncontrol"]{
+  --bg:#131415;--panel:linear-gradient(180deg,#242528,#1a1b1d);--line:#3a3b3f;--rim:rgba(255,255,255,.06);
+  --ink:#e8dcc0;--dim:#a39b86;--acc:#8dbf7a;--acc2:#cfe3c4;--warn:#e2a93d;--bad:#dc4a35;
+  --font:"IBM Plex Mono","SF Mono",Menlo,monospace;--mono:"IBM Plex Mono","SF Mono",Menlo,monospace;--disp:"Share Tech Mono","IBM Plex Mono",Menlo,monospace;
+  --glow:0 0 10px rgba(232,220,192,.22);
+  /* skin-private tokens */
+  --mc-bezel:#0a0a0b;--mc-metal:#35363a;--mc-plate:#0e0f10;--mc-readout:#f2d98f;
+  --mc-go:linear-gradient(180deg,#a7d892,#78ad66);--mc-go-ink:#0f1a0c;--mc-go-rim:#3f6a34;
+  --mc-nogo:linear-gradient(180deg,#e56a52,#b8392a);--mc-nogo-ink:#2a0b07;--mc-nogo-rim:#5a1d14;
+  --mc-amber:linear-gradient(180deg,#f0c060,#c98f2a);--mc-amber-ink:#2a1a04;--mc-amber-rim:#6a4a10;
+  --mc-cream:linear-gradient(180deg,#ece2c8,#b9ae93);--mc-cream-ink:#1a1a16;--mc-cream-rim:#5a5546;
+}
+@keyframes mc-blink{50%{opacity:.25}}
+html[data-skin="missioncontrol"] body::before{background:radial-gradient(ellipse at 50% 0%,rgba(255,255,255,.035),transparent 60%),radial-gradient(ellipse at 50% 100%,rgba(0,0,0,.5),transparent 60%)}
+html[data-skin="missioncontrol"] body::after{background:none}
+html[data-skin="missioncontrol"] body{font-weight:500}
+
+/* ---- header: engraved title, deck muted to the console's greys, clock as a recessed readout window ---- */
+html[data-skin="missioncontrol"] header{border-bottom:1px solid #000;box-shadow:0 1px 0 var(--mc-metal),0 3px 0 #000,0 4px 0 rgba(255,255,255,.04);padding-bottom:14px}
+html[data-skin="missioncontrol"] header h1{font-family:var(--disp);letter-spacing:.26em;color:var(--ink);text-shadow:0 1px 0 #000,0 0 14px rgba(232,220,192,.18)}
+html[data-skin="missioncontrol"] h1 small{color:var(--acc);text-shadow:none;letter-spacing:.4em;font-size:15px}
+html[data-skin="missioncontrol"] h1 em{color:var(--dim);font-size:14px}
+html[data-skin="missioncontrol"] #deck.playing~h1 em{color:var(--acc2);text-shadow:none}
+html[data-skin="missioncontrol"] #deck{filter:grayscale(.75) sepia(.3) brightness(.9)}
+html[data-skin="missioncontrol"] #clock{font-family:var(--disp);font-size:44px;letter-spacing:.1em;color:var(--mc-readout);text-shadow:0 0 10px rgba(242,217,143,.45);background:#090a0b;border:1px solid #000;border-radius:3px;padding:8px 16px 10px;box-shadow:inset 0 0 0 1px #2a2b2e,inset 0 2px 8px #000,0 1px 0 rgba(255,255,255,.05)}
+html[data-skin="missioncontrol"] #clock small{color:var(--dim);font-family:var(--mono);font-size:13px;letter-spacing:.22em;font-weight:500}
+html[data-skin="missioncontrol"] #clock small.rpm{color:#6c665a}
+html[data-skin="missioncontrol"] #lamp{border-radius:2px;width:16px;height:9px;background:#1a1b1d;box-shadow:inset 0 0 0 1px #000}
+html[data-skin="missioncontrol"] #lamp.on{background:var(--bad);box-shadow:0 0 10px var(--bad),inset 0 0 0 1px #000;animation:mc-blink 1s steps(2) infinite}
+html[data-skin="missioncontrol"] #lockbtn,html[data-skin="missioncontrol"] #clock small.sp button{font-family:var(--mono);color:var(--dim);border:1px solid #000;border-radius:2px;background:linear-gradient(180deg,#2a2b2e,#1a1b1d);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 1px 0 #000}
+html[data-skin="missioncontrol"] #lockbtn:hover{color:var(--ink);border-color:#000}
+html[data-skin="missioncontrol"] #clock small.sp i{color:var(--acc)}
+html[data-skin="missioncontrol"] kbd.key{font-family:var(--mono);color:var(--dim);border-color:#4a4b4f;border-radius:2px}
+
+/* ---- panels: bezels with an inset frame, four screw heads, and the h2 as an engraved label plate ---- */
+html[data-skin="missioncontrol"] .panel{background:var(--panel);border:1px solid var(--mc-bezel);border-radius:6px;padding:26px 28px 24px;box-shadow:0 0 0 1px #2c2d30,0 12px 30px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.05)}
+html[data-skin="missioncontrol"] .panel::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:6;border-radius:inherit;box-shadow:inset 0 0 0 1px var(--mc-metal),inset 0 0 0 3px #1b1c1e,inset 0 0 0 4px var(--mc-bezel)}
+html[data-skin="missioncontrol"] .panel::before{content:"";position:absolute;inset:7px;pointer-events:none;z-index:7;
+  background:
+    linear-gradient(45deg,transparent 46%,#050506 46%,#050506 54%,transparent 54%) left top/11px 11px no-repeat,
+    linear-gradient(45deg,transparent 46%,#050506 46%,#050506 54%,transparent 54%) right top/11px 11px no-repeat,
+    linear-gradient(45deg,transparent 46%,#050506 46%,#050506 54%,transparent 54%) left bottom/11px 11px no-repeat,
+    linear-gradient(45deg,transparent 46%,#050506 46%,#050506 54%,transparent 54%) right bottom/11px 11px no-repeat,
+    radial-gradient(circle,#55565a 0 2.3px,#262729 2.7px 3.6px,var(--mc-bezel) 3.9px 4.6px,transparent 5px) left top/11px 11px no-repeat,
+    radial-gradient(circle,#55565a 0 2.3px,#262729 2.7px 3.6px,var(--mc-bezel) 3.9px 4.6px,transparent 5px) right top/11px 11px no-repeat,
+    radial-gradient(circle,#55565a 0 2.3px,#262729 2.7px 3.6px,var(--mc-bezel) 3.9px 4.6px,transparent 5px) left bottom/11px 11px no-repeat,
+    radial-gradient(circle,#55565a 0 2.3px,#262729 2.7px 3.6px,var(--mc-bezel) 3.9px 4.6px,transparent 5px) right bottom/11px 11px no-repeat}
+html[data-skin="missioncontrol"] .panel h2{position:relative;font-family:var(--mono);font-size:13px;letter-spacing:.3em;font-weight:600;color:var(--ink);text-transform:uppercase;
+  background:var(--mc-plate);border:1px solid #000;border-radius:3px;padding:8px 12px 7px;margin:0 0 20px;
+  box-shadow:0 1px 0 rgba(255,255,255,.07),inset 0 1px 3px #000;text-shadow:0 1px 0 #000,0 0 6px rgba(232,220,192,.12)}
+html[data-skin="missioncontrol"] .panel h2::after{content:"";position:absolute;left:8px;right:8px;bottom:-8px;height:2px;border-radius:1px;background:linear-gradient(90deg,transparent,#2e2f33 8%,#2e2f33 92%,transparent);box-shadow:0 1px 0 rgba(255,255,255,.05)}
+html[data-skin="missioncontrol"] .panel h2 span{color:var(--acc);font-weight:500;text-shadow:0 0 8px rgba(141,191,122,.35);letter-spacing:.14em}
+html[data-skin="missioncontrol"] .termbar{font-family:var(--mono);color:var(--ink);text-shadow:none;letter-spacing:.3em;background:var(--mc-plate);border-bottom:1px solid #000;box-shadow:0 1px 0 var(--mc-metal);padding:12px 20px 10px}
+html[data-skin="missioncontrol"] .termbar .dim{color:var(--dim)}
+html[data-skin="missioncontrol"] #shell,html[data-skin="missioncontrol"] #term{background:#0f1011!important}
+html[data-skin="missioncontrol"] #termframe{background:#0f1011}
+html[data-skin="missioncontrol"] .sc .d{color:var(--ink);text-shadow:none}html[data-skin="missioncontrol"] .sc .d i{color:var(--dim)}
+html[data-skin="missioncontrol"] .sc .c{color:var(--acc2)}html[data-skin="missioncontrol"] .sc .c::before{color:var(--acc)}
+html[data-skin="missioncontrol"] .sc .o{border-left-color:#2e2f33}html[data-skin="missioncontrol"] .sc.run .d::after{color:var(--acc)}
+html[data-skin="missioncontrol"] #live{background:#000!important}
+html[data-skin="missioncontrol"] .feed span{font-family:var(--mono);border-radius:2px;border-color:#2e2f33;background:rgba(10,10,11,.8)}
+
+/* ---- FLIGHT DIRECTOR: status as a lit GO / NO-GO lamp (dark text on a lit face, like an Apollo-era indicator) ---- */
+html[data-skin="missioncontrol"] .badge{font-family:var(--disp);font-size:26px;line-height:1.25;letter-spacing:.14em;padding:16px 28px;border-radius:3px;background:var(--mc-go);color:var(--mc-go-ink);border:1px solid var(--mc-go-rim);box-shadow:inset 0 1px 0 rgba(255,255,255,.35),inset 0 -2px 0 rgba(0,0,0,.15),0 0 22px rgba(141,191,122,.25);text-shadow:none}
+html[data-skin="missioncontrol"] .badge::before{content:"GO · "}
+html[data-skin="missioncontrol"] .badge.hot{background:var(--mc-go);color:var(--mc-go-ink);border-color:var(--mc-go-rim);box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 30px rgba(141,191,122,.45);animation:none}
+html[data-skin="missioncontrol"] .badge.off{background:var(--mc-nogo);color:var(--mc-nogo-ink);border-color:var(--mc-nogo-rim);box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 0 26px rgba(220,74,53,.35)}
+html[data-skin="missioncontrol"] .badge.off::before{content:"NO-GO · "}
+html[data-skin="missioncontrol"] #status .meta{font-family:var(--mono);font-size:17px;color:var(--dim);line-height:1.75}
+html[data-skin="missioncontrol"] #status .meta b{color:var(--ink);font-weight:600}
+
+/* ---- EECOM: the gauges get a dial face behind the canvas and a GO / caution / red-line ring just outside the arc ---- */
+html[data-skin="missioncontrol"] .gauges{gap:14px}
+html[data-skin="missioncontrol"] .g{position:relative}
+html[data-skin="missioncontrol"] .g canvas{position:relative;z-index:1}
+html[data-skin="missioncontrol"] .g::before,html[data-skin="missioncontrol"] .g::after{content:"";position:absolute;left:0;top:0;width:100%;aspect-ratio:1;border-radius:50%;pointer-events:none}
+html[data-skin="missioncontrol"] .g::before{z-index:0;transform:scale(.985);
+  background:radial-gradient(circle at 50% 40%,#2b2c2f 0,#1c1d1f 50%,#121314 74%,#0c0c0d 100%);
+  box-shadow:inset 0 0 0 2px #3c3d41,inset 0 0 0 4px var(--mc-bezel),inset 0 8px 20px rgba(0,0,0,.7),0 0 0 1px #000,0 2px 0 rgba(255,255,255,.04)}
+/* the canvas arc runs 135deg -> 405deg (canvas angles) = 225deg -> 495deg clockwise from 12 o'clock; heat() flips at .6 (162deg) and .85 (229.5deg) */
+html[data-skin="missioncontrol"] .g::after{z-index:2;
+  background:conic-gradient(from 225deg,rgba(141,191,122,.55) 0 162deg,rgba(226,169,61,.8) 162deg 229.5deg,var(--bad) 229.5deg 270deg,transparent 270deg 360deg);
+  -webkit-mask:radial-gradient(circle closest-side,transparent 0 92%,#000 92.5% 98%,transparent 98.5%);mask:radial-gradient(circle closest-side,transparent 0 92%,#000 92.5% 98%,transparent 98.5%)}
+html[data-skin="missioncontrol"] .g .v{position:relative;z-index:3;display:inline-block;font-family:var(--disp);font-weight:400;font-size:36px;letter-spacing:.08em;color:var(--mc-readout);text-shadow:0 0 10px rgba(242,217,143,.45);
+  background:#090a0b;border:1px solid #000;border-radius:3px;padding:1px 12px 0;line-height:1.2;margin-top:-58px;box-shadow:inset 0 0 0 1px #2a2b2e,inset 0 2px 6px #000}
+html[data-skin="missioncontrol"] .g .l{position:relative;z-index:3;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.3em;color:var(--dim);margin-top:16px}
+html[data-skin="missioncontrol"] body.compact .g::before,html[data-skin="missioncontrol"] body.compact .g::after{width:70%;left:15%}
+html[data-skin="missioncontrol"] body.compact .g .v{font-size:26px;margin-top:-46px;padding:0 8px}
+html[data-skin="missioncontrol"] .cores{gap:4px;margin-top:18px}
+html[data-skin="missioncontrol"] .cores div{border-radius:1px;opacity:1;background:repeating-linear-gradient(0deg,var(--acc) 0 3px,transparent 3px 5px);box-shadow:none}
+
+/* ---- GNC: console pushbuttons (lit = GO), red CUTOFF, and the record strip as a GO / NO-GO board ---- */
+html[data-skin="missioncontrol"] .modes .grp{border:1px solid #000;border-radius:3px;background:var(--mc-plate);box-shadow:inset 0 1px 3px #000,0 1px 0 rgba(255,255,255,.05)}
+html[data-skin="missioncontrol"] .modes .grp::before{font-family:var(--mono);color:#6d685a;letter-spacing:.3em}
+html[data-skin="missioncontrol"] .modes button{font-family:var(--mono);font-size:11px;letter-spacing:.16em;color:var(--dim);border:1px solid #000;border-radius:2px;background:linear-gradient(180deg,#2c2d30,#1b1c1e);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 2px 0 #000}
+html[data-skin="missioncontrol"] .modes button::before{background:#111213;box-shadow:inset 0 0 0 1px #000}
+html[data-skin="missioncontrol"] .modes button:hover{color:var(--ink);border-color:#000}
+html[data-skin="missioncontrol"] .modes button.on{background:var(--mc-go);color:var(--mc-go-ink);border-color:var(--mc-go-rim);text-shadow:none;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 14px rgba(141,191,122,.35)}
+html[data-skin="missioncontrol"] .modes button.on::before{background:var(--mc-go-ink);box-shadow:none}
+html[data-skin="missioncontrol"] .modes button.stop{background:var(--mc-nogo);color:var(--mc-nogo-ink);border-color:var(--mc-nogo-rim);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 2px 0 #000}
+html[data-skin="missioncontrol"] .modes button.stop:hover{background:linear-gradient(180deg,#f07a62,#c8402f)}
+html[data-skin="missioncontrol"] .modes button.on kbd.key,html[data-skin="missioncontrol"] .modes button.stop kbd.key,html[data-skin="missioncontrol"] #recstrip button kbd.key,html[data-skin="missioncontrol"] .transport .rec kbd.key{color:inherit;border-color:currentColor;opacity:.7}
+html[data-skin="missioncontrol"] .transport .rec{font-family:var(--mono);letter-spacing:.2em;color:var(--mc-nogo-ink);background:var(--mc-nogo);border:1px solid var(--mc-nogo-rim);border-radius:3px;box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 2px 0 #000}
+html[data-skin="missioncontrol"] .transport .rec:hover{background:linear-gradient(180deg,#f07a62,#c8402f)}
+html[data-skin="missioncontrol"] #recidle{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--dim);border:1px solid #000;border-radius:3px;background:var(--mc-plate);box-shadow:inset 0 0 0 1px #2a2b2e,inset 0 2px 6px #000}
+html[data-skin="missioncontrol"] #recidle .dot{width:30px;height:12px;border-radius:2px;background:#1a1b1d;box-shadow:inset 0 0 0 1px #000}
+html[data-skin="missioncontrol"] #recidle::before{content:"GO · NO-GO";flex:0 0 auto;font:700 9px/1 var(--mono);letter-spacing:.3em;color:#6d685a;padding-right:8px;border-right:1px solid #2a2b2e}
+html[data-skin="missioncontrol"] #recstrip{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;color:var(--ink);border:1px solid #000;border-radius:3px;background:var(--mc-plate);box-shadow:inset 0 0 0 1px #2a2b2e,inset 0 2px 6px #000;padding:6px 8px;gap:6px}
+html[data-skin="missioncontrol"] #recstrip .dot{display:none}
+html[data-skin="missioncontrol"] #rectext{white-space:nowrap;font-weight:600;letter-spacing:.02em}
+/* portrait: the arm panel is 3/5 of the width and the GO / NO-GO captions are longer than the stock ones, so the key tags go */
+@media (orientation: portrait){html[data-skin="missioncontrol"] #recstrip button kbd.key{display:none}}
+html[data-skin="missioncontrol"] #recstrip .bar{min-width:40px}
+html[data-skin="missioncontrol"] #recstrip::before{content:"GO";flex:0 0 auto;min-width:54px;text-align:center;font:700 11px/1 var(--mono);letter-spacing:.2em;padding:7px 8px 6px;border-radius:2px;
+  background:var(--mc-go);color:var(--mc-go-ink);border:1px solid var(--mc-go-rim);box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 12px rgba(141,191,122,.35)}
+html[data-skin="missioncontrol"] #recstrip.reset::before{content:"RESET";background:var(--mc-amber);color:var(--mc-amber-ink);border-color:var(--mc-amber-rim);box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 12px rgba(226,169,61,.35)}
+html[data-skin="missioncontrol"] #recstrip.paused::before{content:"HOLD";background:var(--mc-amber);color:var(--mc-amber-ink);border-color:var(--mc-amber-rim);box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 14px rgba(226,169,61,.5);animation:mc-blink 1.2s steps(2) infinite}
+html[data-skin="missioncontrol"] #recstrip.paused{box-shadow:inset 0 0 0 1px var(--warn),inset 0 2px 6px #000}
+html[data-skin="missioncontrol"] #recstrip.done::before{content:"COMPLETE";background:var(--mc-cream);color:var(--mc-cream-ink);border-color:var(--mc-cream-rim);box-shadow:inset 0 1px 0 rgba(255,255,255,.4)}
+html[data-skin="missioncontrol"] #recstrip .bar{height:9px;border-radius:0;background:#151617;border:1px solid #000;box-shadow:inset 0 1px 2px #000}
+html[data-skin="missioncontrol"] #recstrip .bar i{background:repeating-linear-gradient(90deg,var(--bad) 0 6px,#8a2a1c 6px 8px);box-shadow:none}
+html[data-skin="missioncontrol"] #recstrip.reset .bar i{background:repeating-linear-gradient(90deg,var(--warn) 0 6px,#9a6a1a 6px 8px)}
+html[data-skin="missioncontrol"] #recstrip.paused .bar i{background:repeating-linear-gradient(90deg,var(--warn) 0 6px,#9a6a1a 6px 8px);opacity:.6}
+html[data-skin="missioncontrol"] #recstrip.done .bar i{background:repeating-linear-gradient(90deg,var(--acc) 0 6px,#4f7a45 6px 8px)}
+html[data-skin="missioncontrol"] #recstrip button{font-family:var(--mono);font-size:10px;letter-spacing:.1em;border-radius:2px;padding:6px 7px;border:1px solid #000;box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 2px 0 #000;white-space:nowrap}
+html[data-skin="missioncontrol"] #recstrip button kbd.key{font-size:7px;padding:1px 2px;margin-left:5px}
+html[data-skin="missioncontrol"] #recstrip #recpause{background:var(--mc-cream);color:var(--mc-cream-ink);border-color:var(--mc-cream-rim)}
+html[data-skin="missioncontrol"] #recstrip #recnext{background:var(--mc-go);color:var(--mc-go-ink);border-color:var(--mc-go-rim)}
+html[data-skin="missioncontrol"] #recstrip #recredo{background:var(--mc-amber);color:var(--mc-amber-ink);border-color:var(--mc-amber-rim)}
+html[data-skin="missioncontrol"] #recstrip #recstop{color:var(--ink);background:repeating-linear-gradient(135deg,#3a1a14 0 7px,#1a0c0a 7px 14px);border-color:var(--bad);box-shadow:inset 0 0 0 1px rgba(220,74,53,.4),0 2px 0 #000}
+
+/* ---- arm view, tables, charts ---- */
+html[data-skin="missioncontrol"] #arm3d{background:radial-gradient(ellipse at 50% 80%,#1c1e20,#0e0f10 70%);border-radius:3px;border:1px solid #000;box-shadow:inset 0 0 0 1px #2a2b2e}
+html[data-skin="missioncontrol"] .armctl button{font-family:var(--mono);color:var(--dim);border:1px solid #000;border-radius:2px;background:linear-gradient(180deg,#2c2d30,#1b1c1e);box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+html[data-skin="missioncontrol"] .armctl button.on{background:var(--mc-go);color:var(--mc-go-ink);border-color:var(--mc-go-rim);text-shadow:none}
+html[data-skin="missioncontrol"] .armhint{color:#55564f;font-family:var(--mono)}
+html[data-skin="missioncontrol"] table{font-family:var(--mono);font-size:17px}
+html[data-skin="missioncontrol"] td,html[data-skin="missioncontrol"] th{border-bottom:1px solid #2a2b2e}
+html[data-skin="missioncontrol"] th{font-family:var(--mono);color:var(--dim);letter-spacing:.3em;font-size:11px}
+html[data-skin="missioncontrol"] td.num{font-family:var(--disp);font-size:21px;letter-spacing:.06em;color:var(--mc-readout)}
+html[data-skin="missioncontrol"] #joints{font-size:15px}
+html[data-skin="missioncontrol"] #joints td.num{font-size:24px;line-height:1.1}
+html[data-skin="missioncontrol"] #joints td.num:nth-child(3){color:var(--acc2)!important}
+html[data-skin="missioncontrol"] .bar{background:#151617;border-radius:0;box-shadow:inset 0 1px 2px #000}
+html[data-skin="missioncontrol"] .bar i{background:repeating-linear-gradient(90deg,var(--acc) 0 6px,#4f7a45 6px 8px);box-shadow:none}
+html[data-skin="missioncontrol"] .tag{font-family:var(--mono);border-radius:2px;background:var(--mc-plate);border:1px solid #2e2f33;color:var(--dim)}
+html[data-skin="missioncontrol"] .tag.jetson{color:var(--acc);background:var(--mc-plate);border-color:#2e2f33}
+html[data-skin="missioncontrol"] .tag.mac{color:var(--acc2);background:var(--mc-plate);border-color:#2e2f33}
+html[data-skin="missioncontrol"] .legend{font-family:var(--mono);color:var(--dim)}
+html[data-skin="missioncontrol"] .empty{color:var(--dim);font-family:var(--mono);font-style:normal;text-transform:uppercase;letter-spacing:.2em}
+
+/* ---- COMM LOOP: the event log as a teletype: uppercase, sprocket margin, paper-feed stripes, blinking cursor on the newest line ---- */
+html[data-skin="missioncontrol"] #events{position:relative;font-family:var(--mono);font-size:16px;line-height:2;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;font-weight:500;
+  padding:4px 16px 4px 44px;border:1px solid #000;border-radius:3px;
+  background:repeating-linear-gradient(180deg,#121314 0 32px,#171819 32px 64px);background-position:0 4px;
+  box-shadow:inset 0 0 0 1px #2a2b2e,inset 0 2px 8px #000}
+html[data-skin="missioncontrol"] #events::before{content:"";position:absolute;left:0;top:0;bottom:0;width:30px;border-right:1px dashed #2e2f33;
+  background:radial-gradient(circle,#000 0 3px,#2e2f33 3.5px,transparent 4.5px) 7px 4px/16px 32px repeat-y}
+html[data-skin="missioncontrol"] #events b{font-family:var(--disp);font-size:17px;letter-spacing:.06em;color:var(--acc);font-weight:400;margin-right:16px;text-shadow:none}
+html[data-skin="missioncontrol"] #events div:first-child{color:#f6ecd4}
+html[data-skin="missioncontrol"] #events div:first-child::after{content:"▮";margin-left:8px;color:var(--acc);animation:mc-blink .9s steps(2) infinite}
+
+/* ---- attract panel (the strip-chart recorder draws itself; this is only the frame) ---- */
+html[data-skin="missioncontrol"] #gallery{background:#17301f;border-color:#000}
+html[data-skin="missioncontrol"] #gallery .hud{font-family:var(--mono);color:var(--ink);text-shadow:none}
+html[data-skin="missioncontrol"] #gallery .hud b{color:var(--acc);text-shadow:none}
+html[data-skin="missioncontrol"] #simview{background:radial-gradient(ellipse at 20% 50%,#1b1c1e,#0e0f10 70%);font-family:var(--mono)}
+html[data-skin="missioncontrol"] #simview h3{font-family:var(--mono);color:var(--dim)}html[data-skin="missioncontrol"] #simview h3 span{color:var(--acc)}
+html[data-skin="missioncontrol"] #simview td.pct{color:var(--mc-readout)}html[data-skin="missioncontrol"] #simview .bar{background:var(--acc);box-shadow:none}
+
+/* ---- record modal: flight-plan card ---- */
+html[data-skin="missioncontrol"] #recmodal{background:rgba(10,10,11,.8)}
+html[data-skin="missioncontrol"] #recmodal form{border-radius:6px;border:1px solid #000;box-shadow:0 0 0 1px #2c2d30,inset 0 0 0 1px var(--mc-metal),inset 0 0 0 3px #1b1c1e,inset 0 0 0 4px #000,0 30px 80px rgba(0,0,0,.7)}
+html[data-skin="missioncontrol"] #recmodal h2{font-family:var(--mono);color:var(--ink);text-shadow:none;font-weight:600;font-size:14px;letter-spacing:.3em;background:var(--mc-plate);border:1px solid #000;padding:8px 12px;border-radius:3px}
+html[data-skin="missioncontrol"] #recmodal label{font-family:var(--mono);color:var(--dim)}
+html[data-skin="missioncontrol"] #recmodal input[type=text],html[data-skin="missioncontrol"] #recmodal input[type=number]{font-family:var(--mono);background:#090a0b;border:1px solid #000;border-radius:3px;box-shadow:inset 0 0 0 1px #2a2b2e;color:var(--ink)}
+html[data-skin="missioncontrol"] #recmodal input:focus{border-color:var(--acc)}
+html[data-skin="missioncontrol"] #recmodal .hint{font-family:var(--mono);font-size:12.5px}html[data-skin="missioncontrol"] #recmodal .hint b{color:var(--warn)}
+html[data-skin="missioncontrol"] #recmodal .btns button{font-family:var(--mono);border-radius:2px;border:1px solid #000;background:linear-gradient(180deg,#2c2d30,#1b1c1e);color:var(--dim);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 2px 0 #000}
+html[data-skin="missioncontrol"] #recmodal .btns button.go{background:var(--mc-nogo);color:var(--mc-nogo-ink);border-color:var(--mc-nogo-rim);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 2px 0 #000}
+
+/* ---- lock screen: CAPCOM AUTHORIZATION ---- */
+html[data-skin="missioncontrol"] #lockscreen{background:radial-gradient(ellipse at 50% 45%,#1e1f21 0%,#0c0c0d 72%);font-family:var(--mono)}
+html[data-skin="missioncontrol"] #lockscreen::before{content:"";position:absolute;inset:18px;pointer-events:none;border-radius:6px;box-shadow:inset 0 0 0 1px var(--mc-metal),inset 0 0 0 3px #1b1c1e,inset 0 0 0 4px #000}
+html[data-skin="missioncontrol"] #lockscreen .brand{top:34px;left:40px;font-family:var(--mono);font-size:17px;letter-spacing:.4em;color:var(--ink);text-shadow:none;background:var(--mc-plate);border:1px solid #000;border-radius:3px;padding:14px 20px 12px;box-shadow:inset 0 0 0 1px #2a2b2e,inset 0 2px 6px #000,0 1px 0 rgba(255,255,255,.05)}
+html[data-skin="missioncontrol"] #lockscreen .brand::before{content:"";display:inline-block;width:22px;height:11px;border-radius:2px;margin-right:14px;vertical-align:1px;background:var(--bad);box-shadow:0 0 12px var(--bad),inset 0 0 0 1px #000;animation:mc-blink 1.2s steps(2) infinite}
+html[data-skin="missioncontrol"] #lockscreen .brand small{font-family:var(--mono);color:var(--dim);letter-spacing:.3em;margin-top:10px}
+/* flex:0 — index.html's header rule h1{flex:1} also reaches this h1 and would stretch it to the full column, pushing .st to the bottom edge */
+html[data-skin="missioncontrol"] #lockscreen h1{flex:0 0 auto;font-family:var(--mono);font-size:38px;font-weight:600;letter-spacing:.3em;color:var(--ink);text-shadow:0 1px 0 #000}
+html[data-skin="missioncontrol"] #lockscreen .st{font-family:var(--disp);font-size:28px;letter-spacing:.3em;color:var(--warn);text-shadow:0 0 12px rgba(226,169,61,.4);background:#090a0b;border:1px solid #000;border-radius:3px;padding:8px 22px 6px;box-shadow:inset 0 0 0 1px #2a2b2e,inset 0 2px 6px #000;min-height:0}
+html[data-skin="missioncontrol"] #lockscreen.okay .st{color:var(--acc);text-shadow:0 0 12px rgba(141,191,122,.5)}
+html[data-skin="missioncontrol"] #lockscreen .hint{color:var(--dim);font-size:13px;letter-spacing:.3em}
+html[data-skin="missioncontrol"] #scanner .ring{stroke:#2e2f33;stroke-width:3}
+html[data-skin="missioncontrol"] #scanner .ticks{stroke:#5a5b55}
+html[data-skin="missioncontrol"] #scanner .arc{stroke:rgba(232,220,192,.3)}
+html[data-skin="missioncontrol"] #scanner .prog{stroke:var(--warn);filter:drop-shadow(0 0 8px var(--warn))}
+html[data-skin="missioncontrol"] #scanner.ok .prog,html[data-skin="missioncontrol"] #scanner.ok .eye{stroke:var(--acc);border-color:var(--acc);filter:drop-shadow(0 0 10px var(--acc))}
+html[data-skin="missioncontrol"] #scanner .feed{box-shadow:0 0 0 3px #2e2f33,0 0 0 5px #000,0 0 50px rgba(0,0,0,.9),inset 0 0 80px rgba(0,0,0,.8)}
+html[data-skin="missioncontrol"] #scanner .feed img{filter:grayscale(1) contrast(1.2) brightness(.85) sepia(.5)}
+html[data-skin="missioncontrol"] #scanner .feed .eye{border-color:var(--warn);box-shadow:0 0 10px var(--warn);border-radius:2px}
+html[data-skin="missioncontrol"] #scanner .feed .beam{background:linear-gradient(90deg,transparent,var(--ink),transparent);box-shadow:0 0 14px var(--ink)}
+html[data-skin="missioncontrol"] #scanner svg path{stroke:#4a4b4f}
+
+/* ---- landscape: nothing structural (index.html owns the grid); tighten the plates so headings stay single-line in four columns ---- */
+@media (orientation: landscape){
+  html[data-skin="missioncontrol"] .panel h2{letter-spacing:.22em;font-size:12px}
+  html[data-skin="missioncontrol"] .badge{font-size:26px;padding:16px 24px}
+}

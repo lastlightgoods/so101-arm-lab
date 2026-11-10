@@ -1,0 +1,201 @@
+{
+ "biases": {
+  "hover_nut": {
+   "shoulder_pan": -0.4290999999999966,
+   "shoulder_lift": -0.4641000000000026,
+   "elbow_flex": -3.395000000000003,
+   "wrist_flex": 0.08679999999999659,
+   "wrist_roll": 0.616
+  },
+  "grasp": {
+   "shoulder_pan": -0.4290999999999966,
+   "shoulder_lift": -0.21069999999999947,
+   "elbow_flex": -0.18479999999999455,
+   "wrist_flex": -0.18410000000000365,
+   "wrist_roll": 0.6159999999999999
+  },
+  "lift": {
+   "shoulder_pan": -0.4290999999999966,
+   "shoulder_lift": -4.146100000000002,
+   "elbow_flex": -3.3459999999999996,
+   "wrist_flex": 0.1497999999999991,
+   "wrist_roll": 0.784
+  },
+  "hover_tgt": {
+   "shoulder_pan": 0.13719999999999977,
+   "shoulder_lift": -1.4776999999999987,
+   "elbow_flex": -3.4411999999999994,
+   "wrist_flex": 0.21629999999999816,
+   "wrist_roll": 0.784
+  },
+  "place": {
+   "shoulder_pan": 0.13719999999999954,
+   "shoulder_lift": -0.2751000000000017,
+   "elbow_flex": -0.17290000000000116,
+   "wrist_flex": -0.15190000000000903,
+   "wrist_roll": 0.784
+  },
+  "lift2": {
+   "shoulder_pan": 0.1931999999999996,
+   "shoulder_lift": -4.242699999999999,
+   "elbow_flex": -3.3222000000000005,
+   "wrist_flex": 0.03430000000000463,
+   "wrist_roll": 0.784
+  },
+  "rest": {
+   "shoulder_pan": 0.553,
+   "shoulder_lift": -0.06300000000000239,
+   "elbow_flex": -0.21699999999999162,
+   "wrist_flex": -0.3710000000000008,
+   "wrist_roll": -0.5599999999999999
+  }
+ },
+ "place_offsets_in": {
+  "6.00,5.00": [
+   0.6,
+   0.6
+  ],
+  "9.00,6.00": [
+   0.21940038826201214,
+   0.07709881856490819
+  ]
+ },
+ "history": [
+  {
+   "run": 1,
+   "target_in": [
+    6.0,
+    5.0
+   ],
+   "nut_in": [
+    9.03,
+    6.51
+   ],
+   "picked": true,
+   "landed_in": [
+    6.29,
+    3.8
+   ],
+   "err_mm": 31.2,
+   "seconds": 18.3,
+   "sag_deg": {
+    "hover_nut": 3.17,
+    "grasp": 0.5,
+    "close": 0.0,
+    "lift": 4.58,
+    "hover_tgt": 4.07,
+    "place": 1.5,
+    "open": 0.0,
+    "lift2": 3.72,
+    "rest": 1.27
+   },
+   "place_offset_in": [
+    -0.143,
+    0.598
+   ],
+   "t": "00:03:18"
+  },
+  {
+   "run": 2,
+   "target_in": [
+    9.0,
+    6.0
+   ],
+   "nut_in": [
+    6.29,
+    3.8
+   ],
+   "picked": true,
+   "landed_in": [
+    9.4,
+    5.9
+   ],
+   "err_mm": 10.4,
+   "seconds": 18.2,
+   "sag_deg": {
+    "hover_nut": 1.07,
+    "grasp": 0.42,
+    "close": 0.0,
+    "lift": 0.99,
+    "hover_tgt": 3.25,
+    "place": 1.94,
+    "open": 0.0,
+    "lift2": 1.94,
+    "rest": 0.48
+   },
+   "place_offset_in": [
+    -0.198,
+    0.05
+   ],
+   "t": "00:03:37"
+  },
+  {
+   "run": 3,
+   "target_in": [
+    6.0,
+    5.0
+   ],
+   "nut_in": [
+    9.42,
+    5.9
+   ],
+   "picked": true,
+   "landed_in": [
+    4.5,
+    4.62
+   ],
+   "err_mm": 39.3,
+   "seconds": 18.4,
+   "sag_deg": {
+    "hover_nut": 1.02,
+    "grasp": 1.02,
+    "close": 0.0,
+    "lift": 1.07,
+    "hover_tgt": 1.29,
+    "place": 1.17,
+    "open": 0.0,
+    "lift2": 1.17,
+    "rest": 0.84
+   },
+   "place_offset_in": [
+    0.6,
+    0.6
+   ],
+   "t": "00:03:57"
+  },
+  {
+   "run": 4,
+   "target_in": [
+    9.0,
+    6.0
+   ],
+   "nut_in": [
+    4.5,
+    4.62
+   ],
+   "picked": true,
+   "landed_in": [
+    8.17,
+    5.94
+   ],
+   "err_mm": 21.2,
+   "seconds": 18.2,
+   "sag_deg": {
+    "hover_nut": 0.97,
+    "grasp": 0.97,
+    "close": 0.0,
+    "lift": 0.97,
+    "hover_tgt": 1.56,
+    "place": 0.91,
+    "open": 0.0,
+    "lift2": 0.99,
+    "rest": 0.84
+   },
+   "place_offset_in": [
+    0.219,
+    0.077
+   ],
+   "t": "00:04:16"
+  }
+ ]
+}

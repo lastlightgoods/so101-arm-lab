@@ -1,0 +1,17 @@
+# SO-101 cameras: re-apply the frozen exposure / white balance / focus (~/so101/calib/cam_settings.json) whenever a camera
+# appears, at boot or after a USB re-plug. See docs/camera-settings.md.
+#
+# Install (as TC, needs sudo):
+#   sudo install -m 644 ~/so101/99-so101-cams.rules /etc/udev/rules.d/99-so101-cams.rules
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger --subsystem-match=video4linux --action=add     # fires the rule for the cameras plugged in now
+#
+# Only the capture node triggers (video-index0; the index1 node is UVC metadata and has no ":capture:" capability).
+# udev kills RUN+= programs after a few seconds and the camera is not always ready to take controls the instant its node
+# exists, so the work is handed to a transient systemd unit that starts 3 s later (runs as root, stdlib only, no frame
+# check; output in the journal: journalctl --since -5min | grep cam_lock). The resident guard (so101-cam-lock.service)
+# would catch the re-plug too; this is the fast path.
+# Logitech C920 (top, front)
+ACTION=="add", SUBSYSTEM=="video4linux", ENV{ID_V4L_CAPABILITIES}=="*:capture:*", ATTRS{idVendor}=="046d", ATTRS{idProduct}=="08e5", RUN+="/usr/bin/systemd-run --no-block --collect --on-active=3 --unit=so101-cam-lock-%k-$env{SEQNUM} /usr/bin/python3 /home/tc/so101/cam_lock.py apply --only %k"
+# icSpring wrist camera
+ACTION=="add", SUBSYSTEM=="video4linux", ENV{ID_V4L_CAPABILITIES}=="*:capture:*", ATTRS{idVendor}=="32e6", ATTRS{idProduct}=="9005", RUN+="/usr/bin/systemd-run --no-block --collect --on-active=3 --unit=so101-cam-lock-%k-$env{SEQNUM} /usr/bin/python3 /home/tc/so101/cam_lock.py apply --only %k"

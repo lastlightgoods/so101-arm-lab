@@ -1,0 +1,39 @@
+# environments and caches
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.DS_Store
+# big or generated: training runs, downloaded checkpoints, JetPack images, logs
+outputs/
+policies_hub/
+policies/
+jetson/*.zip
+jetson/*.img
+*.log
+# dashboard runtime artefacts (gallery frames are extracted from datasets; beats are synthesized by beat.py)
+dashboard/img/
+dashboard/beat_*.wav
+dashboard/events.log
+dashboard/index.pre_*.html
+# local-only files
+poses.json
+# simulation: third-party wrapper clone and generated sim datasets
+sim/so101-lerobot/
+sim/data/
+sim/rollouts/
+films/
+mlflow/
+# session backups made by Claude before edits
+*.pre_*.py
+# mlflow local store
+mlruns/
+# Claude Code agent worktrees
+.claude/
+# packaging metadata and local secrets
+*.egg-info/
+dashboard/.phone_token
+
+site/.wrangler/
+site/node_modules/
+.wrangler/

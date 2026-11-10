@@ -1,0 +1,191 @@
+/* NOSTROMO skin: the ship's computer. Near-black with a green cast, phosphor ink, warm white for the few
+   highlights, red only for END / STOP (and the recording lamp). Monospace throughout, CRT scanlines, text glow,
+   typewriter reveal on panel headings, Semiotic-Standard style glyphs on panel headers, wireframe 3D arm.
+   Everything is scoped under html[data-skin="nostromo"]; see README.md for the contract. */
+@import url('https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&display=swap');
+
+html[data-skin="nostromo"]{
+  --bg:#030603;
+  --panel:linear-gradient(180deg,rgba(6,16,8,.94),rgba(2,6,3,.97));
+  --line:#2a6b30;
+  --rim:rgba(156,255,156,.07);
+  --ink:#9cff9c;
+  --dim:#3f8f3f;
+  --acc:#9cff9c;
+  --acc2:#efe6c8;              /* warm white: sparklines, scan ring, pause */
+  --warn:#efe6c8;              /* mid-range gauge heat is the warm white, never amber */
+  --bad:#ff3b30;               /* END / STOP / fault */
+  --font:"Share Tech Mono","SF Mono",Menlo,monospace;
+  --mono:"Share Tech Mono","SF Mono",Menlo,monospace;
+  --disp:"VT323","Share Tech Mono",monospace;
+  --glow:0 0 12px rgba(156,255,156,.45);
+  --nos-glyph-font:"Share Tech Mono","Apple Symbols","Segoe UI Symbol",monospace;
+}
+/* ---- CRT: green cast under everything, scanlines + vignette over everything (pointer-events none) ---- */
+html[data-skin="nostromo"] body{background:var(--bg);text-shadow:0 0 6px rgba(156,255,156,.28)}
+html[data-skin="nostromo"] body::before{background:radial-gradient(ellipse at 50% 40%,rgba(60,160,70,.10),transparent 60%),radial-gradient(ellipse at 50% 100%,rgba(30,90,40,.10),transparent 55%);z-index:0}
+html[data-skin="nostromo"] body::after,html[data-skin="nostromo"] #lockscreen::after,html[data-skin="nostromo"] #recmodal::after{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:3;mix-blend-mode:normal;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.30) 0 1px,transparent 1px 3px),radial-gradient(ellipse at 50% 50%,transparent 58%,rgba(0,0,0,.62) 100%);
+}
+html[data-skin="nostromo"] #lockscreen::after,html[data-skin="nostromo"] #recmodal::after{position:absolute;z-index:5}
+/* ---- type ---- */
+html[data-skin="nostromo"] h1{font-family:var(--disp);font-size:62px;letter-spacing:.14em;color:#efe6c8;text-shadow:0 0 18px rgba(239,230,200,.35),0 0 2px rgba(239,230,200,.6)}
+html[data-skin="nostromo"] h1 small{font-family:var(--mono);font-size:14px;letter-spacing:.36em;color:var(--acc);text-shadow:var(--glow)}
+html[data-skin="nostromo"] h1 em{font-family:var(--mono);font-size:13px;letter-spacing:.22em;color:var(--dim)}
+html[data-skin="nostromo"] #deck.playing~h1 em{color:var(--acc);text-shadow:var(--glow)}
+html[data-skin="nostromo"] #clock{font-family:var(--disp);font-size:54px;letter-spacing:.06em;color:var(--acc);text-shadow:var(--glow)}
+html[data-skin="nostromo"] #clock small{font-family:var(--mono);font-size:13px;color:var(--dim)}
+html[data-skin="nostromo"] #clock small.sp i{color:var(--acc)}
+html[data-skin="nostromo"] header{border-bottom:1px solid var(--line);box-shadow:0 1px 0 var(--rim),0 6px 20px -8px rgba(60,160,70,.25)}
+html[data-skin="nostromo"] #platter{background:#040804;box-shadow:0 0 0 3px #0e2a12,0 0 0 4px #000,0 0 0 9px #061008,0 0 0 10px var(--line),0 14px 30px rgba(0,0,0,.75)}
+html[data-skin="nostromo"] #vinyl{background:repeating-radial-gradient(circle at 50% 50%,#040804 0 1.2px,#0d2410 1.2px 2.6px)}
+html[data-skin="nostromo"] #label{background:radial-gradient(circle,#040804 0 2.5px,#0d2410 3px 4px,var(--acc) 4.5px);color:#03140a}
+html[data-skin="nostromo"] #arm{background:radial-gradient(circle,#2a5a30 0 5px,#122a16 6px);box-shadow:0 0 0 2px #000}
+html[data-skin="nostromo"] #arm i{background:linear-gradient(90deg,#5f9a63,#bfe9bf 45%,#3f7a43)}
+html[data-skin="nostromo"] #arm i::after{background:linear-gradient(#1d3a22,#071009)}
+html[data-skin="nostromo"] #strobe{background:#0d2410}
+/* ---- panels: rounded, 1px phosphor border, faint inner glow ---- */
+html[data-skin="nostromo"] .panel{border-radius:10px;border:1px solid var(--line);box-shadow:inset 0 0 0 1px rgba(156,255,156,.04),inset 0 0 40px rgba(20,70,25,.18),0 0 18px rgba(40,140,50,.10)}
+html[data-skin="nostromo"] .panel h2{font-family:var(--mono);font-size:13px;letter-spacing:.28em;color:var(--acc);text-shadow:var(--glow);justify-content:flex-start;align-items:center;gap:0}
+html[data-skin="nostromo"] .panel h2 span{margin-left:auto;color:var(--dim);text-shadow:none;letter-spacing:.14em;font-size:12px}
+/* Semiotic-Standard style glyph: a framed square with one simple sign per panel */
+html[data-skin="nostromo"] .panel h2::before,html[data-skin="nostromo"] .termbar>span:first-child::before{
+  content:"";display:inline-flex;align-items:center;justify-content:center;flex:none;width:20px;height:20px;margin-right:12px;
+  border:1px solid var(--acc);border-radius:3px;font:14px/1 var(--nos-glyph-font);color:var(--acc);text-shadow:var(--glow);letter-spacing:0;box-shadow:0 0 8px rgba(156,255,156,.25)}
+html[data-skin="nostromo"] #statusp h2::before{content:"◎"}                                      /* status: eye of the ship */
+html[data-skin="nostromo"] #jetsonp h2::before{content:"▣"}                                      /* core processor */
+html[data-skin="nostromo"] #armp h2::before{content:"⌖"}                                         /* manipulator */
+html[data-skin="nostromo"] .rightcol .panel:nth-child(1) h2::before{content:"◭"}                 /* training */
+html[data-skin="nostromo"] .rightcol .panel:nth-child(2) h2::before{content:"▦"}                 /* data stores */
+html[data-skin="nostromo"] .rightcol .panel:nth-child(3) h2::before{content:"◈"}                 /* protocols */
+html[data-skin="nostromo"] main>.panel.wide:last-child h2::before{content:"≡"}                   /* ship log */
+html[data-skin="nostromo"] #term .termbar>span:first-child::before{content:"▤";margin-right:10px} /* terminal */
+html[data-skin="nostromo"] #shell .termbar>span:first-child::before{content:"▥";margin-right:10px}/* shell */
+html[data-skin="nostromo"] .termbar{font-family:var(--mono);letter-spacing:.28em;color:var(--acc);display:flex;align-items:center;background:linear-gradient(180deg,rgba(156,255,156,.05),transparent)}
+html[data-skin="nostromo"] .termbar>span:first-child{display:inline-flex;align-items:center}
+html[data-skin="nostromo"] .termbar .dim{color:var(--dim)}
+/* typewriter reveal on the panel headings; nostromo.js toggles .nos-type on <html> in apply() to re-run it and sets --i per heading */
+@keyframes nos-type{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+@keyframes nos-caret{0%,49%{opacity:1}50%,100%{opacity:0}}
+html[data-skin="nostromo"].nos-type .panel h2,html[data-skin="nostromo"].nos-type .termbar{animation:nos-type .8s steps(24,end) both;animation-delay:calc(var(--i,0)*.09s)}
+/* ---- status ---- */
+html[data-skin="nostromo"] .badge{font-family:var(--disp);font-size:34px;letter-spacing:.12em;padding:12px 26px;border-radius:6px;background:linear-gradient(180deg,#0a1f0d,#061108);color:var(--acc);border:1px solid var(--line);box-shadow:inset 0 0 0 1px rgba(156,255,156,.05),var(--glow)}
+html[data-skin="nostromo"] .badge.hot{background:linear-gradient(180deg,#10351a,#071a0b);color:#efe6c8;border-color:var(--acc);box-shadow:0 0 22px rgba(156,255,156,.35)}
+html[data-skin="nostromo"] .badge.off{background:linear-gradient(180deg,#1a0806,#0d0403);color:var(--bad);border-color:#5a1d16;box-shadow:none}
+html[data-skin="nostromo"] #status .meta{font-size:17px;color:var(--dim)}
+html[data-skin="nostromo"] #status .meta b{color:var(--acc);font-weight:400}
+/* ---- gauges: values in the big terminal face so they read at 3 m ---- */
+html[data-skin="nostromo"] .g .v{font-family:var(--disp);font-size:44px;letter-spacing:.02em;color:#efe6c8;text-shadow:0 0 14px rgba(239,230,200,.35);margin-top:-62px}
+html[data-skin="nostromo"] .g .l{font-size:12px;letter-spacing:.28em;color:var(--dim);margin-top:30px}
+html[data-skin="nostromo"] body.compact .g .v{font-size:34px;margin-top:-48px}
+html[data-skin="nostromo"] .cores div{background:linear-gradient(180deg,var(--acc),#2f7a35);box-shadow:0 0 8px rgba(156,255,156,.35);border-radius:1px}
+/* ---- feeds ---- */
+html[data-skin="nostromo"] #live{border-radius:10px}
+html[data-skin="nostromo"] .feed img{filter:sepia(1) hue-rotate(60deg) saturate(1.8) brightness(.9) contrast(1.1)}
+html[data-skin="nostromo"] .feed span{font-family:var(--mono);color:var(--acc);background:rgba(2,8,3,.72);border:1px solid var(--line);border-radius:3px;text-shadow:var(--glow)}
+html[data-skin="nostromo"] .feed span::before{content:"◫";width:auto;height:auto;border-radius:0;background:none;animation:none;font:13px/1 var(--nos-glyph-font);margin-right:8px;vertical-align:-1px}
+/* ---- terminal + shell ---- */
+html[data-skin="nostromo"] #term,html[data-skin="nostromo"] #shell{background:#020502!important}
+html[data-skin="nostromo"] #termframe{background:#020502}
+html[data-skin="nostromo"] #shellbody{font-size:13px}
+html[data-skin="nostromo"] .sc .d{color:var(--acc);font-weight:400}
+html[data-skin="nostromo"] .sc .d i{color:var(--dim)}
+html[data-skin="nostromo"] .sc .c{color:#efe6c8}
+html[data-skin="nostromo"] .sc .c::before{color:var(--acc)}
+html[data-skin="nostromo"] .sc .o{color:var(--dim);border-left:2px solid var(--line)}
+html[data-skin="nostromo"] .sc.run .d::after{color:var(--acc)}
+/* ---- arm panel: the deck ---- */
+html[data-skin="nostromo"] .modes .grp{border-radius:5px;background:linear-gradient(180deg,rgba(3,9,4,.9),rgba(6,16,8,.9));border-color:var(--line)}
+html[data-skin="nostromo"] .modes .grp::before{color:var(--dim)}
+html[data-skin="nostromo"] .modes button{border-radius:3px;background:rgba(3,9,4,.85);color:var(--dim);border-color:#1b4a20}
+html[data-skin="nostromo"] .modes button::before{background:#123a17}
+html[data-skin="nostromo"] .modes button:hover{color:var(--acc);border-color:var(--acc)}
+html[data-skin="nostromo"] .modes button.on{color:#efe6c8;border-color:var(--acc);background:linear-gradient(180deg,#10351a,#071a0b);text-shadow:var(--glow)}
+html[data-skin="nostromo"] .modes button.on::before{background:var(--acc);box-shadow:0 0 8px var(--acc)}
+html[data-skin="nostromo"] .modes button.stop{color:var(--bad);border-color:#6a1a14}
+html[data-skin="nostromo"] .modes button.stop:hover{background:#2a0806}
+html[data-skin="nostromo"] .transport .rec{border-radius:4px;color:var(--acc);background:linear-gradient(180deg,#0a1f0d,#061108);border:1px solid var(--line)}
+html[data-skin="nostromo"] .transport .rec:hover{background:#10351a;border-color:var(--acc)}
+html[data-skin="nostromo"] #recidle{border:1px dashed #1b4a20;border-radius:4px;color:var(--dim)}
+html[data-skin="nostromo"] #recidle .dot{background:#0d2410;box-shadow:inset 0 0 0 1px #1b4a20}
+html[data-skin="nostromo"] #recstrip{border:1px solid var(--line);border-radius:4px;background:rgba(10,31,13,.5);color:var(--acc)}
+html[data-skin="nostromo"] #recstrip .bar{background:#0a150b}
+html[data-skin="nostromo"] #recstrip .bar i{background:var(--acc);box-shadow:0 0 8px var(--acc)}
+html[data-skin="nostromo"] #recstrip.reset .bar i{background:#efe6c8}
+html[data-skin="nostromo"] #recstrip button{border-radius:3px;color:var(--acc);border-color:var(--line)}
+html[data-skin="nostromo"] #recstrip #recnext,html[data-skin="nostromo"] #recstrip #recredo{color:var(--acc);border-color:var(--line)}
+html[data-skin="nostromo"] #recstrip #recpause{color:#efe6c8;border-color:#5a5440}
+html[data-skin="nostromo"] #recstrip #recstop{color:var(--bad);border-color:#6a1a14}      /* END stays red */
+html[data-skin="nostromo"] #arm3d{border-radius:6px;background:radial-gradient(ellipse at 50% 80%,#07140a,#020502 70%);
+  /* the three.js materials are out of CSS reach, so the whole viewport is pushed to green monochrome; nostromo.js
+     additionally hides the robot faces so only the edge lines remain (true wireframe) when window.__scene is exposed */
+  filter:sepia(1) hue-rotate(58deg) saturate(2.4) brightness(.95) contrast(1.15)}
+html[data-skin="nostromo"] .armctl button{border-radius:3px;background:rgba(2,6,3,.85);color:var(--dim);border-color:#1b4a20}
+html[data-skin="nostromo"] .armctl button:hover{color:var(--acc);border-color:var(--acc)}
+html[data-skin="nostromo"] .armctl button.on{color:#efe6c8;border-color:var(--acc);background:#0a1f0d;text-shadow:var(--glow)}
+html[data-skin="nostromo"] .armhint{color:var(--dim);opacity:.7}
+html[data-skin="nostromo"] #joints td.num{color:var(--acc);font-size:17px}
+html[data-skin="nostromo"] #joints td.num:nth-child(3){color:#efe6c8!important}              /* leader column is inline-styled cyan in index.html */
+/* ---- tables, bars, tags ---- */
+html[data-skin="nostromo"] table{font-size:17px}
+html[data-skin="nostromo"] td,html[data-skin="nostromo"] th{border-bottom:1px solid #123a17}
+html[data-skin="nostromo"] th{color:var(--dim);font-weight:400;letter-spacing:.24em}
+html[data-skin="nostromo"] td.num{color:#efe6c8}
+html[data-skin="nostromo"] .bar{background:#0a150b;border-radius:1px}
+html[data-skin="nostromo"] .bar i{background:linear-gradient(90deg,#2f7a35,var(--acc));box-shadow:0 0 8px rgba(156,255,156,.35)}
+html[data-skin="nostromo"] .tag{border-radius:2px;background:#071a0b;color:var(--dim);border:1px solid #1b4a20;font-family:var(--mono)}
+html[data-skin="nostromo"] .tag.jetson{color:var(--acc);background:#0a1f0d;border-color:var(--line)}
+html[data-skin="nostromo"] .tag.mac{color:#efe6c8;background:#0f120a;border-color:#4a4830}
+html[data-skin="nostromo"] .legend{color:var(--dim)}
+/* loss chart lines keep their six-colour palette on the canvas; pull them toward phosphor without merging them */
+html[data-skin="nostromo"] canvas.chart,html[data-skin="nostromo"] .legend i{filter:sepia(.7) hue-rotate(50deg) saturate(1.5) brightness(1.05)}
+/* ---- events: a log printout ---- */
+html[data-skin="nostromo"] #events{font-size:16px;line-height:1.85;color:var(--dim)}
+html[data-skin="nostromo"] #events b{color:var(--acc);font-weight:400;text-shadow:var(--glow)}
+html[data-skin="nostromo"] #events b::before{content:"> ";color:var(--dim);text-shadow:none}
+html[data-skin="nostromo"] #events div:first-child{color:#efe6c8}
+html[data-skin="nostromo"] .empty{color:var(--dim)}
+/* ---- attract panel ---- */
+html[data-skin="nostromo"] #gallery{border:1px solid var(--line);border-radius:10px;background:#020502}
+html[data-skin="nostromo"] #simview{background:radial-gradient(ellipse at 20% 50%,#07140a,#020502 70%)}
+html[data-skin="nostromo"] #simview .simgif img{border-color:var(--line);background:#020502}
+html[data-skin="nostromo"] #simview h3 span,html[data-skin="nostromo"] #simview .simstat .run{color:var(--acc)}
+html[data-skin="nostromo"] #simview td,html[data-skin="nostromo"] #simview th{border-bottom:1px solid #123a17}
+html[data-skin="nostromo"] #simview .bar{background:var(--acc);box-shadow:0 0 8px var(--acc)}
+html[data-skin="nostromo"] #gallery .hud button{background:rgba(2,6,3,.85);border-color:#1b4a20;color:var(--dim)}
+/* ---- lock screen: MOTHER asks for clearance ---- */
+html[data-skin="nostromo"] #lockscreen{background:radial-gradient(ellipse at 50% 45%,#07140a 0%,#010301 70%);font-family:var(--mono)}
+html[data-skin="nostromo"] #lockscreen .brand{font-family:var(--disp);font-size:30px;letter-spacing:.3em;color:var(--acc);text-shadow:var(--glow)}
+html[data-skin="nostromo"] #lockscreen .brand::before{content:"> ";color:var(--dim)}
+html[data-skin="nostromo"] #lockscreen .brand small{font-family:var(--mono);font-size:12px;letter-spacing:.3em;color:var(--dim);margin-top:4px}
+html[data-skin="nostromo"] #lockscreen h1{font-family:var(--disp);font-size:58px;letter-spacing:.16em;color:#efe6c8;text-shadow:0 0 30px rgba(156,255,156,.3);flex:0 0 auto}   /* index.html's header h1{flex:1} leaks in here and shoves the status line to the bottom edge */
+html[data-skin="nostromo"] #lockscreen .st{font-family:var(--mono);font-size:22px;letter-spacing:.26em;color:var(--acc);text-shadow:var(--glow)}
+html[data-skin="nostromo"] #lockscreen .st::before{content:"> ";color:var(--dim);text-shadow:none}
+html[data-skin="nostromo"] #lockscreen .st::after{content:"▮";margin-left:6px;animation:nos-caret 1s steps(1) infinite}
+html[data-skin="nostromo"] #lockscreen.okay .st{color:#efe6c8;text-shadow:0 0 16px rgba(239,230,200,.5)}
+html[data-skin="nostromo"] #lockscreen .hint{font-family:var(--mono);color:var(--dim);letter-spacing:.24em}
+html[data-skin="nostromo"] #scanner .feed{box-shadow:0 0 0 2px #0e2a12,0 0 60px rgba(156,255,156,.14),inset 0 0 80px rgba(0,0,0,.8)}
+html[data-skin="nostromo"] #scanner .feed img{filter:grayscale(1) sepia(1) hue-rotate(60deg) saturate(2.4) brightness(.8) contrast(1.3)}
+html[data-skin="nostromo"] #scanner .feed .eye{border-color:var(--acc);box-shadow:0 0 14px var(--acc)}
+html[data-skin="nostromo"] #scanner .feed .beam{background:linear-gradient(90deg,transparent,var(--acc),transparent);box-shadow:0 0 18px var(--acc)}
+html[data-skin="nostromo"] #scanner .ring{stroke:#123a17}
+html[data-skin="nostromo"] #scanner .ticks{stroke:#2a6b30}
+html[data-skin="nostromo"] #scanner svg path{stroke:#2a6b30}
+html[data-skin="nostromo"] #scanner .prog{stroke:var(--acc);filter:drop-shadow(0 0 10px var(--acc))}
+html[data-skin="nostromo"] #scanner .arc{stroke:rgba(156,255,156,.35)}
+html[data-skin="nostromo"] #scanner.ok .prog,html[data-skin="nostromo"] #scanner.ok .eye{stroke:#efe6c8;border-color:#efe6c8;filter:drop-shadow(0 0 14px #efe6c8)}
+/* ---- lock button, keys, record modal ---- */
+html[data-skin="nostromo"] kbd.key{color:var(--dim);border-color:#1b4a20;border-radius:2px}
+html[data-skin="nostromo"] #lockbtn{border-radius:3px;border-color:var(--line);color:var(--dim)}
+html[data-skin="nostromo"] #lockbtn:hover{color:var(--acc);border-color:var(--acc)}
+html[data-skin="nostromo"] #clock small.sp button{border-radius:3px;color:var(--acc);border-color:var(--line)}
+html[data-skin="nostromo"] #recmodal{background:rgba(1,3,1,.8)}
+html[data-skin="nostromo"] #recmodal form{border-radius:10px;border:1px solid var(--line);box-shadow:0 30px 80px rgba(0,0,0,.7),0 0 30px rgba(40,140,50,.15)}
+html[data-skin="nostromo"] #recmodal h2{font-family:var(--disp);font-size:30px;color:var(--acc)}
+html[data-skin="nostromo"] #recmodal h2::before{content:"> ";color:var(--dim)}
+html[data-skin="nostromo"] #recmodal input[type=text],html[data-skin="nostromo"] #recmodal input[type=number]{font-family:var(--mono);background:#020502;border-color:var(--line);border-radius:3px;color:#efe6c8}
+html[data-skin="nostromo"] #recmodal input:focus{border-color:var(--acc);box-shadow:var(--glow)}
+html[data-skin="nostromo"] #recmodal .hint b{color:#efe6c8}
+html[data-skin="nostromo"] #recmodal .btns button{border-radius:3px;border-color:var(--line);color:var(--dim)}
+html[data-skin="nostromo"] #recmodal .btns button.go{color:#020502;background:var(--acc);border-color:var(--acc);box-shadow:var(--glow)}

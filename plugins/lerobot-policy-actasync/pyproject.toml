@@ -1,0 +1,10 @@
+[project]
+name = "lerobot_policy_actasync"
+version = "0.1.0"
+description = "Let LeRobot's async (rtc) inference engine drive an ACT policy: accept the RTC call shape, ignore the prefix (plain background chunking)."
+requires-python = ">=3.10"
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+[tool.setuptools.packages.find]
+include = ["lerobot_policy_actasync*"]

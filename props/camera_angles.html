@@ -1,0 +1,188 @@
+<title>SO-101 Camera Angles</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* layout: one column of two to-scale drawings (plan, elevation) with a spec table; dark-first, the lab dashboard's amber/cyan */
+:root{--bg:#07090d;--panel:#0f131a;--line:#273040;--fg:#eef0f3;--dim:#8d94a0;--amber:#ffb347;--cyan:#4fd6ff;--green:#7cff6b;--red:#ff5a5f;--mat:#2a2d31;--matline:rgba(220,225,230,.22);--wood:#3b2a19;
+ --font:"Rajdhani","SF Pro Display",system-ui,sans-serif;--mono:"JetBrains Mono","SF Mono",Menlo,monospace;color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f4f3ef;--panel:#ffffff;--line:#d7d9de;--fg:#161a21;--dim:#5e6671;--amber:#b86a00;--cyan:#0a7fa8;--green:#2a8f1c;--red:#c62b32;--mat:#cfd3d8;--matline:rgba(40,50,60,.35);--wood:#d9c3a3;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f4f3ef;--panel:#ffffff;--line:#d7d9de;--fg:#161a21;--dim:#5e6671;--amber:#b86a00;--cyan:#0a7fa8;--green:#2a8f1c;--red:#c62b32;--mat:#cfd3d8;--matline:rgba(40,50,60,.35);--wood:#d9c3a3;color-scheme:light}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:17px;line-height:1.45;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 48px}
+main{max-width:900px;margin:0 auto;display:grid;gap:26px}
+h1{font-size:34px;letter-spacing:.14em;font-weight:700;margin:0;text-wrap:balance}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.3em;color:var(--amber);text-transform:uppercase;margin-bottom:8px}
+p{max-width:65ch;margin:0;color:var(--fg)}
+.lead{font-size:19px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;min-width:0}
+section h2{font-family:var(--mono);font-size:12px;letter-spacing:.3em;color:var(--dim);font-weight:600;margin:0 0 10px;text-transform:uppercase}
+.fig{overflow-x:auto}
+svg{display:block;width:100%;height:auto;max-width:100%;font-family:var(--mono)}
+.key{display:flex;flex-wrap:wrap;gap:10px 22px;font-family:var(--mono);font-size:12.5px;color:var(--dim);margin-top:10px}
+.key span::before{content:"";display:inline-block;width:14px;height:3px;margin-right:8px;vertical-align:middle;background:var(--c)}
+table{border-collapse:collapse;width:100%;font-size:15px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--dim);font-weight:600;text-transform:uppercase}
+td b{color:var(--amber)}td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tag{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;padding:3px 7px;border-radius:4px;border:1px solid var(--line);color:var(--dim);margin-left:6px;vertical-align:1px}
+.tag.have{color:var(--green);border-color:var(--green)}.tag.add{color:var(--amber);border-color:var(--amber)}.tag.opt{color:var(--cyan);border-color:var(--cyan)}
+ul{margin:0;padding-left:20px;max-width:65ch}li{margin:4px 0}
+@media (max-width:520px){body{font-size:16px}h1{font-size:26px}section{padding:14px}}
+</style>
+
+<main>
+ <div>
+  <div class="eyebrow">Lastlight Robotics · Arm Lab</div>
+  <h1>SO-101 CAMERA ANGLES</h1>
+  <p class="lead" style="margin-top:10px">Three views are the sweet spot for this arm: the wrist camera you have, the overhead you have, and one front-angled camera to add. Both drawings are to scale on the 24 × 18 in cutting mat.</p>
+ </div>
+
+ <section>
+  <h2>Plan view · looking down on the mat</h2>
+  <div class="fig">
+  <svg viewBox="0 0 900 560" role="img" aria-label="Plan view of the mat with the arm base at the near edge and the three camera positions">
+   <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--dim)"/></marker>
+    <pattern id="grid" width="20.3" height="20.3" patternUnits="userSpaceOnUse"><path d="M20.3 0H0V20.3" fill="none" stroke="var(--matline)" stroke-width="1"/></pattern>
+   </defs>
+   <!-- table -->
+   <rect x="40" y="30" width="820" height="500" rx="10" fill="var(--wood)" opacity=".45"/>
+   <!-- mat: 610 x 457 mm at 0.8 px/mm = 488 x 366 ; arm base centred on the top (near) edge -->
+   <g transform="translate(206 90)">
+    <rect x="0" y="0" width="488" height="366" fill="var(--mat)" stroke="var(--amber)" stroke-width="2"/>
+    <rect x="0" y="0" width="488" height="366" fill="url(#grid)"/>
+    <rect x="183" y="122" width="122" height="122" fill="none" stroke="var(--fg)" stroke-width="5" opacity=".8"/>
+    <rect x="122" y="61" width="244" height="244" fill="none" stroke="var(--fg)" stroke-width="5" opacity=".8"/>
+    <!-- arm base and reach -->
+    <rect x="212" y="-46" width="64" height="52" rx="6" fill="var(--panel)" stroke="var(--amber)" stroke-width="2"/>
+    <text x="244" y="-14" text-anchor="middle" font-size="11" fill="var(--amber)" font-weight="600">BASE</text>
+    <path d="M244 6 A264 264 0 0 1 244 6" fill="none"/>
+    <path d="M-20 6 A264 264 0 0 0 508 6" fill="none" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="6 6" opacity=".7"/>
+    <text x="244" y="290" text-anchor="middle" font-size="11" fill="var(--amber)" opacity=".9">reach limit ≈ 330 mm (13 in)</text>
+    <!-- work zone -->
+    <rect x="130" y="40" width="228" height="200" rx="6" fill="var(--cyan)" opacity=".10" stroke="var(--cyan)" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="244" y="150" text-anchor="middle" font-size="12" fill="var(--cyan)" font-weight="600">OBJECT ZONE</text>
+    <text x="244" y="166" text-anchor="middle" font-size="10.5" fill="var(--cyan)">place things here, randomize within it</text>
+    <!-- handoff / target zone at the far edge -->
+    <rect x="200" y="300" width="88" height="60" rx="6" fill="none" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <text x="244" y="336" text-anchor="middle" font-size="10.5" fill="var(--amber)">TARGET / HANDOFF</text>
+   </g>
+   <!-- overhead camera: centred over the mat -->
+   <g>
+    <circle cx="450" cy="273" r="13" fill="none" stroke="var(--cyan)" stroke-width="2.5"/>
+    <circle cx="450" cy="273" r="4" fill="var(--cyan)"/>
+    <text x="470" y="262" font-size="12" fill="var(--cyan)" font-weight="600">① OVERHEAD · have</text>
+    <text x="470" y="278" font-size="10.5" fill="var(--cyan)">620 mm (24 in) above the mat centre, straight down</text>
+   </g>
+   <!-- front-angled camera: far side, beyond the mat, looking back -->
+   <g>
+    <path d="M450 500 L300 300 M450 500 L600 300" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="5 4" opacity=".8"/>
+    <path d="M300 300 Q450 265 600 300" fill="none" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="5 4" opacity=".8"/>
+    <rect x="432" y="488" width="36" height="24" rx="4" fill="var(--panel)" stroke="var(--amber)" stroke-width="2.5"/>
+    <rect x="462" y="494" width="8" height="12" fill="var(--amber)"/>
+    <text x="450" y="534" text-anchor="middle" font-size="12" fill="var(--amber)" font-weight="600">② FRONT-ANGLED · add</text>
+    <text x="450" y="549" text-anchor="middle" font-size="10.5" fill="var(--amber)">300 mm (12 in) beyond the far edge, 400 mm (16 in) high, aimed at the mat centre</text>
+   </g>
+   <!-- wrist camera: mounted on the RIGHT side of the gripper as seen from the front of the mat, looking down the fingers -->
+   <g>
+    <circle cx="450" cy="200" r="9" fill="var(--panel)" stroke="var(--amber)" stroke-width="2"/>
+    <text x="450" y="187" text-anchor="middle" font-size="9.5" fill="var(--amber)">GRIPPER</text>
+    <rect x="408" y="194" width="18" height="12" rx="3" fill="var(--panel)" stroke="var(--green)" stroke-width="2"/>
+    <path d="M417 206 L402 262 L462 246 Z" fill="var(--green)" fill-opacity=".10" stroke="var(--green)" stroke-width="1.5" opacity=".9"/>
+    <text x="400" y="186" text-anchor="end" font-size="12" fill="var(--green)" font-weight="600">③ WRIST · have</text>
+    <text x="400" y="201" text-anchor="end" font-size="10.5" fill="var(--green)">on the left side of the arm as you face it from the front,</text>
+    <text x="400" y="215" text-anchor="end" font-size="10.5" fill="var(--green)">tilted 24° down the fingers; footprint lands at the tips</text>
+   </g>
+   <!-- optional low side camera for the plug task -->
+   <g>
+    <rect x="96" y="262" width="26" height="20" rx="4" fill="var(--panel)" stroke="var(--red)" stroke-width="2" stroke-dasharray="3 3"/>
+    <path d="M122 272 L206 272" stroke="var(--red)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#ah)"/>
+    <text x="109" y="300" text-anchor="middle" font-size="11" fill="var(--red)" font-weight="600">④ LOW SIDE</text>
+    <text x="109" y="314" text-anchor="middle" font-size="10" fill="var(--red)">plug task only</text>
+   </g>
+   <!-- dimensions -->
+   <g stroke="var(--dim)" stroke-width="1" fill="var(--dim)" font-size="11">
+    <line x1="206" y1="470" x2="694" y2="470" marker-start="url(#ah)" marker-end="url(#ah)"/><text x="450" y="486" text-anchor="middle" stroke="none">610 mm · 24 in</text>
+    <line x1="726" y1="90" x2="726" y2="456" marker-start="url(#ah)" marker-end="url(#ah)"/><text x="740" y="278" stroke="none">457 mm · 18 in</text>
+   </g>
+  </svg>
+  </div>
+  <div class="key"><span style="--c:var(--cyan)">overhead</span><span style="--c:var(--amber)">front-angled</span><span style="--c:var(--green)">wrist</span><span style="--c:var(--red)">optional low side</span></div>
+ </section>
+
+ <section>
+  <h2>Elevation · looking from the side</h2>
+  <div class="fig">
+  <svg viewBox="0 0 900 420" role="img" aria-label="Side elevation showing camera heights and tilt angles above the table">
+   <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--dim)"/></marker></defs>
+   <!-- table surface at y=330 ; 0.5 px/mm horizontally and vertically -->
+   <rect x="40" y="330" width="820" height="28" fill="var(--wood)" opacity=".6"/>
+   <line x1="40" y1="330" x2="860" y2="330" stroke="var(--amber)" stroke-width="2"/>
+   <!-- mat footprint 610 mm = 305 px from x=200 -->
+   <rect x="200" y="325" width="305" height="5" fill="var(--mat)" stroke="var(--amber)" stroke-width="1"/>
+   <text x="352" y="350" text-anchor="middle" font-size="11" fill="var(--dim)">mat · 610 mm</text>
+   <!-- arm: base at x=200, drawn reaching over the zone -->
+   <g stroke="var(--amber)" stroke-width="8" stroke-linecap="round" fill="none" opacity=".95">
+    <path d="M200 330 V260 L268 190 L336 236 L356 258"/>
+   </g>
+   <rect x="182" y="318" width="36" height="12" rx="3" fill="var(--panel)" stroke="var(--amber)" stroke-width="2"/>
+   <rect x="348" y="256" width="18" height="26" rx="3" fill="var(--panel)" stroke="var(--amber)" stroke-width="2"/>
+   <!-- wrist camera frustum, 24 degrees toward the fingertips -->
+   <g>
+    <rect x="368" y="248" width="12" height="9" rx="2" fill="var(--panel)" stroke="var(--green)" stroke-width="2"/>
+    <path d="M374 257 L340 326 M374 257 L412 326" stroke="var(--green)" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <text x="420" y="258" font-size="12" fill="var(--green)" font-weight="600">③ WRIST</text>
+    <text x="420" y="273" font-size="10.5" fill="var(--green)">on the gripper, 24° toward the tips</text>
+   </g>
+   <!-- overhead camera 620 mm above mat centre: y = 330 - 310 = 20 -->
+   <g>
+    <rect x="336" y="22" width="32" height="18" rx="4" fill="var(--panel)" stroke="var(--cyan)" stroke-width="2.5"/>
+    <path d="M352 40 L222 326 M352 40 L482 326" stroke="var(--cyan)" stroke-width="1.5" stroke-dasharray="5 4" opacity=".8"/>
+    <text x="378" y="36" font-size="12" fill="var(--cyan)" font-weight="600">① OVERHEAD</text>
+    <text x="378" y="51" font-size="10.5" fill="var(--cyan)">620 mm up, straight down, covers the whole mat</text>
+   </g>
+   <!-- front-angled camera: 300 mm beyond the far edge (x=505+150=655), 400 mm high (y=130), aimed at mat centre (352,330) -->
+   <g>
+    <rect x="640" y="118" width="34" height="22" rx="4" fill="var(--panel)" stroke="var(--amber)" stroke-width="2.5" transform="rotate(34 657 129)"/>
+    <path d="M652 136 L352 330" stroke="var(--amber)" stroke-width="2" opacity=".9"/>
+    <path d="M652 136 L240 330 M652 136 L470 330" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="5 4" opacity=".7"/>
+    <path d="M600 165 A60 60 0 0 1 640 140" fill="none" stroke="var(--amber)" stroke-width="1.5"/>
+    <text x="588" y="160" text-anchor="end" font-size="11" fill="var(--amber)">≈ 45° down</text>
+    <text x="690" y="112" font-size="12" fill="var(--amber)" font-weight="600">② FRONT-ANGLED</text>
+    <text x="690" y="127" font-size="10.5" fill="var(--amber)">400 mm high · 300 mm past the edge</text>
+    <text x="690" y="141" font-size="10.5" fill="var(--amber)">sees height and depth the overhead can't</text>
+   </g>
+   <!-- optional low side camera, 100 mm high, for the receptacle face -->
+   <g>
+    <rect x="762" y="272" width="26" height="18" rx="3" fill="var(--panel)" stroke="var(--red)" stroke-width="2" stroke-dasharray="3 3"/>
+    <path d="M762 281 L520 300" stroke="var(--red)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#ah2)"/>
+    <text x="775" y="312" text-anchor="middle" font-size="11" fill="var(--red)" font-weight="600">④ LOW SIDE · 100 mm</text>
+   </g>
+   <!-- height dimensions -->
+   <g stroke="var(--dim)" stroke-width="1" fill="var(--dim)" font-size="11">
+    <line x1="120" y1="40" x2="120" y2="330" marker-start="url(#ah2)" marker-end="url(#ah2)"/><text x="112" y="190" text-anchor="end" stroke="none">620 mm</text>
+    <line x1="560" y1="136" x2="560" y2="330" marker-start="url(#ah2)" marker-end="url(#ah2)"/><text x="572" y="240" stroke="none">400 mm</text>
+    <line x1="505" y1="390" x2="655" y2="390" marker-start="url(#ah2)" marker-end="url(#ah2)"/><text x="580" y="406" text-anchor="middle" stroke="none">300 mm</text>
+   </g>
+  </svg>
+  </div>
+ </section>
+
+ <section>
+  <h2>Spec per camera</h2>
+  <div class="fig">
+  <table>
+   <tr><th>Camera</th><th>Resolution · fps</th><th>Mount</th><th>What it is for</th></tr>
+   <tr><td><b>① Overhead</b><span class="tag have">have</span></td><td class="n">640 × 360 · 30</td><td>fixed, 620 mm above the mat centre, looking straight down</td><td>where things are on the mat; weak on height</td></tr>
+   <tr><td><b>② Front-angled</b><span class="tag add">add</span></td><td class="n">640 × 360 · 30</td><td>fixed, far side of the mat, 300 mm past the edge, 400 mm up, aimed at the mat centre (≈ 45° down)</td><td>height and depth: is the gripper above the object or on it; is the plug seated</td></tr>
+   <tr><td><b>③ Wrist</b><span class="tag have">have</span></td><td class="n">640 × 480 · 30</td><td>left side of the gripper as you face the arm, 24° toward the fingertips</td><td>fine alignment at the grasp and at insertion</td></tr>
+   <tr><td><b>④ Low side</b><span class="tag opt">plug task</span></td><td class="n">640 × 360 · 30</td><td>fixed, 100 mm above the table, level with the receptacle face</td><td>prongs and slots in one frame during insertion</td></tr>
+  </table>
+  </div>
+  <ul style="margin-top:14px">
+   <li>Three cameras is the limit the Jetson records cleanly at 30 fps. Add ② now; add ④ only for the plug work, and drop ① if the loop rate falls.</li>
+   <li>Mounts must not move between recording and running a policy. Mark their positions on the table with tape.</li>
+   <li>Keep ② on the side opposite you, so your hand and body stay out of its frame during demos.</li>
+   <li>The object zone is 229 × 200 mm, inside the reach arc and away from the far corners where the arm fails.</li>
+  </ul>
+ </section>
+</main>

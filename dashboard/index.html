@@ -1,0 +1,653 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SO-101 Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Michroma&family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#050607;--panel:linear-gradient(180deg,rgba(22,26,32,.92),rgba(10,12,15,.96));--line:#262c36;--rim:rgba(255,255,255,.07);--ink:#f2efe6;--dim:#8d94a0;--acc:#ffb347;--acc2:#4fd6ff;--warn:#ffd166;--bad:#ff5a5f;--font:"Rajdhani","SF Pro Display",sans-serif;--mono:"JetBrains Mono","SF Mono",Menlo,monospace;--disp:"Michroma","Rajdhani",sans-serif;--glow:0 0 18px rgba(255,179,71,.35)}
+body::before{content:"";position:fixed;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(255,179,71,.07),transparent 55%),radial-gradient(ellipse at 50% 100%,rgba(79,214,255,.05),transparent 55%);pointer-events:none;z-index:0}
+body::after{content:"";position:fixed;inset:0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.012) 0 1px,transparent 1px 3px);pointer-events:none;z-index:3;mix-blend-mode:overlay}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--ink);font-family:var(--font);overflow:hidden}body>*{position:relative;z-index:1}
+body{display:grid;grid-template-rows:auto 1fr;padding:14px 28px 24px;gap:14px}
+header{display:flex;align-items:center;justify-content:space-between;gap:26px;border-bottom:1px solid var(--line);padding-bottom:10px;box-shadow:0 1px 0 var(--rim)}
+h1{flex:1}h1 em{display:block;font-family:var(--font);font-style:normal;font-size:14px;letter-spacing:.3em;color:var(--dim);font-weight:600;margin-top:10px;text-shadow:none;transition:color .6s}#deck.playing~h1 em{color:var(--acc2);text-shadow:0 0 14px rgba(79,214,255,.5)}
+#deck{position:relative;flex:none;width:168px;height:118px}
+#platter{position:absolute;left:0;top:4px;width:110px;height:110px;border-radius:50%;background:#0b0d10;box-shadow:0 0 0 3px #1b2028,0 0 0 4px #000,0 0 0 9px #101318,0 0 0 10px #262c36,0 14px 30px rgba(0,0,0,.75)}
+#platter::after{content:"";position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 210deg,rgba(255,255,255,.14),transparent 18%,transparent 50%,rgba(255,255,255,.08) 62%,transparent 78%);pointer-events:none}
+#vinyl{position:absolute;inset:0;border-radius:50%;background:repeating-radial-gradient(circle at 50% 50%,#0a0c0f 0 1.2px,#1b1e24 1.2px 2.6px);animation:spin 1.8s linear infinite;animation-play-state:paused;transition:filter .8s;filter:brightness(.8)}
+#deck.playing #vinyl{animation-play-state:running;filter:brightness(1)}
+#label{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:radial-gradient(circle,#0b0d10 0 2.5px,#1d1a12 3px 4px,var(--acc) 4.5px);color:#1a1004;font-family:var(--disp);font-size:10px;letter-spacing:.04em;text-align:center;line-height:1;padding-top:11px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.35)}
+#label b{display:block;font-size:7px;font-weight:400;margin-bottom:3px}#label i{display:block;font-style:normal;font-family:var(--font);font-size:5px;letter-spacing:.2em;margin-top:2px;font-weight:700}
+#arm{position:absolute;right:26px;top:0;width:22px;height:22px;border-radius:50%;background:radial-gradient(circle,#3a414c 0 5px,#20252d 6px);box-shadow:0 0 0 2px #0a0c0f,0 4px 10px rgba(0,0,0,.6)}
+#arm i{position:absolute;left:9px;top:10px;width:4px;height:96px;border-radius:2px;background:linear-gradient(90deg,#aab1bb,#dfe4ea 45%,#7c838e);transform-origin:2px 1px;transform:rotate(6deg);transition:transform 1.4s cubic-bezier(.5,0,.3,1);box-shadow:2px 3px 6px rgba(0,0,0,.6)}
+#arm i::after{content:"";position:absolute;left:-4px;bottom:-4px;width:12px;height:18px;border-radius:2px 2px 4px 4px;background:linear-gradient(#2b313c,#0e1116);box-shadow:0 0 0 1px #000}
+#deck.playing #arm i{transform:rotate(36deg)}
+#strobe{position:absolute;left:2px;top:98px;width:10px;height:10px;border-radius:50%;background:#2a2016;box-shadow:inset 0 0 2px #000;transition:all .5s}#deck.playing #strobe{background:var(--acc);box-shadow:0 0 10px var(--acc)}
+#clock small.rpm{margin-top:4px;font-family:var(--font);letter-spacing:.18em;color:var(--dim)}#lamp{display:inline-block;width:9px;height:9px;border-radius:50%;background:#3a1114;margin-right:6px;vertical-align:1px;box-shadow:inset 0 0 2px #000}#lamp.on{background:var(--bad);box-shadow:0 0 10px var(--bad);animation:blink 1s steps(2) infinite}
+@keyframes spin{to{transform:rotate(360deg)}}@keyframes blink{50%{opacity:.35}}
+#lockscreen{position:fixed;inset:0;z-index:50;background:radial-gradient(ellipse at 50% 45%,#0a1016 0%,#020304 70%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;transition:opacity .9s ease,visibility .9s;font-family:var(--font)}
+#lockscreen.off{opacity:0;visibility:hidden;pointer-events:none}
+#lockscreen .brand{position:absolute;top:34px;left:40px;font-family:var(--disp);font-size:14px;letter-spacing:.42em;color:var(--acc);text-shadow:var(--glow)}
+#lockscreen .brand small{display:block;font-family:var(--font);font-size:12px;letter-spacing:.3em;color:var(--dim);margin-top:8px}
+#scanner{position:relative;width:560px;height:560px}
+#scanner .feed{position:absolute;left:50%;top:50%;width:420px;height:420px;margin:-210px 0 0 -210px;border-radius:50%;overflow:hidden;background:#000;box-shadow:0 0 0 2px #0e1a22,0 0 60px rgba(79,214,255,.18),inset 0 0 80px rgba(0,0,0,.8)}
+#scanner .feed img{width:100%;height:100%;object-fit:cover;filter:grayscale(.85) contrast(1.25) brightness(.9) sepia(.3) hue-rotate(150deg);transform:scaleX(-1)}
+#scanner .feed .eye{position:absolute;border:2px solid var(--acc2);box-shadow:0 0 14px var(--acc2);border-radius:6px;display:none}
+#scanner .feed .beam{position:absolute;left:0;right:0;height:3px;background:linear-gradient(90deg,transparent,var(--acc2),transparent);box-shadow:0 0 18px var(--acc2);top:-5px;display:none}
+#scanner.scanning .feed .beam{display:block;animation:beam 1.4s ease-in-out infinite alternate}
+@keyframes beam{from{top:6%}to{top:94%}}
+#scanner svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+#scanner .ring{fill:none;stroke:#1d2b36;stroke-width:2}#scanner .ticks{fill:none;stroke:#2b3d4d;stroke-width:2;stroke-dasharray:2 11.6;transform-origin:50% 50%;animation:spin 40s linear infinite}
+#scanner .prog{fill:none;stroke:var(--acc2);stroke-width:5;stroke-linecap:round;stroke-dasharray:1570;stroke-dashoffset:1570;transform:rotate(-90deg);transform-origin:50% 50%;filter:drop-shadow(0 0 10px var(--acc2));transition:stroke-dashoffset .25s linear}
+#scanner .arc{fill:none;stroke:rgba(79,214,255,.35);stroke-width:1.5;stroke-dasharray:60 300;transform-origin:50% 50%;animation:spin 6s linear infinite reverse}
+#scanner.ok .prog,#scanner.ok .eye{stroke:#7cff6b;border-color:#7cff6b;filter:drop-shadow(0 0 14px #7cff6b)}
+#lockscreen h1{flex:0 0 auto;font-size:42px;letter-spacing:.3em;margin:0;text-shadow:0 0 30px rgba(79,214,255,.35)}
+#lockscreen .st{font-family:var(--mono);font-size:20px;letter-spacing:.28em;color:var(--acc2);text-shadow:0 0 14px rgba(79,214,255,.5);min-height:28px}
+#lockscreen.okay .st{color:#7cff6b;text-shadow:0 0 16px #7cff6b}
+#lockscreen .hint{position:absolute;bottom:40px;font-size:13px;letter-spacing:.3em;color:var(--dim)}
+kbd.key{display:inline-block;font:700 9px/1 var(--mono);letter-spacing:.05em;color:var(--dim);border:1px solid var(--line);border-radius:3px;padding:2px 4px;margin-left:7px;vertical-align:1px;opacity:.8}
+#lockbtn{font:700 11px/1 var(--font);letter-spacing:.2em;color:var(--dim);background:transparent;border:1px solid var(--line);border-radius:4px;padding:4px 10px;margin-left:12px;cursor:pointer;vertical-align:1px}#lockbtn:hover{color:var(--acc);border-color:var(--acc)}
+h1{font-family:var(--disp);font-size:46px;letter-spacing:.22em;font-weight:400;line-height:1;color:#fff;text-shadow:0 0 24px rgba(255,255,255,.18)}
+h1 small{display:block;font-family:var(--font);font-size:15px;letter-spacing:.42em;color:var(--acc);font-weight:600;margin-bottom:12px;text-shadow:var(--glow)}
+#clock{font-family:var(--disp);font-size:40px;text-align:right;color:var(--acc);font-variant-numeric:tabular-nums;text-shadow:var(--glow);letter-spacing:.08em}
+#clock small{display:block;font-size:14px;color:var(--dim);letter-spacing:.2em;font-family:var(--font)}
+main{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:min-content;gap:18px;align-content:start}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:20px 22px;position:relative;overflow:hidden;box-shadow:inset 0 1px 0 var(--rim),0 12px 40px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.6)}
+.panel h2{font-size:12px;letter-spacing:.34em;color:var(--dim);font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between;text-transform:uppercase}
+.panel h2 span{color:var(--acc)}
+.wide{grid-column:1/-1}
+/* status */
+#status{display:flex;gap:18px;align-items:center}
+.badge{font-family:var(--disp);font-size:24px;font-weight:400;letter-spacing:.16em;padding:16px 28px;border-radius:12px;background:linear-gradient(180deg,#2a1f0d,#1a1408);color:var(--acc);border:1px solid #5a4420;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),var(--glow)}
+.badge.hot{background:linear-gradient(180deg,#0e2a36,#081a22);color:var(--acc2);border-color:#1f5a70;box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 0 22px rgba(79,214,255,.35);animation:pulse 1.6s infinite}
+.badge.off{background:linear-gradient(180deg,#2a0f14,#1a080b);color:var(--bad);border-color:#5a1d26;box-shadow:none}
+@keyframes pulse{50%{opacity:.55}}
+#status .meta{font-family:var(--mono);color:var(--dim);font-size:16px;line-height:1.7}
+#status .meta b{color:var(--ink);font-weight:600}
+/* gauges */
+.gauges{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+.g{text-align:center}.g canvas{width:100%;height:auto}
+.g .v{font-family:var(--font);font-weight:700;letter-spacing:.04em;font-size:30px;margin-top:-56px;font-weight:400;color:#fff;text-shadow:0 0 14px rgba(255,255,255,.25)}
+.g .l{font-size:11px;letter-spacing:.25em;color:var(--dim);margin-top:26px}
+.cores{display:flex;gap:5px;margin-top:14px;height:40px;align-items:flex-end}
+.cores div{flex:1;background:linear-gradient(180deg,var(--acc),#b26a12);opacity:.9;border-radius:3px 3px 0 0;min-height:2px;transition:height .6s;box-shadow:0 0 8px rgba(255,179,71,.35)}
+/* gallery */
+.feeds{display:flex;height:100%;gap:4px}.feed{flex:1;position:relative;background:#000;overflow:hidden}.feed img{width:100%;height:100%;object-fit:contain;display:block}
+/* #cam_top is shown as the camera delivers it: since the mat was turned (9 Nov) the printed grid reads upright in the raw frame; TOPFLIP in the overlay code must match (false = no rotation) */
+.feed span{position:absolute;left:14px;top:12px;font-family:var(--mono);font-size:12px;letter-spacing:.24em;color:#fff;background:rgba(0,0,0,.6);padding:5px 10px;border-radius:4px;border:1px solid rgba(255,255,255,.12)}.feed span::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bad);margin-right:8px;animation:pulse 1.2s infinite}
+/* ---- feed calibration overlays: mat grid + markers over #cam_top and #cam_front, tap-to-measure readout, CAL status chip ---- */
+.feed canvas.calov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.feed .calchip{position:absolute;left:14px;top:44px;font-family:var(--mono);font-size:11px;letter-spacing:.18em;color:var(--acc2);background:rgba(0,0,0,.6);padding:5px 10px;border-radius:4px;border:1px solid rgba(79,214,255,.28);pointer-events:none;max-width:calc(100% - 28px)}
+.feed .calchip.off{color:var(--dim);border-color:rgba(255,255,255,.12)}.feed .calchip .p{display:inline-block;white-space:nowrap}
+.feed .calread{position:absolute;left:14px;bottom:12px;display:none;font-family:var(--mono);font-size:13px;letter-spacing:.12em;color:var(--ink);background:rgba(0,0,0,.74);padding:11px 34px 11px 14px;border-radius:4px;border:1px solid rgba(79,214,255,.4);box-shadow:0 0 14px rgba(79,214,255,.18);cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:manipulation;max-width:calc(100% - 28px);line-height:1.5}
+.feed .calread.on{display:block}.feed .calread .p{display:inline-block;white-space:nowrap}.feed .calread b{color:var(--acc2);font-weight:600}.feed .calread i{position:absolute;right:12px;top:10px;color:var(--dim);font-style:normal}
+.feed .calbtn{position:absolute;right:14px;top:12px;min-height:40px;font:600 11px/1 var(--mono);letter-spacing:.18em;color:var(--acc2);background:rgba(0,0,0,.6);border:1px solid rgba(79,214,255,.28);border-radius:4px;padding:0 14px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none;z-index:2}.feed .calbtn:disabled{cursor:default}.feed .calbtn.ok{color:#7cff6b;border-color:rgba(124,255,107,.5)}.feed .calbtn.bad{color:var(--bad);border-color:rgba(255,90,95,.5)}   /* SET BACKGROUND for the mat map: touch sized, top-right so it never covers the CAL chip */
+/* ---- end feed calibration overlays (styles) ---- */
+.termbar{display:flex;justify-content:space-between;padding:10px 18px 8px;font-size:12px;letter-spacing:.34em;color:var(--acc);font-weight:700;border-bottom:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.04),transparent);text-shadow:var(--glow)}.termbar .dim{color:var(--dim);letter-spacing:.1em;font-weight:500}
+#termframe{width:100%;height:calc(100% - 38px);border:0;display:block;background:#07090d}
+#shellbody{height:calc(100% - 38px);overflow:hidden;padding:8px 14px;font-family:var(--mono);font-size:12.5px;line-height:1.45;display:flex;flex-direction:column;justify-content:flex-end}
+.sc{margin-top:8px}.sc .d{color:var(--acc);font-weight:600;text-shadow:var(--glow)}.sc .d i{color:var(--dim);font-style:normal;margin-right:8px}.sc .c{color:#9fc4ff;white-space:pre-wrap;word-break:break-all;max-height:3.6em;overflow:hidden}.sc .c::before{content:"$ ";color:var(--dim)}
+.sc .o{color:var(--dim);white-space:pre-wrap;word-break:break-all;max-height:4.4em;overflow:hidden;border-left:2px solid #1a2230;padding-left:8px;margin-top:2px}.sc.run .d::after{content:" ▮";color:var(--acc2);animation:pulse 1s infinite}
+.armwrap{display:flex;flex-direction:column;gap:8px}#arm3d{position:relative;width:100%;height:400px;border-radius:8px;overflow:hidden;background:radial-gradient(ellipse at 50% 80%,#101826,#07090d 70%)}#arm3d canvas{display:block}#arm3d .matcap{position:absolute;left:10px;bottom:10px;z-index:2;font:600 11px/1.4 var(--mono);letter-spacing:.14em;color:var(--dim);background:rgba(13,17,25,.78);border:1px solid var(--line);border-radius:4px;padding:7px 10px;max-width:calc(100% - 20px);pointer-events:none}#arm3d .matcap:empty{display:none}   /* mat-map caption: why the map is empty */
+.armctl{position:absolute;top:8px;right:8px;display:flex;gap:4px;z-index:2}.armctl button{font:600 10px/1 var(--mono);letter-spacing:.15em;color:var(--dim);background:rgba(13,17,25,.85);border:1px solid var(--line);border-radius:4px;padding:6px 8px;cursor:pointer}
+.armctl button:hover{color:var(--ink);border-color:#2a3a55}
+.modes{display:flex;gap:10px;margin:-2px 0 8px;align-items:stretch}
+.modes .grp{position:relative;display:flex;gap:3px;flex:1 1 auto;padding:15px 4px 4px;border:1px solid var(--line);border-radius:9px;background:linear-gradient(180deg,rgba(9,12,17,.9),rgba(16,20,27,.9));box-shadow:inset 0 1px 0 var(--rim)}.modes .grp::before{content:attr(data-g);position:absolute;top:4px;left:9px;font:700 8px/1 var(--mono);letter-spacing:.3em;color:#59606c}.modes .grp[data-g=KILL]{flex:0 0 auto}
+.modes button{position:relative;flex:1;min-width:0;font:700 10.5px/1 var(--mono);letter-spacing:.14em;white-space:nowrap;padding:13px 14px 10px;color:var(--dim);background:rgba(13,17,25,.85);border:1px solid var(--line);border-radius:6px;cursor:pointer;transition:all .2s}.modes button::before{content:"";position:absolute;left:50%;top:4px;width:14px;height:2px;margin-left:-7px;border-radius:1px;background:#1e242e;transition:all .25s}
+.modes button:hover{color:var(--ink);border-color:#2a3a55}.modes button.on{color:var(--acc);border-color:#5a4420;background:linear-gradient(180deg,#2e2210,#1a1409);text-shadow:var(--glow)}.modes button.on::before{background:var(--acc);box-shadow:0 0 8px var(--acc)}.modes button.stop{color:var(--bad);border-color:#5a2024;padding-inline:16px}.modes button.stop:hover{background:#3a1114}.modes button.busy{opacity:.5}.modes button kbd.key{position:absolute;right:3px;top:3px;margin:0;font-size:7.5px;padding:1px 3px;opacity:.55}
+.transport{display:flex;align-items:center;gap:8px;margin:0 0 10px}.transport .rec{flex:0 0 auto;position:relative;font:700 11px/1 var(--mono);letter-spacing:.2em;padding:11px 16px;color:#ff8a8f;background:linear-gradient(180deg,#2a1114,#180a0c);border:1px solid #5a2024;border-radius:8px;cursor:pointer;white-space:nowrap}.transport .rec:hover{background:#3a1114}.transport .rec kbd.key{margin-left:8px;font-size:7.5px;opacity:.6}
+#recidle{flex:1;display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px dashed #232a35;border-radius:8px;font:600 10px/1 var(--mono);letter-spacing:.2em;color:#59606c;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}#recidle .dot{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:#1e242e;box-shadow:inset 0 0 0 1px #2a313c}.transport:has(#recstrip.on) #recidle{display:none}
+#recstrip{display:none;flex:1;min-width:0;align-items:center;gap:12px;padding:8px 12px;border:1px solid #5a2024;border-radius:8px;background:rgba(58,17,20,.35);font:600 12px/1 var(--mono);letter-spacing:.12em;color:var(--ink)}#recstrip.on{display:flex}
+#recstrip .dot{width:10px;height:10px;border-radius:50%;background:var(--bad);box-shadow:0 0 10px var(--bad);animation:blink 1s steps(2) infinite}#recstrip.reset .dot{background:var(--warn);box-shadow:0 0 10px var(--warn);animation:none}#recstrip.done .dot{background:#7cff6b;box-shadow:0 0 10px #7cff6b;animation:none}
+#recstrip .bar{flex:1;height:6px;background:#1a1f27;border-radius:3px;overflow:hidden}#recstrip .bar i{display:block;height:100%;background:var(--bad);box-shadow:0 0 8px var(--bad);transition:width .5s linear}#recstrip.reset .bar i{background:var(--warn)}#recstrip.done .bar i{background:#7cff6b}
+#recstrip button{font:700 10px/1 var(--mono);letter-spacing:.2em;color:var(--bad);background:transparent;border:1px solid #5a2024;border-radius:4px;padding:5px 9px;cursor:pointer}#recstrip #recnext,#recstrip #recredo{color:var(--warn);border-color:#5a4a20}#recstrip #recpause{color:var(--acc2);border-color:#1f4a5a}#recstrip.paused .dot{animation:none;opacity:.5}
+#recmodal{position:fixed;inset:0;z-index:60;background:rgba(2,3,4,.78);display:none;align-items:center;justify-content:center;backdrop-filter:blur(6px)}#recmodal.on{display:flex}
+#recmodal form{width:720px;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:28px 30px;box-shadow:0 30px 80px rgba(0,0,0,.7),inset 0 1px 0 var(--rim)}
+#recmodal h2{font-family:var(--disp);font-size:18px;letter-spacing:.3em;color:var(--acc);text-shadow:var(--glow);margin:0 0 18px;font-weight:400}
+#recmodal label{display:block;font:700 10px/1 var(--mono);letter-spacing:.3em;color:var(--dim);margin:14px 0 6px;text-transform:uppercase}
+#recmodal input[type=text],#recmodal input[type=number]{width:100%;font:600 18px/1.3 var(--font);color:var(--ink);background:#0a0d12;border:1px solid var(--line);border-radius:8px;padding:10px 12px;outline:none}#recmodal input:focus{border-color:var(--acc)}
+#recmodal .row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}#recmodal .radio{display:flex;gap:18px;font:600 14px var(--font);color:var(--ink)}#recmodal .radio label{display:flex;align-items:center;gap:8px;margin:0;font:600 14px var(--font);color:var(--ink);letter-spacing:0;text-transform:none}
+#recmodal .hint{font:500 13px/1.5 var(--font);color:var(--dim);margin-top:14px}#recmodal .hint b{color:var(--warn)}
+#recmodal .btns{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}#recmodal .btns button{font:700 12px/1 var(--mono);letter-spacing:.25em;padding:12px 20px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--dim)}#recmodal .btns button.go{color:#fff;background:#8a1e24;border-color:#c0303a;box-shadow:0 0 18px rgba(255,90,95,.35)}
+#label.art{width:62px;height:62px;margin:-31px 0 0 -31px;background-size:cover;background-position:center;color:transparent}#label.art::after{content:"";position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,#0b0d10 0 2.5px,transparent 3.5px);box-shadow:inset 0 0 0 1px rgba(0,0,0,.5)}
+#clock small.sp{display:none;margin-top:6px}#clock small.sp.on{display:block}#clock small.sp button{font-size:13px;line-height:1;background:transparent;border:1px solid var(--line);color:var(--acc);border-radius:4px;padding:3px 9px;margin-left:6px;cursor:pointer}#clock small.sp button:hover{border-color:var(--acc)}
+#clock small.sp i{font-style:normal;color:#1db954;margin-right:4px;font-weight:700;letter-spacing:.1em}.armctl button.on{color:var(--acc);border-color:#5a4420;background:#2a1f0d;text-shadow:var(--glow)}
+.armhint{position:absolute;left:10px;bottom:8px;font:11px var(--mono);color:#3d4a60;letter-spacing:.05em;z-index:2;pointer-events:none}
+#joints{font-size:14px}#joints td,#joints th{padding:4px 6px}#joints td.num{font-size:15px}#joints .bar{height:4px;margin-top:3px}
+#gallery{height:700px;padding:0;border:1px solid var(--line);background:#000;overflow:hidden}
+#gallery canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#gallery .hud{position:absolute;left:18px;top:10px;font-family:var(--disp);font-size:13px;letter-spacing:.3em;color:var(--acc2);text-shadow:0 0 12px rgba(79,214,255,.6);pointer-events:none;z-index:2}
+#gallery .hud b{color:var(--acc);text-shadow:var(--glow);margin-left:18px}
+#gallery .hud button{pointer-events:auto;margin-left:18px;font:700 10px/1 var(--mono);letter-spacing:.2em;color:var(--dim);background:rgba(13,17,25,.85);border:1px solid var(--line);border-radius:4px;padding:4px 8px;cursor:pointer;vertical-align:1px}#gallery .hud button.on{color:var(--acc2);border-color:#1d4a5a}
+#simview{position:absolute;inset:0;z-index:3;display:grid;grid-template-columns:470px 1fr 330px;gap:16px;padding:12px 16px 12px 16px;background:radial-gradient(ellipse at 20% 50%,#0b1420,#000 70%);font-family:var(--mono);color:var(--ink)}#simview.off{display:none}
+#simview .simgif{position:relative;height:100%;min-height:0}#simview .simgif img{height:100%;width:100%;object-fit:contain;border:1px solid #1d2a3d;border-radius:6px;background:#05080c;image-rendering:auto}
+#simview .simgif .tag{position:absolute;left:8px;top:8px;font:700 11px/1 var(--mono);letter-spacing:.2em;padding:4px 7px;border-radius:4px;background:rgba(0,0,0,.7);color:var(--dim)}#simview .simgif .tag.ok{color:#7cff6b;text-shadow:0 0 10px #7cff6b}#simview .simgif .tag.fail{color:var(--bad)}
+#simview h3{font:700 11px/1 var(--font);letter-spacing:.34em;color:var(--dim);margin:0 0 8px;text-transform:uppercase}#simview h3 span{color:var(--acc2)}
+#simview table{border-collapse:collapse;width:100%;font-size:13px}#simview td,#simview th{padding:3px 8px;text-align:left;border-bottom:1px solid #141c2a;white-space:nowrap}#simview th{color:var(--dim);font-weight:600;letter-spacing:.15em;font-size:10px}#simview td.pct{text-align:right;font-weight:700;color:var(--acc)}#simview tr.best td.pct{color:#7cff6b;text-shadow:0 0 10px #7cff6b}
+#simview .bar{display:inline-block;height:6px;background:var(--acc2);border-radius:3px;vertical-align:middle;margin-left:8px;box-shadow:0 0 8px var(--acc2)}
+#simview .simstat div{font-size:13px;line-height:1.7;color:var(--dim)}#simview .simstat b{color:var(--ink);font-weight:600}#simview .simstat .run{color:var(--acc2)}#simview .simstat .run::before{content:"▮ ";animation:blink 1s steps(2) infinite}#gallery .hud i{font-style:normal;color:var(--dim);margin-left:18px;animation:blink 1.6s steps(2) infinite}
+/* charts */
+canvas.chart{width:100%;height:400px;display:block}
+.legend{display:flex;gap:10px 14px;font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:8px;flex-wrap:wrap}
+.legend i{display:inline-block;width:12px;height:3px;margin-right:6px;vertical-align:middle}
+/* tables */
+table{width:100%;border-collapse:collapse;font-size:17px}
+td,th{padding:9px 6px;border-bottom:1px solid var(--line);text-align:left}
+th{font-size:11px;letter-spacing:.28em;color:var(--dim);font-weight:700}
+td.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.bar{height:6px;background:#1a1f27;border-radius:3px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:linear-gradient(90deg,#b26a12,var(--acc));box-shadow:0 0 8px rgba(255,179,71,.4)}
+.tag{font-size:10px;letter-spacing:.2em;padding:3px 7px;border-radius:4px;background:#162033;color:var(--dim);margin-left:8px;vertical-align:middle}
+.tag.jetson{color:#9be89f;background:#0f2a12;border:1px solid #1d4a24}.tag.mac{color:#9fc4ff;background:#10203a;border:1px solid #1d3a5a}
+/* events */
+body.compact canvas.chart{height:200px}body.compact #arm3d{height:600px}body.compact #events div:nth-child(n+4){display:none}body.compact #live{height:372px!important}body.compact #term,body.compact #shell{height:282px!important}.armrow{display:grid;grid-template-columns:3fr 2fr;gap:18px;align-items:stretch}body.compact .armrow{height:922px}.armrow>.panel{min-height:0;overflow:hidden}.rightcol{display:flex;flex-direction:column;gap:18px;min-height:0}.rightcol .panel{flex:1;min-height:0;overflow:hidden}#arm3d{height:700px}body.compact #events div:nth-child(n+3){display:none}body.compact main{gap:14px}body{gap:14px}body.compact .gauges canvas{width:70%}body.compact .g .v{font-size:24px;margin-top:-44px}body.compact .g .l{margin-top:18px}body.compact .cores{height:24px;margin-top:8px}body.compact #ds tbody tr:nth-child(n+6){display:none}body.compact .panel{padding-top:10px;padding-bottom:10px}body.compact .panel h2{margin-bottom:8px}body.compact .panel{padding-top:14px;padding-bottom:14px}body.compact #term{padding:0!important}body.compact #gallery,body.compact #live{padding:0!important}
+#events{font-family:var(--mono);font-size:15px;line-height:1.9;color:var(--dim)}
+#events b{color:var(--acc);font-weight:500;margin-right:14px;text-shadow:var(--glow)}
+#events div:first-child{color:var(--ink)}
+.empty{color:var(--dim);font-size:15px;font-style:italic}
+/* landscape (monitor rotated): four columns, the portrait stack becomes two side-by-side columns with the arm row across the bottom */
+@media (orientation: landscape){main{grid-template-columns:repeat(4,1fr)}#statusp{grid-column:1/3;grid-row:1}#jetsonp{grid-column:3/5;grid-row:1}#live{grid-column:1/3;grid-row:2}#gallery{grid-column:3/5;grid-row:2}#term{grid-column:1/3;grid-row:3}#shell{grid-column:3/5;grid-row:3}.armrow{grid-column:1/5;grid-row:4}.gauges{grid-template-columns:repeat(6,1fr)}}
+</style></head><body>
+<div id="recmodal"><form id="recform" autocomplete="off"><h2>RECORD A DATASET</h2>
+ <label>Dataset name</label><input type="text" id="rf_name" list="rf_dsl" pattern="[A-Za-z0-9_\-]+" placeholder="dataset name" value="" required><datalist id="rf_dsl"></datalist><div class="hint" id="rf_last"></div>
+ <label>Task (spoken and stored with every episode)</label><input type="text" id="rf_task" placeholder="Pick up the lighter and hand it to the person" value="Pick up the lighter and hand it to the person" required>
+ <div class="row"><div><label>Episodes</label><input type="number" id="rf_n" min="1" max="200" value="20"></div><div><label>Episode seconds</label><input type="number" id="rf_ep" min="5" max="120" value="25"></div><div><label>Reset seconds</label><input type="number" id="rf_rs" min="3" max="60" value="10"></div></div>
+ <label>Mode</label><div class="radio"><label><input type="radio" name="rf_mode" value="append" checked> append to this dataset</label><label><input type="radio" name="rf_mode" value="new"> new dataset</label></div>
+ <div class="hint">Hands on the leader before START. The voice says <b>start</b> at the beginning of each episode: move immediately, no pause. <b>stop</b> ends the episode; put things back during reset. Same scene every time, object inside the marked zone.</div>
+ <div class="hint" id="rf_editnote" style="display:none;color:var(--warn)">A session is running. APPLY finishes the current episode, stops cleanly, and resumes into the same dataset with these settings. Episodes counts the whole session.</div><div class="btns"><button type="button" id="rf_cancel">CANCEL</button><button type="submit" class="go" id="rf_go">● START RECORDING</button></div></form></div>
+<div id="lockscreen" class="off"><div class="brand">LASTLIGHT ROBOTICS<small>SECURE TERMINAL · ARM LAB</small></div>
+ <div id="scanner"><svg viewBox="0 0 560 560"><circle class="ring" cx="280" cy="280" r="250"/><circle class="ticks" cx="280" cy="280" r="236"/><circle class="arc" cx="280" cy="280" r="262"/><circle class="prog" cx="280" cy="280" r="250"/><path d="M280 6v34M280 520v34M6 280h34M520 280h34" stroke="#3a4f63" stroke-width="2"/></svg>
+  <div class="feed"><img id="scanimg" alt=""><div class="eye" id="eyebox"></div><div class="beam"></div></div></div>
+ <h1>RETINAL SCAN</h1><div class="st" id="lockst">NO SIGNAL</div><div class="hint">LOOK INTO THE WRIST CAMERA &nbsp;·&nbsp; HOLD U, OR PRESS AND HOLD THE SCREEN, FOR 2 S TO OVERRIDE</div></div>
+<header><div id="deck"><div id="platter"><div id="vinyl"><div id="label"><b>SO</b>101<i>LASTLIGHT</i></div></div></div><div id="arm"><i></i></div><div id="strobe"></div></div><h1><small>LASTLIGHT ROBOTICS · ARM LAB</small>SO-101<em id="np">STANDBY · 33⅓ RPM</em></h1><div id="clock">--:--:--<small id="date"></small><small class="rpm"><span id="lamp"></span>REC &nbsp;·&nbsp; 33⅓ RPM<button id="lockbtn" title="lock the dashboard (retinal scan to unlock)">⬡ LOCK</button></small><small class="sp" id="sp"><i>SPOTIFY</i><button data-s="previous">⏮</button><button data-s="playpause">⏯</button><button data-s="next">⏭</button></small></div></header>
+<main>
+ <section class="panel wide" id="statusp"><h2>MISSION STATUS <span id="hosts"></span></h2><div id="status"><div class="badge off" id="badge">OFFLINE</div><div class="meta" id="meta"></div></div></section>
+ <section class="panel wide" id="jetsonp"><h2>JETSON ORIN NANO <span id="jmode"></span></h2>
+  <div class="gauges">
+   <div class="g"><canvas id="g_gpu" width="220" height="220"></canvas><div class="v" id="v_gpu">--</div><div class="l">GPU</div></div>
+   <div class="g"><canvas id="g_bus" width="220" height="220"></canvas><div class="v" id="v_bus">--</div><div class="l" id="l_bus">BUS</div></div>
+   <div class="g"><canvas id="g_cpu" width="220" height="220"></canvas><div class="v" id="v_cpu">--</div><div class="l">CPU</div></div>
+   <div class="g"><canvas id="g_ram" width="220" height="220"></canvas><div class="v" id="v_ram">--</div><div class="l">RAM</div></div>
+   <div class="g"><canvas id="g_tmp" width="220" height="220"></canvas><div class="v" id="v_tmp">--</div><div class="l">TEMP</div></div>
+   <div class="g"><canvas id="g_pwr" width="220" height="220"></canvas><div class="v" id="v_pwr">--</div><div class="l">POWER</div></div>
+  </div><div class="cores" id="cores"></div></section>
+ <section class="panel wide" id="live" style="display:none;padding:0;background:#000;height:400px"><div class="feeds"><div class="feed"><img id="cam_top" alt=""><span>TOP · LIVE</span></div><div class="feed"><img id="cam_front" alt=""><span>FRONT · LIVE</span></div><div class="feed"><img id="cam_wrist" alt=""><span>WRIST · LIVE</span></div></div></section>
+ <section class="panel" id="term" style="display:none;padding:0;height:540px;background:#07090d"><div class="termbar"><span>JETSON TERMINAL</span><span class="dim">tc@tc-nano · click to type</span></div><iframe id="termframe" allow="clipboard-read; clipboard-write"></iframe></section>
+ <section class="panel" id="shell" style="padding:0;height:540px;background:#07090d"><div class="termbar"><span>CLAUDE · SHELL</span><span class="dim">what I am running, live</span></div><div id="shellbody"></div></section>
+ <section class="panel wide" id="gallery"><canvas id="tempest"></canvas><div class="hud" id="thud">TEMPEST<b id="tscore">000000</b><i>ATTRACT MODE</i><button id="simtoggle">SIM</button></div><div id="simview" class="off"><div class="simgif"><img id="simimg" alt=""><span class="tag" id="simtag">SIM</span></div><div><h3>Simulation · <span id="simtitle">success on unseen layouts</span></h3><table id="simevals"></table></div><div class="simstat" id="simstat"><h3>Status</h3></div></div></section>
+ <div class="wide armrow"> <section class="panel" id="armp"><h2>ARM · JOINTS <span id="arm_sub"></span></h2><div class="modes deck"><div class="grp" data-g="DRIVE"><button data-m="teleop" title="follower mirrors the leader arm">TELEOP</button><button data-m="policy" title="run the ACT policy">POLICY</button><button data-m="vla" title="run the SmolVLA policy">VLA</button></div><div class="grp" data-g="HAND"><button data-m="free" title="torque off · move the arm by hand">FREE</button><button data-m="hold" title="torque on at the current pose">HOLD</button></div><div class="grp" data-g="SHOW"><button data-m="dance" title="dance routine to the beat">DANCE</button><button data-m="wave" title="scripted wave">WAVE</button><button data-m="replay" title="replay a random episode from the hub dataset">REPLAY</button></div><div class="grp" data-g="KILL"><button data-m="stop" class="stop" title="stop every arm job now">■ STOP</button></div></div><div class="transport"><button type="button" id="recbtn" class="rec" title="record a dataset (edit the running session once recording)"><span id="recbtntxt">● RECORD</span></button><div id="recstrip"><span class="dot"></span><span id="rectext">RECORDING</span><div class="bar"><i id="recbar" style="width:0%"></i></div><button type="button" id="recpause" title="pause: frames and the clock stop, the arm stays live on the leader">‖ PAUSE</button><button type="button" id="recnext" title="end this episode now (or skip the rest of the reset)">NEXT ▸</button><button type="button" id="recredo" title="discard this episode and record it again">↺ REDO</button><button type="button" id="recstop" title="stop the session cleanly after this episode">■ END</button></div><div id="recidle"><span class="dot"></span><span id="recidletxt">TRANSPORT IDLE · C TO RECORD A DATASET</span></div></div><div class="armwrap"><div id="arm3d"><div class="armctl"><button data-a="auto" class="on" title="auto-rotate (pauses while hovering)">⟳ AUTO</button><button data-a="leader" title="show the leader arm as a cyan ghost (auto during teleop)">LEADER</button><button data-a="front">FRONT</button><button data-a="side">SIDE</button><button data-a="top">TOP</button><button data-a="reset" title="reset view">⌂</button></div><div class="armhint">drag · rotate &nbsp; wheel · zoom &nbsp; right-drag · pan</div></div><table id="joints"><thead><tr><th>JOINT</th><th style="text-align:right">FOLLOWER</th><th style="text-align:right">LEADER</th></tr></thead><tbody></tbody></table></div></section>
+<div class="rightcol"> <section class="panel"><h2>TRAINING · ACT LOSS <span id="tr_sub"></span></h2><canvas class="chart" id="loss" width="640" height="400"></canvas><div class="legend" id="legend"></div></section>
+ <section class="panel"><h2>DATASETS <span id="ds_sub"></span></h2><table id="ds"><thead><tr><th>NAME</th><th style="text-align:right">EPISODES</th><th style="text-align:right">FRAMES</th><th style="text-align:right">MIN</th></tr></thead><tbody></tbody></table></section>
+ <section class="panel"><h2>POLICIES <span id="pol_sub"></span></h2><table id="pol"><thead><tr><th>NAME</th><th>DATA</th><th style="text-align:right">STEPS</th></tr></thead><tbody></tbody></table></section></div></div>
+ <section class="panel wide"><h2>LOG</h2><div id="events"></div></section>
+</main>
+<script>
+const $=s=>document.querySelector(s), css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(n>=1e4?0:1)+'K':String(Math.round(n));
+function gauge(id,frac,color){const c=$(id),x=c.getContext('2d'),w=c.width,r=w/2-16;x.clearRect(0,0,w,w);x.lineCap='round';
+ x.lineWidth=12;x.strokeStyle='#1a1f27';x.beginPath();x.arc(w/2,w/2,r,Math.PI*.75,Math.PI*2.25);x.stroke();
+ for(let i=0;i<=30;i++){const a=Math.PI*.75+Math.PI*1.5*i/30,big=i%5===0,r1=r-14,r2=r-(big?24:19);x.strokeStyle=big?'#5a6270':'#2b313c';x.lineWidth=big?2:1;x.beginPath();x.moveTo(w/2+r1*Math.cos(a),w/2+r1*Math.sin(a));x.lineTo(w/2+r2*Math.cos(a),w/2+r2*Math.sin(a));x.stroke()}
+ x.save();x.shadowColor=color;x.shadowBlur=16;x.lineWidth=12;x.strokeStyle=color;x.beginPath();x.arc(w/2,w/2,r,Math.PI*.75,Math.PI*.75+Math.PI*1.5*Math.max(0.002,Math.min(1,frac)));x.stroke();x.restore();}
+function spark(id,h,col,max,color){if(!h||h.length<2)return;const c=$(id),x=c.getContext('2d'),now=Date.now()/1000,SPAN=300,L=62,R=158,T=66,B=128;
+ const pts=h.filter(r=>now-r[0]<=SPAN&&r[col]!=null);if(pts.length<2)return;const sx=t=>R-(R-L)*Math.min(SPAN,now-t)/SPAN,sy=v=>B-(B-T)*Math.max(0,Math.min(1,v/max));
+ x.save();x.beginPath();x.arc(c.width/2,c.width/2,c.width/2-42,0,7);x.clip();
+ x.strokeStyle='#1e242e';x.lineWidth=1;x.beginPath();x.moveTo(L,B+.5);x.lineTo(R,B+.5);x.stroke();
+ x.beginPath();pts.forEach((r,i)=>{i?x.lineTo(sx(r[0]),sy(r[col])):x.moveTo(sx(r[0]),sy(r[col]))});
+ x.lineTo(sx(pts[pts.length-1][0]),B);x.lineTo(sx(pts[0][0]),B);x.closePath();x.globalAlpha=.16;x.fillStyle=color;x.fill();x.globalAlpha=1;
+ x.beginPath();pts.forEach((r,i)=>{i?x.lineTo(sx(r[0]),sy(r[col])):x.moveTo(sx(r[0]),sy(r[col]))});x.strokeStyle=color;x.lineWidth=2;x.lineJoin='round';x.stroke();x.restore();}
+function heat(f){return f<.6?css('--acc'):f<.85?css('--warn'):css('--bad')}
+function clock(){const d=new Date();$('#clock').firstChild.textContent=d.toLocaleTimeString([],{hour12:false});$('#date').textContent=d.toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'}).toUpperCase()}
+setInterval(clock,1000);clock();
+const COLORS=['#ffb347','#4fd6ff','#9be89f','#ffd166','#ff5a5f','#c58cff'];
+function lossChart(tr){const c=$('#loss'),x=c.getContext('2d'),W=c.width,H=c.height,P={l:62,r:16,t:14,b:30};x.clearRect(0,0,W,H);
+ const jobs=Object.entries(tr).filter(([,t])=>t.points&&t.points.length>1).sort((a,b)=>(a[1].updated||0)-(b[1].updated||0)).slice(-6);   // the six most recent runs; older ones stay in the count
+ $('#legend').innerHTML=jobs.map(([j,t],i)=>`<span><i style="background:${COLORS[i%6]}"></i>${j}<span class="tag ${t.host}">${t.host}</span></span>`).join('')||'<span>no train.log yet — so101-train writes one into its output dir</span>';
+ if(!jobs.length){x.fillStyle='#1a2230';for(let i=0;i<6;i++){x.fillRect(P.l,P.t+i*(H-P.t-P.b)/5,W-P.l-P.r,1)}return}
+ let xmax=1,ymin=Infinity,ymax=0;for(const[,t]of jobs)for(const[s,l]of t.points){xmax=Math.max(xmax,s);ymin=Math.min(ymin,l);ymax=Math.max(ymax,l)}
+ const ly=v=>Math.log10(v),Y0=ly(Math.max(1e-3,ymin*.8)),Y1=ly(ymax*1.2);const sx=s=>P.l+(W-P.l-P.r)*s/xmax,sy=v=>P.t+(H-P.t-P.b)*(1-(ly(v)-Y0)/(Y1-Y0));
+ x.strokeStyle='#1a2230';x.fillStyle='#7d8aa0';x.font='12px Menlo';x.textAlign='right';
+ for(let e=Math.ceil(Y0);e<=Y1;e++){const y=sy(10**e);x.beginPath();x.moveTo(P.l,y);x.lineTo(W-P.r,y);x.stroke();x.fillText(10**e>=1?10**e:(10**e).toString(),P.l-8,y+4)}
+ x.textAlign='center';for(let i=0;i<=5;i++){x.fillText(fmt(xmax*i/5),sx(xmax*i/5),H-8)}
+ jobs.forEach(([j,t],i)=>{x.strokeStyle=COLORS[i%6];x.lineWidth=2.2;x.beginPath();let first=true;const pts=t.points;const k=Math.max(1,Math.round(pts.length/400));
+  for(let n=0;n<pts.length;n+=k){const win=pts.slice(n,n+k),s=win[0][0],l=win.reduce((a,p)=>a+p[1],0)/win.length;first?x.moveTo(sx(s),sy(l)):x.lineTo(sx(s),sy(l));first=false}x.stroke();
+  const last=pts[pts.length-1];x.fillStyle=COLORS[i%6];x.beginPath();x.arc(sx(last[0]),sy(last[1]),4,0,7);x.fill();x.textAlign='left';x.fillText(last[1].toFixed(3),Math.min(sx(last[0])+8,W-60),sy(last[1])-8)});}
+let HIST=[];
+async function refresh(){fetch('/api/hist',{cache:'no-store'}).then(r=>r.json()).then(h=>{if(Array.isArray(h)){HIST=h;window.so101Hist=HIST}}).catch(()=>{});   // why: not awaited, so a slow or broken /api/hist never stalls the gauges (sparklines lag one cycle at most)
+ let s;try{s=await(await fetch('/api/state',{cache:'no-store'})).json()}catch(e){return}if(!s||!s.jetson)return;   // why: server.py answers {"error":…} when the state JSON fails to build
+ window.so101State=s;
+ const j=s.jetson,on=j.online;
+ // status
+ const kinds=[...new Set(s.procs.map(p=>p.kind))];const badge=$('#badge');
+ if(kinds.length){badge.textContent=kinds.map(k=>k.toUpperCase()).join(' + ');badge.className='badge hot'}else if(on){badge.textContent='IDLE · READY';badge.className='badge'}else{badge.textContent='JETSON OFFLINE';badge.className='badge off'}
+ window.simArm=s.sim_arm||null;if(s.sim_arm)window.simArmSeen=Date.now()/1000;const realBusy=kinds.length>0;window.simDrive=!!(s.sim_arm&&!realBusy);$('#arm_sub').textContent=window.simDrive?`SIMULATION · ${(s.sim_arm.mode||'').replace('_sim','').toUpperCase()} · ep ${s.sim_arm.ep}${s.sim_arm.success?' · ✓':''}`:($('#arm_sub').dataset.real||'');const sp=s.spotify||{},spOn=!!sp.running&&sp.state==='playing',p0=s.procs[0];window.so101Busy=kinds.length;window.so101Kinds=kinds;
+ const robotLine=kinds.length?`${kinds.map(k=>k.toUpperCase()).join(' + ')} on ${p0.host.toUpperCase()} · ${Math.floor(p0.secs/60)}m${String(p0.secs%60).padStart(2,'0')}s`:'';
+ const mmss=x=>`${Math.floor(x/60)}:${String(Math.floor(x%60)).padStart(2,'0')}`;
+ $('#deck').classList.toggle('playing',spOn||kinds.length>0);$('#lamp').classList.toggle('on',kinds.includes('record'));
+ $('#np').textContent=spOn?`♫ ${sp.track} — ${sp.artist} · ${mmss(sp.pos)} / ${mmss(sp.dur)}${robotLine?' · '+robotLine:''}`:(sp.running&&sp.track?`⏸ ${sp.track} — ${sp.artist}${robotLine?' · '+robotLine:''}`:(robotLine?'NOW PLAYING · '+robotLine:'STANDBY · 33⅓ RPM'));
+ const lab=$('#label');if(sp.running&&sp.art){lab.classList.add('art');if(lab.dataset.art!==sp.art){lab.dataset.art=sp.art;lab.style.backgroundImage=`url(${sp.art})`}}else{lab.classList.remove('art');lab.style.backgroundImage='';lab.dataset.art=''}
+ $('#sp').classList.toggle('on',!!sp.running);
+ const modeAct=new Set(s.procs.map(p=>({teleoperate:'teleop',rollout:'policy',dance:'dance',demo_wave:'wave',replay:'replay',nudge:'policy'})[p.kind]));document.querySelectorAll('.modes button').forEach(b=>b.classList.toggle('on',modeAct.has(b.dataset.m)));
+ const run=s.procs.map(p=>`<b>lerobot-${p.kind}</b> on ${p.host} · ${Math.floor(p.secs/60)}m${String(p.secs%60).padStart(2,'0')}s`).join('<br>');
+ $('#meta').innerHTML=(run?run+'<br>':'')+`Jetson <b>${on?'up '+(j.uptime||''):'unreachable'}</b>${j.disk?` · disk <b>${j.disk.used}</b>/${j.disk.total}`:''} &nbsp;|&nbsp; Mac cpu <b>${Math.round(s.mac.cpu||0)}%</b> · ram <b>${((s.mac.ram_used||0)/1024).toFixed(1)}</b>/${((s.mac.ram_total||0)/1024).toFixed(0)} GB · free <b>${(s.mac.disk_free_gb||0).toFixed(0)} GB</b>`;
+ $('#hosts').textContent=on?'tc-nano':'';$('#jmode').textContent=on?(j.mode||'')+(j.gpu_mhz?` · GPU ${j.gpu_mhz} MHz`:''):'';
+ // gauges
+ const g=on?j:{gpu:0,cpu:0,ram_used:0,ram_total:1,temp:0,watts:0,cpu_cores:[]};
+ gauge('#g_gpu',g.gpu/100,heat(g.gpu/100));$('#v_gpu').textContent=on?Math.round(g.gpu)+'%':'--';
+ const emcOk=on&&g.emc!=null;gauge('#g_bus',emcOk?g.emc/100:0,heat(emcOk?g.emc/100:0));$('#v_bus').textContent=emcOk?Math.round(g.emc)+'%':'--';$('#l_bus').textContent=emcOk?'BUS'+(g.emc_mhz?' · '+g.emc_mhz+' MHz':''):(on?'BUS · NEEDS ROOT':'BUS');
+ gauge('#g_cpu',g.cpu/100,heat(g.cpu/100));$('#v_cpu').textContent=on?Math.round(g.cpu)+'%':'--';
+ gauge('#g_ram',g.ram_used/g.ram_total,heat(g.ram_used/g.ram_total));$('#v_ram').textContent=on?(g.ram_used/1024).toFixed(1)+'G':'--';
+ gauge('#g_tmp',g.temp/90,heat(g.temp/90));$('#v_tmp').textContent=on?Math.round(g.temp)+'°':'--';
+ gauge('#g_pwr',g.watts/25,heat(g.watts/25));$('#v_pwr').textContent=on?g.watts.toFixed(1)+'W':'--';
+ if(on){const sc=css('--acc2');spark('#g_gpu',HIST,1,100,sc);spark('#g_bus',HIST,2,100,sc);spark('#g_cpu',HIST,3,100,sc);spark('#g_ram',HIST,4,100,sc);spark('#g_tmp',HIST,5,90,sc);spark('#g_pwr',HIST,6,25,sc)}
+ $('#cores').innerHTML=(g.cpu_cores||[]).map(c=>`<div style="height:${Math.max(4,c)}%"></div>`).join('');
+ // training
+ lossChart(s.training);const act=Object.values(s.training).filter(t=>t.points&&t.points.length);$('#tr_sub').textContent=act.length?`${act.length} run${act.length>1?'s':''} logged`:'';
+ // datasets
+ const ds=Object.entries(s.datasets).sort((a,b)=>b[1].frames-a[1].frames),maxf=Math.max(1,...ds.map(([,d])=>d.frames));
+ window.DSNEW=Object.entries(s.datasets).sort((a,b)=>(b[1].mtime||0)-(a[1].mtime||0)).map(([n,d])=>({name:n.replace('@jetson',''),mtime:d.mtime||0,episodes:d.episodes}));
+ const dl=$('#rf_dsl');if(dl&&dl.dataset.n!==String(DSNEW.length)+DSNEW.map(d=>d.name).join()){dl.dataset.n=String(DSNEW.length)+DSNEW.map(d=>d.name).join();dl.innerHTML=DSNEW.map(d=>`<option value="${d.name}">${d.episodes} ep</option>`).join('')}
+ $('#ds tbody').innerHTML=ds.map(([n,d])=>`<tr><td>${n.replace('@jetson','')}<span class="tag ${d.host}">${d.host}</span><div class="bar"><i style="width:${100*d.frames/maxf}%"></i></div></td><td class="num">${d.episodes}</td><td class="num">${fmt(d.frames)}</td><td class="num">${(d.hours*60).toFixed(1)}</td></tr>`).join('')||'<tr><td class="empty" colspan=4>no datasets</td></tr>';
+ const totE=ds.reduce((a,[,d])=>a+d.episodes,0),totH=ds.reduce((a,[,d])=>a+d.hours,0);$('#ds_sub').textContent=ds.length?`${totE} episodes · ${(totH*60).toFixed(0)} min`:'';
+ // policies
+ const pol=Object.entries(s.policies).sort((a,b)=>b[1].mtime-a[1].mtime);
+ $('#pol tbody').innerHTML=pol.map(([n,p])=>`<tr><td>${n.replace('@jetson','')}<span class="tag ${p.host}">${p.host}</span></td><td style="color:var(--dim);font-size:14px">${p.dataset.replace(/^[^/]+\//,'')}</td><td class="num">${fmt(p.steps)}</td></tr>`).join('')||'<tr><td class="empty" colspan=3>no trained policies</td></tr>';
+ $('#pol_sub').textContent=pol.length?`${pol.length} ${pol[0][1].type.toUpperCase()}`:'';
+ // events
+ $('#events').innerHTML=s.events.slice(0,9).map(e=>`<div><b>${new Date(e.t*1000).toLocaleTimeString([],{hour12:false})}</b>${e.msg}</div>`).join('')||'<div class="empty">quiet</div>';
+}
+// ---- arm: joint table + virtual arm (simple 3D forward kinematics, isometric projection) ----
+const JN=['shoulder_pan','shoulder_lift','elbow_flex','wrist_flex','wrist_roll','gripper'],JL={shoulder_pan:'PAN',shoulder_lift:'LIFT',elbow_flex:'ELBOW',wrist_flex:'WRIST',wrist_roll:'ROLL',gripper:'GRIP'};
+function armTable(arms){const simDrive=window.simDrive;const f=simDrive?window.simArm.pos:(arms.follower&&arms.follower.pos||{}),l=simDrive?{}:(arms.leader&&arms.leader.pos||{});$('#joints thead th:nth-child(2)').textContent=simDrive?'SIMULATION':'FOLLOWER';
+ $('#joints tbody').innerHTML=JN.map(k=>{const fv=f[k],lv=l[k],u=k==='gripper'?'%':'°';return`<tr><td>${JL[k]}</td><td class="num">${fv==null?'--':fv.toFixed(1)+u}</td><td class="num" style="color:#4fd6ff">${lv==null?'--':lv.toFixed(1)+u}</td></tr>`}).join('');
+ const src=(arms.follower||{}).src||'',age=arms.follower?Math.max(0,(Date.now()/1000-arms.follower.rx)):99;const realSub=age>3?'no stream':(src==='lerobot'?'via lerobot · live':src==='idle-poll'?'idle · live':src);$('#arm_sub').dataset.real=realSub;if(!window.simArm)$('#arm_sub').textContent=realSub}
+let lastArms={};
+async function arms(){try{const s=await(await fetch('/api/state',{cache:'no-store'})).json();lastArms=s.arms||{};window.armsNow=lastArms}catch(e){}armTable(lastArms)}
+setInterval(arms,200);
+// tempest (vector web game, self-playing)
+const TP={lv:0,score:0,lives:3,lane:0,px:0,shots:[],foes:[],parts:[],cool:0,kills:0,warp:0,t:0,last:0,dead:0,flash:0,keys:{}};
+const WEBS=[n=>0,n=>1-Math.abs(n),n=>Math.abs(n)*.9,n=>(Math.round((n+1)*3)%2?1:-1)*.8,n=>Math.sin(n*Math.PI*1.5),n=>Math.cos(n*Math.PI)*.8,n=>n>0?.8:-.8,n=>1-n*n*1.6];
+const COLS=['#4fd6ff','#ff5a5f','#ffd166','#7cff6b','#c77dff','#ff9f43','#4fd6ff','#ffffff'];
+function webPts(){const N=16,f=WEBS[TP.lv%WEBS.length];return Array.from({length:N+1},(_,i)=>{const n=i/N*2-1;return [n,f(n)]})}
+function proj(c,n,y,z){const W=c.width,H=c.height,zz=Math.pow(Math.min(1,Math.max(0,z)),.55),far=.1,sx=1-(1-far)*zz;
+ const cx=W/2+n*W*.47*sx,top=H*.08,near=H*.84,cy=top+(near-top)*(1-zz)+y*H*.14*sx;return [cx,cy]}
+function spawnFoe(){const pts=webPts();TP.foes.push({lane:Math.floor(Math.random()*(pts.length-1)),z:1,v:.08+.03*TP.lv+Math.random()*.05,tank:Math.random()<.2+TP.lv*.02,flip:0,rim:false})}
+function boom(c,x,y,col,n=14){for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,s=40+Math.random()*120;TP.parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:.6+Math.random()*.5,col})}}
+function tempestStep(dt,c){const pts=webPts(),NL=pts.length-1;TP.t+=dt;const busy=(window.so101Busy||0)>0;
+ if(TP.warp>0){TP.warp-=dt;if(TP.warp<=0){TP.lv++;TP.foes=[];TP.shots=[];TP.kills=0}return}
+ if(TP.dead>0){TP.dead-=dt;if(TP.dead<=0){TP.foes=TP.foes.filter(f=>!f.rim);TP.lives--;if(TP.lives<0){TP.lives=3;TP.score=0;TP.lv=0}}return}
+ // spawn
+ if(TP.foes.length<3+TP.lv+(busy?3:0)&&Math.random()<dt*(.5+.1*TP.lv)*(busy?2:1))spawnFoe();
+ // AI / keys
+ const target=TP.foes.length?TP.foes.reduce((a,b)=>a.z<b.z?a:b):null;let want=TP.lane;
+ if(TP.keys.ArrowLeft)want=TP.lane-1;else if(TP.keys.ArrowRight)want=TP.lane+1;else if(target)want=target.lane;
+ if(want!==TP.lane&&TP.t-TP.last>.09){TP.lane+=Math.sign(want-TP.lane);TP.lane=Math.max(0,Math.min(NL-1,TP.lane));TP.last=TP.t}
+ TP.px+=(TP.lane-TP.px)*Math.min(1,dt*14);TP.cool-=dt;
+ const aligned=target&&target.lane===TP.lane;if((aligned||TP.keys[' ']||Math.random()<dt*.6)&&TP.cool<=0&&TP.shots.length<6){TP.shots.push({lane:TP.lane,z:0});TP.cool=.14}
+ // move shots/foes
+ for(const s of TP.shots)s.z+=dt*2.2;TP.shots=TP.shots.filter(s=>s.z<1.05);
+ for(const f of TP.foes){if(!f.rim){f.z-=dt*f.v;if(f.z<=0){f.z=0;f.rim=true;f.flip=0}}else{f.flip+=dt;if(f.flip>.35){f.flip=0;f.lane+=Math.sign(TP.lane-f.lane)||1;f.lane=Math.max(0,Math.min(NL-1,f.lane))}
+   if(f.lane===TP.lane){const [x,y]=proj(c,(pts[f.lane][0]+pts[f.lane+1][0])/2,(pts[f.lane][1]+pts[f.lane+1][1])/2,0);boom(c,x,y,'#ffd166',40);TP.dead=1.4;TP.flash=.3}}}
+ // hits
+ for(const s of TP.shots)for(const f of TP.foes){if(!f.hit&&!s.hit&&f.lane===s.lane&&Math.abs(f.z-s.z)<.06){f.hit=s.hit=true;const [x,y]=proj(c,(pts[f.lane][0]+pts[f.lane+1][0])/2,(pts[f.lane][1]+pts[f.lane+1][1])/2,f.z);boom(c,x,y,COLS[TP.lv%COLS.length]);TP.score+=f.tank?250:150;TP.kills++;
+   if(f.tank){for(const d of[-1,1])TP.foes.push({lane:Math.max(0,Math.min(NL-1,f.lane+d)),z:f.z,v:f.v*1.2,tank:false,flip:0,rim:false})}}}
+ TP.foes=TP.foes.filter(f=>!f.hit);TP.shots=TP.shots.filter(s=>!s.hit);
+ for(const q of TP.parts){q.x+=q.vx*dt;q.y+=q.vy*dt;q.l-=dt}TP.parts=TP.parts.filter(q=>q.l>0);
+ if(TP.kills>=12+TP.lv*3){TP.warp=1.6;TP.score+=1000}
+ $('#tscore').textContent=String(TP.score).padStart(6,'0')}
+function tempestDraw(c,x){const W=c.width,H=c.height,pts=webPts(),NL=pts.length-1,col=COLS[TP.lv%COLS.length];x.clearRect(0,0,W,H);
+ x.fillStyle='#000';x.fillRect(0,0,W,H);x.globalCompositeOperation='lighter';x.lineCap='round';x.lineJoin='round';
+ const zoff=TP.warp>0?1-Math.max(0,TP.warp/1.6):0;const P=(n,y,z)=>proj(c,n,y,Math.min(1,z+zoff*1.2));
+ // stars
+ x.fillStyle='rgba(255,255,255,.35)';for(let i=0;i<40;i++){const sx=(i*7919%W),sy=(i*104729%(H*.6));x.fillRect(sx,sy,1,1)}
+ // web
+ x.shadowColor=col;x.shadowBlur=14;x.strokeStyle=col;x.lineWidth=1.6;
+ for(const zz of[0,1]){x.beginPath();pts.forEach(([n,y],i)=>{const [a,b]=P(n,y,zz);i?x.lineTo(a,b):x.moveTo(a,b)});x.stroke()}
+ x.lineWidth=1;x.globalAlpha=.7;for(const [n,y] of pts){const [a,b]=P(n,y,0),[d,e]=P(n,y,1);x.beginPath();x.moveTo(a,b);x.lineTo(d,e);x.stroke()}x.globalAlpha=1;
+ // player lane highlight
+ if(TP.dead<=0){x.strokeStyle='#ffd166';x.shadowColor='#ffd166';x.lineWidth=2.2;const i=TP.lane;x.beginPath();for(const [n,y] of[pts[i],pts[i+1]]){const [a,b]=P(n,y,0);x.lineTo(a,b)}
+  for(const k of[i+1,i]){const [a,b]=P(pts[k][0],pts[k][1],1);x.lineTo(a,b)}x.closePath();x.stroke()
+  // claw
+  const n=pts[Math.floor(TP.px)][0]+(pts[Math.min(NL,Math.floor(TP.px)+1)][0]-pts[Math.floor(TP.px)][0])*(TP.px%1+.5),yy=pts[Math.floor(TP.px)][1];
+  const [cx,cy]=P(n,yy,0),s=Math.max(10,H*.09);x.beginPath();x.moveTo(cx-s,cy-s*.2);x.lineTo(cx-s*.45,cy-s*1.1);x.lineTo(cx,cy-s*.35);x.lineTo(cx+s*.45,cy-s*1.1);x.lineTo(cx+s,cy-s*.2);x.lineTo(cx,cy+s*.15);x.closePath();x.stroke()}
+ // shots
+ x.strokeStyle='#fff';x.shadowColor='#fff';x.lineWidth=2;for(const s of TP.shots){const m=(pts[s.lane][0]+pts[s.lane+1][0])/2,my=(pts[s.lane][1]+pts[s.lane+1][1])/2;const [a,b]=P(m,my,s.z),[d,e]=P(m,my,Math.min(1,s.z+.04));x.beginPath();x.moveTo(a,b);x.lineTo(d,e);x.stroke()}
+ // foes
+ for(const f of TP.foes){const m=(pts[f.lane][0]+pts[f.lane+1][0])/2,my=(pts[f.lane][1]+pts[f.lane+1][1])/2;const [a,b]=P(m,my,f.z);const sc=(1-.85*Math.pow(f.z,.55))*Math.max(9,H*.075);
+  x.strokeStyle=f.tank?'#c77dff':'#ff5a5f';x.shadowColor=x.strokeStyle;x.lineWidth=1.8;x.beginPath();
+  if(f.tank){x.moveTo(a,b-sc);x.lineTo(a+sc,b);x.lineTo(a,b+sc);x.lineTo(a-sc,b);x.closePath()}else{const w=f.rim?Math.sin(f.flip*18)*.4:0;x.moveTo(a-sc,b-sc*.5+w*sc);x.lineTo(a+sc,b+sc*.5);x.lineTo(a+sc,b-sc*.5-w*sc);x.lineTo(a-sc,b+sc*.5);x.closePath()}x.stroke()}
+ // particles
+ for(const q of TP.parts){x.fillStyle=q.col;x.shadowColor=q.col;x.globalAlpha=Math.max(0,q.l);x.fillRect(q.x,q.y,2,2)}x.globalAlpha=1;
+ // lives + level
+ x.shadowBlur=0;x.fillStyle='#ffd166';x.font=`${Math.max(11,H*.09)}px Michroma`;x.textAlign='right';x.fillText(`LEVEL ${TP.lv+1}   ${'▲ '.repeat(Math.max(0,TP.lives))}`,W-18,Math.max(16,H*.13));
+ if(TP.flash>0){TP.flash-=1/60;x.fillStyle=`rgba(255,255,255,${TP.flash})`;x.fillRect(0,0,W,H)}
+ x.globalCompositeOperation='source-over'}
+const typing=e=>/^(INPUT|TEXTAREA|SELECT)$/.test((e.target||{}).tagName)||(e.target&&e.target.isContentEditable);   // why: top level — the lock-override and shortcut keydown handlers below use it too (scoped inside startTempest it threw ReferenceError on every keypress)
+let tempestOn=false,tempestStarted=false;function stopTempest(){tempestOn=false}   // skins/skins.js hands the attract canvas to a skin
+function startTempest(){tempestOn=true;if(tempestStarted)return;tempestStarted=true;const c=$('#tempest'),x=c.getContext('2d');let last=performance.now();
+ addEventListener('keydown',e=>{if(typing(e))return;if(['ArrowLeft','ArrowRight',' '].includes(e.key)){TP.keys[e.key]=true;e.preventDefault()}});addEventListener('keyup',e=>{if(typing(e))return;TP.keys[e.key]=false});
+ (function frame(now){const dt=Math.min(.05,(now-last)/1000);last=now;if(!tempestOn){requestAnimationFrame(frame);return}const r=c.parentElement.getBoundingClientRect();if(c.width!==Math.round(r.width)||c.height!==Math.round(r.height)){c.width=Math.round(r.width);c.height=Math.round(r.height)}   // why: while a skin owns the canvas this loop must not measure or resize it
+  if(c.width>0&&!simOn&&tempestOn){tempestStep(dt,c);tempestDraw(c,x)}requestAnimationFrame(frame)})(last)}
+let termOn=false;
+async function term(){let t={up:false};try{t=await(await fetch('/api/term',{cache:'no-store'})).json()}catch(e){}
+ const f=$('#termframe');if(t.up&&!termOn){f.src=t.url;termOn=true}if(!t.up&&termOn){f.removeAttribute('src');termOn=false}
+ $('#term').style.display=t.up?'':'none';$('#shell').className='panel'+(t.up?'':' wide');document.body.classList.toggle('compact',t.up);layout()}
+function layout(){const live=$('#live').style.display!=='none';$('#gallery').style.height=termOn?(live?'180px':'400px'):(live?'320px':'700px')}
+term();setInterval(term,5000);
+let liveOn={};
+function pump(n){const im=$('#cam_'+n);if(!liveOn[n])return;const t=Date.now();const nx=new Image();
+ nx.onload=()=>{im.src=nx.src;setTimeout(()=>pump(n),Math.max(0,90-(Date.now()-t)))};nx.onerror=()=>setTimeout(()=>pump(n),700);nx.src='/cam/'+n+'.jpg?'+t}
+async function cams(){let live=[];try{live=await(await fetch('/api/cams',{cache:'no-store'})).json()}catch(e){}
+ const any=live.length>0;$('#live').style.display=any?'':'none';layout();
+ for(const n of ['top','front','wrist']){const im=$('#cam_'+n),on=live.includes(n);im.parentElement.style.display=on?'':'none';if(on&&!liveOn[n]){liveOn[n]=1;pump(n)}if(!on&&liveOn[n]){liveOn[n]=0;im.removeAttribute('src')}}}
+cams();setInterval(cams,5000);
+/* ---- feed calibration overlays: mat grid, marker centres and arm base projected through each camera's inverse homography; tap to measure ---- */
+// /api/calib gives a px -> table mm homography per camera: the overhead one (homography_px_to_table_mm, raw 640x360 px) and the FRONT camera's
+// (camera.front.homography_px_to_table_mm, derived from its solved pose: mat surface only, no orientation assumed; the view is oblique). Each
+// feed is letterboxed (object-fit:contain), so every projected point goes raw px -> (optional 180° flip) -> drawn-image rect, and a tap goes the
+// same way back. Nothing is drawn while uncalibrated. calOverlay() builds one overlay per feed; the TOP one keeps the original ids (#calov,
+// #calchip, #calread, #calbg) and globals (CAL, CALHI, calTap, calDraw, calClear, CALDBG), the FRONT one carries a _front suffix (#calov_front,
+// CALDBG_front). One shared calibPoll() feeds both (the 3D stage listens to it too: never add a second poller under this name).
+let CAL=null,CALHI=null;
+const inv3=m=>{const [[a,b,c],[d,e,f],[g,h,i]]=m,A=e*i-f*h,B=f*g-d*i,C=d*h-e*g,det=a*A+b*B+c*C;if(!det||!isFinite(det))return null;const s=1/det;
+ return[[A*s,(c*h-b*i)*s,(b*f-c*e)*s],[B*s,(a*i-c*g)*s,(c*d-a*f)*s],[C*s,(b*g-a*h)*s,(a*e-b*d)*s]]};
+const hApply=(m,x,y)=>{const w=m[2][0]*x+m[2][1]*y+m[2][2];return[(m[0][0]*x+m[0][1]*y+m[0][2])/w,(m[1][0]*x+m[1][1]*y+m[1][2])/w]};
+const TOPFLIP=false;   // true when #cam_top is CSS-rotated 180°; keep in sync with the stylesheet (the front feed is never rotated)
+function tableToArm(mx,my,a=CAL&&CAL.arm){if(!a||!a.base_mm)return null;const y=(a.yaw_deg||0)*Math.PI/180,dx=mx-a.base_mm[0],dy=my-a.base_mm[1];return[dx*Math.cos(y)+dy*Math.sin(y),-dx*Math.sin(y)+dy*Math.cos(y)]}
+const f2=n=>{const v=Math.round(n*100)/100;return(v===0?0:v).toFixed(2)};
+const parts=a=>a.map((t,i)=>`<div class="p">${i?'· ':''}${t}</div>`).join(' ');   // wraps between items only (the TOP feed can be ~300 px wide beside FRONT and WRIST)
+function calOverlay(o){   // o: {img: '#cam_x', cam: 'top'|'front', suffix: '' | '_front', flip: bool, locate: extra /api/locate query ('' | 'cam=front&')}
+ const img=$(o.img),feed=img.parentElement,sfx=o.suffix||'',flip=!!o.flip,cv=document.createElement('canvas'),chip=document.createElement('div'),read=document.createElement('div');
+ cv.id='calov'+sfx;cv.className='calov';chip.id='calchip'+sfx;chip.className='calchip off';chip.textContent='UNCALIBRATED';read.id='calread'+sfx;read.className='calread';read.title='tap to clear';
+ for(const el of [cv,chip,read])el.dataset.cam=o.cam;feed.append(cv,chip,read);
+ const S={cam:o.cam,feed,cv,chip,read,cal:null,H:null,HI:null,tap:null,seq:0,nat:'',imageSize:null};   // cal: the /api/calib payload (mat, markers, arm) while THIS camera's homography is usable, else null
+ const pxToDisp=(R,u,v)=>flip?[R.ox+(R.W-u)*R.sx,R.oy+(R.H-v)*R.sy]:[R.ox+u*R.sx,R.oy+v*R.sy];          // raw camera px -> css px inside the feed (optional 180° flip + letterbox)
+ const dispToPx=(R,x,y)=>flip?[R.W-(x-R.ox)/R.sx,R.H-(y-R.oy)/R.sy]:[(x-R.ox)/R.sx,(y-R.oy)/R.sy];
+ const rect=()=>{const r=cv.getBoundingClientRect(),[W,H]=S.imageSize||[640,360],nw=img.naturalWidth||W,nh=img.naturalHeight||H,s=Math.min(r.width/nw,r.height/nh)||0,dw=nw*s,dh=nh*s;
+  return{W,H,w:r.width,h:r.height,left:r.left,top:r.top,ox:(r.width-dw)/2,oy:(r.height-dh)/2,sx:dw/W,sy:dh/H}};
+ const matToDisp=(R,xin,yin)=>{const [u,v]=hApply(S.HI,xin*25.4,yin*25.4);return pxToDisp(R,u,v)};
+ const local=(u,v)=>{const mm=hApply(S.H,u,v),am=tableToArm(mm[0],mm[1],S.cal&&S.cal.arm);return{table_in:[mm[0]/25.4,mm[1]/25.4],arm_in:am?[am[0]/25.4,am[1]/25.4]:null}};
+ const show=t=>{const p=[`<b>MAT</b> ${f2(t.table_in[0])}, ${f2(t.table_in[1])} in`];if(t.arm_in)p.push(`<b>ARM</b> ${f2(t.arm_in[0])}, ${f2(t.arm_in[1])} in`);read.innerHTML=parts(p)+'<i>×</i>';read.classList.add('on')};
+ S.rect=rect;S.local=local;
+ S.draw=()=>{const R=rect(),dpr=devicePixelRatio||1;if(R.w<2||R.h<2)return;cv.width=Math.round(R.w*dpr);cv.height=Math.round(R.h*dpr);const x=cv.getContext('2d');x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,R.w,R.h);const D=window['CALDBG'+sfx]={rect:R,markers:{}};if(!S.cal||!S.HI)return;
+  const mat=S.cal.mat||{},MW=mat.width_in||18,MD=mat.depth_in||12,c1=css('--acc'),c2=css('--acc2'),ink=css('--ink');
+  const line=(a,b)=>{const p=matToDisp(R,a[0],a[1]),q=matToDisp(R,b[0],b[1]);x.moveTo(p[0],p[1]);x.lineTo(q[0],q[1])};
+  x.lineWidth=1;x.strokeStyle=c2;x.globalAlpha=.16;x.beginPath();for(let i=1;i<MW;i++)line([i,0],[i,MD]);for(let j=1;j<MD;j++)line([0,j],[MW,j]);x.stroke();          // 1-inch grid
+  x.globalAlpha=.8;x.lineWidth=1.5;x.beginPath();line([0,0],[MW,0]);line([MW,0],[MW,MD]);line([MW,MD],[0,MD]);line([0,MD],[0,0]);x.stroke();                   // mat outline
+  x.globalAlpha=1;x.font='600 11px '+css('--mono');x.textBaseline='middle';x.textAlign='left';
+  const arrow=(a,b,col,label)=>{const p=matToDisp(R,a[0],a[1]),q=matToDisp(R,b[0],b[1]),g=Math.atan2(q[1]-p[1],q[0]-p[0]);x.strokeStyle=col;x.fillStyle=col;x.lineWidth=2;x.beginPath();x.moveTo(p[0],p[1]);x.lineTo(q[0],q[1]);x.stroke();
+   x.beginPath();x.moveTo(q[0],q[1]);x.lineTo(q[0]-7*Math.cos(g-.5),q[1]-7*Math.sin(g-.5));x.lineTo(q[0]-7*Math.cos(g+.5),q[1]-7*Math.sin(g+.5));x.closePath();x.fill();if(label)x.fillText(label,q[0]+9*Math.cos(g)-3,q[1]+9*Math.sin(g))};
+  arrow([0,0],[2,0],c1,'X');arrow([0,0],[0,2],c2,'Y');                                                                                                           // mat axes at the origin
+  for(const [id,p] of Object.entries(S.cal.layout_markers_in||{})){const [cx,cy]=matToDisp(R,p[0],p[1]);D.markers[id]=[cx,cy];x.strokeStyle=c1;x.fillStyle=c1;x.lineWidth=1.5;x.strokeRect(cx-5,cy-5,10,10);x.fillText(id,cx+8,cy-9)}   // marker centres
+  const a=S.cal.arm;if(a&&a.base_mm){const bx=a.base_mm[0]/25.4,by=a.base_mm[1]/25.4,y=(a.yaw_deg||0)*Math.PI/180,[px,py]=matToDisp(R,bx,by);D.base=[px,py];x.fillStyle=ink;x.beginPath();x.arc(px,py,4,0,7);x.fill();arrow([bx,by],[bx+2*Math.cos(y),by+2*Math.sin(y)],ink,'ARM')}   // base + forward (+X arm)
+  if(S.tap){const [cx,cy]=pxToDisp(R,S.tap.u,S.tap.v);D.tap=[cx,cy];x.strokeStyle=c2;x.lineWidth=1.5;x.beginPath();x.moveTo(cx-20,cy);x.lineTo(cx-6,cy);x.moveTo(cx+6,cy);x.lineTo(cx+20,cy);x.moveTo(cx,cy-20);x.lineTo(cx,cy-6);x.moveTo(cx,cy+6);x.lineTo(cx,cy+20);x.stroke();x.beginPath();x.arc(cx,cy,6,0,7);x.stroke()}};
+ S.clear=()=>{S.tap=null;S.seq++;read.classList.remove('on');read.innerHTML='';S.draw()};
+ S.set=(cal,H,imageSize,deco)=>{   // cal: the ok /api/calib payload or null; H: this camera's px -> table mm; deco(cal) -> [chip html, chip title]
+  const hi=cal&&Array.isArray(H)&&H.length===3?inv3(H):null;S.cal=hi?cal:null;S.H=hi?H:null;S.HI=hi;S.imageSize=Array.isArray(imageSize)&&imageSize.length===2?imageSize:null;
+  const [html,title]=deco(S.cal);chip.innerHTML=html;chip.classList.toggle('off',!S.cal);chip.title=title;if(!S.cal&&S.tap)S.clear();else S.draw()};
+ feed.addEventListener('click',e=>{if(!S.cal||!S.HI||read.contains(e.target))return;const R=rect();if(!R.sx||!R.sy)return;const [u,v]=dispToPx(R,e.clientX-R.left,e.clientY-R.top);if(u<0||v<0||u>R.W||v>R.H)return;   // taps on the letterbox are ignored
+  S.tap={u,v};const seq=++S.seq;show(local(u,v));S.draw();
+  fetch(`/api/locate?${o.locate||''}u=${u.toFixed(2)}&v=${v.toFixed(2)}&h_mm=0`,{cache:'no-store'}).then(r=>r.json()).then(j=>{if(seq!==S.seq||!j||!j.ok||!Array.isArray(j.table_in))return;show({table_in:j.table_in,arm_in:Array.isArray(j.arm_in)?j.arm_in:null})}).catch(()=>{})});
+ read.addEventListener('click',e=>{e.stopPropagation();S.clear()});
+ new ResizeObserver(()=>S.draw()).observe(feed);addEventListener('resize',S.draw);
+ img.addEventListener('load',()=>{const n=img.naturalWidth+'x'+img.naturalHeight;if(n!==S.nat){S.nat=n;S.draw()}});   // frames arrive ~10/s: redraw only when the stream size changes
+ return S}
+const calTop=calOverlay({img:'#cam_top',cam:'top',flip:TOPFLIP}),calFront=calOverlay({img:'#cam_front',cam:'front',suffix:'_front',locate:'cam=front&'});
+const calFeed=calTop.feed,calCv=calTop.cv,calChip=calTop.chip,calRead=calTop.read;window.calOverlays={top:calTop,front:calFront};
+function calDraw(){calTop.draw()}function calClear(){calTop.clear()}Object.defineProperty(window,'calTap',{get:()=>calTop.tap,set:v=>{calTop.tap=v}});   // the TOP overlay under its original names
+// SET BACKGROUND (top feed only): teach the mat map the empty mat (POST /api/scene/background, median of 3 frames over a second); brief SAVED / FAILED state, then back
+const calBg=document.createElement('button');calBg.id='calbg';calBg.type='button';calBg.className='calbtn';calBg.textContent='SET BACKGROUND';calBg.title='mat map: learn the empty mat (clear it first, park the arm)';calFeed.append(calBg);let calBgT=0;
+calBg.addEventListener('click',async e=>{e.stopPropagation();if(calBg.disabled)return;calBg.disabled=true;calBg.textContent='SAVING…';calBg.className='calbtn';let j=null;
+ try{j=await(await fetch('/api/scene/background',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({frames:3})})).json()}catch(err){}
+ const ok=!!(j&&j.ok);calBg.textContent=ok?'SAVED':'FAILED';calBg.className='calbtn '+(ok?'ok':'bad');calBg.title=ok?'background saved: '+(j.saved||''):'mat map: '+((j&&j.err)||'request failed');
+ clearTimeout(calBgT);calBgT=setTimeout(()=>{calBg.textContent='SET BACKGROUND';calBg.className='calbtn';calBg.title='mat map: learn the empty mat (clear it first, park the arm)';calBg.disabled=false},2200);if(typeof window.scenePoll==='function')window.scenePoll()});
+function calChipHtml(c){if(!c)return'UNCALIBRATED';const p=[],cam=c.camera||{},a=c.arm;if(cam.residual_mm_max!=null)p.push(`CAL ${(+cam.residual_mm_max).toFixed(1)} mm`);
+ if(a){if(a.residual_xy_mm_max!=null)p.push(`ARM FIT ${(+a.residual_xy_mm_max).toFixed(1)} mm`);if(a.wrist_roll_deg!=null)p.push(`ROLL ${(+a.wrist_roll_deg).toFixed(1)}°`)}else p.push('ARM UNFITTED');
+ if(c.live)p.push(`LIVE ${Math.round(+c.shift_px||0)} px`);if(c.holding)p.push('HOLDING');if(c.calib_ok===false)p.push('CHECK MAT');   // self-healing camera solve (docs/mat-scene.md): served live after a bump, held with < 3 markers, flagged when the mat itself moved
+ return p.length?parts(p):'CALIBRATED'}
+function calFrontChipHtml(fr){if(!fr)return'UNCALIBRATED';const p=['FRONT'];p.push(fr.reproj_rms_px!=null?`${(+fr.reproj_rms_px).toFixed(1)} px`:'POSE');return parts(p)}   // FRONT · <reprojection rms> px
+async function calibPoll(){let c=null;try{c=await(await fetch('/api/calib',{cache:'no-store'})).json()}catch(e){}
+ const sc=(c&&typeof c==='object'&&c.ok)?c:null,err=(c&&c.err)||'no calibration';
+ calTop.set(sc,sc&&sc.homography_px_to_table_mm,sc&&sc.image_size,cal=>[calChipHtml(cal),cal?`camera ${(cal.camera||{}).created||''}${cal.arm&&cal.arm.fitted?' · arm '+cal.arm.fitted:''}${cal.live?' · camera moved '+cal.shift_px+' px: re-solved live from the markers':cal.live_solve?' · re-solved from the markers '+cal.live_solve.at:''}${cal.calib_note?' · '+cal.calib_note:''}`:err]);
+ CAL=calTop.cal;CALHI=calTop.HI;
+ const fr=(sc&&sc.camera&&sc.camera.front)||null,fp=(fr&&fr.pose)||{};   // the front camera: pose-derived mat-surface homography, or nothing (no front_campose.json yet)
+ calFront.set(fr?sc:null,fr&&fr.homography_px_to_table_mm,fp.image_size,cal=>[calFrontChipHtml(cal?fr:null),cal?`front camera ${fr.created||''}${fp.source?' · '+fp.source:''}${fp.tilt_deg!=null?' · tilt '+(+fp.tilt_deg).toFixed(0)+'°':''}`:sc?'no front camera pose (so101-calib campose --name front)':err]);
+ // the 3D stage shares this poll: window.calib (null unless ok), the fitted joint offsets, a sequence number and a 'calib' event
+ window.calib=sc;window.calibOffsets=(sc&&sc.arm&&sc.arm.joint_offsets_deg)||{};window.calibSeq=(window.calibSeq||0)+1;dispatchEvent(new CustomEvent('calib',{detail:sc}))}
+window.calib=null;window.calibOffsets={};window.calibSeq=0;
+calibPoll();setInterval(calibPoll,60000);
+/* ---- end feed calibration overlays ---- */
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+async function shell(){let calls=[];try{calls=await(await fetch('/api/shell',{cache:'no-store'})).json()}catch(e){}
+ $('#shellbody').innerHTML=calls.slice(-5).map(c=>{const t=c.t?new Date(c.t).toLocaleTimeString([],{hour12:false}):'';const out=(c.out||'').trim().split('\n').filter(l=>l.trim()).slice(-3).join('\n');
+  return`<div class="sc${c.done?'':' run'}"><div class="d"><i>${t}</i>${esc(c.desc||'')}</div><div class="c">${esc(c.cmd.split('\n')[0].slice(0,220))}</div>${out?`<div class="o">${esc(out.slice(-400))}</div>`:''}</div>`}).join('')||'<div class="empty">idle</div>'}
+shell();setInterval(shell,2000);
+document.querySelectorAll('.modes button').forEach(b=>b.addEventListener('click',async()=>{b.classList.add('busy');try{const r=await(await fetch('/api/arm/'+b.dataset.m,{method:'POST'})).json();if(!r.ok)console.warn('arm mode',b.dataset.m,r)}catch(e){console.warn(e)}finally{setTimeout(()=>b.classList.remove('busy'),1500)}}));
+document.querySelectorAll('#sp button').forEach(b=>b.addEventListener('click',()=>fetch('/api/spotify/'+b.dataset.s,{method:'POST'})));
+// retinal-scan lock
+let lockedNow=null,imgTick=0;
+async function lockPoll(){let L;try{L=await(await fetch('/api/lock',{cache:'no-store'})).json()}catch(e){return}
+ const ls=$('#lockscreen'),sc=$('#scanner');if(L.locked!==lockedNow){lockedNow=L.locked;window.lockedNow=L.locked;ls.classList.toggle('off',!L.locked);if(L.locked){ls.classList.remove('okay');sc.classList.remove('ok');setTimeout(focusLock,50)}}
+ if(!L.locked)return;
+ $('#lockst').textContent=L.status||'';sc.classList.toggle('scanning',L.status==='SCANNING'||L.status==='CONFIRMED');const ok=L.status==='CONFIRMED';sc.classList.toggle('ok',ok);ls.classList.toggle('okay',ok);
+ document.querySelector('#scanner .prog').style.strokeDashoffset=1570*(1-(L.progress||0));
+ const eb=$('#eyebox');if(L.eye){const [x,y,w,h]=L.eye,W=L.w||640,H=L.h||480,box=420,sx=box/Math.min(W,H),ox=(W*sx-box)/2,oy=(H*sx-box)/2;eb.style.display='block';eb.style.left=(box-((x+w)*sx-ox))+'px';eb.style.top=(y*sx-oy)+'px';eb.style.width=(w*sx)+'px';eb.style.height=(h*sx)+'px'}else eb.style.display='none';
+ if(++imgTick%2===0)$('#scanimg').src='/cam/wrist.jpg?'+Date.now();}
+setInterval(lockPoll,180);lockPoll();
+// simulation view (takes over the Tempest strip while sim work is active; SIM button forces it)
+let simOn=false,simForce=null,simGifs=[],simGi=0,simData=null;
+function simShow(on){simOn=on;$('#simview').classList.toggle('off',!on);$('#simtoggle').classList.toggle('on',on)}
+$('#simtoggle').addEventListener('click',()=>{simForce=!simOn;simShow(simForce)});
+function simCycle(){if(!simGifs.length)return;const g=simGifs[simGi%simGifs.length];simGi++;$('#simimg').src=g.url+'?'+g.age;const t=$('#simtag');t.textContent=`${g.run.toUpperCase()} · ${g.ok?'SUCCESS':'FAIL'}`;t.className='tag '+(g.ok?'ok':'fail')}
+setInterval(simCycle,7000);
+async function simPoll(){let d;try{d=await(await fetch('/api/sim',{cache:'no-store'})).json()}catch(e){return}simData=d;
+ if(simForce===null)simShow(!!d.active);
+ if(JSON.stringify(d.gifs.map(g=>g.url))!==JSON.stringify(simGifs.map(g=>g.url))){simGifs=d.gifs;simGi=0;simCycle()}
+ const ev=d.evals.slice().sort((a,b)=>b.pct-a.pct);const best=ev[0];const rows=ev.slice(0,5).map(e=>`<tr class="${e===best?'best':''}"><td>${e.log.replace(/^eval_/,'')}</td><td>${e.ckpt?(+e.ckpt/1000)+'k':'—'}</td><td class="pct">${e.pct}%<span class="bar" style="width:${e.pct*1.2}px"></span></td><td style="color:var(--dim)">${e.ok}/${e.n}</td></tr>`).join('');
+ $('#simevals').innerHTML=`<tr><th>RUN</th><th>CKPT</th><th>SUCCESS</th><th></th></tr>${rows||'<tr><td colspan=4 style="color:var(--dim)">no evaluations yet</td></tr>'}`;
+ const ds=d.datasets.map(x=>`<b>${x.name.replace('so101_sim_','')}</b> ${x.episodes} ep · ${Math.round(x.frames/1000)}k frames`).join('<br>');
+ const pr=d.procs.length?d.procs.map(p=>`<span class="run">${p.kind.toUpperCase()}${p.ckpt?' '+(+p.ckpt/1000)+'k':''}${p.episodes?' · '+p.episodes+' ep':''} · ${p.etime}</span>`).join('<br>'):'<span>idle</span>';
+ $('#simstat').innerHTML=`<h3>Status</h3><div>${pr}</div><div style="margin-top:6px">${ds}</div>`}
+setInterval(simPoll,5000);simPoll();
+$('#lockbtn').addEventListener('click',()=>fetch('/api/lock',{method:'POST'}));
+let uDown=0,uTimer=null,pTimer=null;const override=()=>{fetch('/api/unlock',{method:'POST'});$('#lockst').textContent='OVERRIDE ACCEPTED'};
+addEventListener('keydown',e=>{if(typing(e))return;if((e.key==='u'||e.key==='U')&&lockedNow&&!uTimer){uTimer=setTimeout(()=>{uTimer=null;override()},2000)}},true);addEventListener('keyup',e=>{if(e.key==='u'||e.key==='U'){clearTimeout(uTimer);uTimer=null}},true);
+const LS=$('#lockscreen');LS.setAttribute('tabindex','0');LS.addEventListener('pointerdown',()=>{LS.focus();pTimer=setTimeout(override,2000)});['pointerup','pointercancel','pointerleave'].forEach(ev=>LS.addEventListener(ev,()=>clearTimeout(pTimer)));
+const focusLock=()=>{try{document.activeElement&&document.activeElement.blur()}catch(e){}window.focus();LS.focus()};
+// record form
+const RF=['rf_name','rf_task','rf_n','rf_ep','rf_rs'];try{const sv=JSON.parse(localStorage.getItem('so101rec')||'{}');RF.forEach(k=>{if(sv[k]!=null)$('#'+k).value=sv[k]})}catch(e){}
+let recRunning=false,recState=null;
+$('#recbtn').addEventListener('click',()=>{const ed=recRunning;$('#rf_editnote').style.display=ed?'':'none';$('#rf_go').textContent=ed?'✓ APPLY TO SESSION':'● START RECORDING';$('#rf_name').disabled=ed;document.querySelectorAll('input[name=rf_mode]').forEach(r=>r.disabled=ed);
+ if(ed&&recState){$('#rf_name').value=recState.name;$('#rf_task').value=recState.task;$('#rf_n').value=recState.episodes_target||recState.episodes;$('#rf_ep').value=recState.episode_s;$('#rf_rs').value=recState.reset_s}
+ if(!ed&&window.DSNEW&&DSNEW.length){const L=DSNEW[0];$('#rf_name').value=L.name;document.querySelector('input[name=rf_mode][value=append]').checked=true;
+  $('#rf_last').textContent=`last batch: ${L.name} · ${L.episodes} ep · ${new Date(L.mtime*1000).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})} — pick another from the list or type a new name`}
+ $('#recmodal').classList.add('on');setTimeout(()=>$(ed?'#rf_ep':'#rf_name').focus(),50)});
+['pause','next','rerecord','stop'].forEach((cmd,i)=>$(['#recpause','#recnext','#recredo','#recstop'][i]).addEventListener('click',()=>fetch('/api/record/ctl',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd})})));$('#rf_cancel').addEventListener('click',()=>$('#recmodal').classList.remove('on'));
+$('#recform').addEventListener('submit',async e=>{e.preventDefault();const p={name:$('#rf_name').value.trim(),task:$('#rf_task').value.trim(),episodes:+$('#rf_n').value,episode_s:+$('#rf_ep').value,reset_s:+$('#rf_rs').value,resume:document.querySelector('input[name=rf_mode]:checked').value==='append'};
+ if(recRunning){$('#rf_go').textContent='APPLYING…';const r=await(await fetch('/api/record/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();$('#rf_go').textContent='✓ APPLY TO SESSION';if(!r.ok){alert('could not apply: '+(r.err||'?'));return}$('#recmodal').classList.remove('on');recPoll();return}
+ try{localStorage.setItem('so101rec',JSON.stringify(Object.fromEntries(RF.map(k=>[k,$('#'+k).value]))))}catch(x){}
+ const r=await(await fetch('/api/record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();if(!r.ok){alert('could not start: '+(r.err||'?'));return}$('#recmodal').classList.remove('on');recPoll()});
+
+let recDoneAt=0;async function recPoll(){let R;try{R=await(await fetch('/api/record',{cache:'no-store'})).json()}catch(e){return}const st=$('#recstrip');recRunning=!!R.running;recState=R;window.recState=R;$('#recbtntxt').textContent=R.running?'✎ EDIT':'● RECORD';
+ if(R.running){const paused=!!R.paused_at;st.className='on'+(R.phase==='reset'?' reset':'')+(paused?' paused':'');const span=R.phase==='reset'?R.reset_s:R.episode_s,el=R.ep_started?Math.min(span,(paused?R.paused_at:Date.now()/1000)-R.ep_started):0;
+  $('#recpause').textContent=paused?'▶ RESUME':'‖ PAUSE';$('#recpause').title=paused?'resume: the clock and frame capture continue':'pause: frames and the clock stop, the arm stays live on the leader';
+  const tot=(R.done_total||0)+R.episode,tgt=R.episodes_target||R.episodes;$('#rectext').textContent=R.phase==='starting'?`STARTING · ${R.name}`:`${paused?'PAUSED':R.phase==='reset'?'RESET':'RECORDING'} · ep ${tot}/${tgt} · ${Math.max(0,Math.round(span-el))}s`;$('#recbar').style.width=(R.phase==='starting'?0:el/span*100)+'%';recDoneAt=0}
+ else if(R.done&&(!recDoneAt||Date.now()-recDoneAt<90000)){if(!recDoneAt)recDoneAt=Date.now();st.className='on done';$('#rectext').textContent=R.err?`RECORD FAILED · ${R.err.slice(0,60)}`:`DONE · ${R.name} · ${(R.done_total||0)+R.episode} episodes recorded`;$('#recbar').style.width='100%'}
+ else{st.className='';$('#recidletxt').textContent=R.name?`TRANSPORT IDLE · LAST SESSION ${R.name} · ${(R.done_total||0)+(R.episode||0)} EP`:'TRANSPORT IDLE · C TO RECORD A DATASET'}}
+setInterval(recPoll,2000);recPoll();
+// keyboard shortcuts (ignored while typing in a field; letters match the small tags on the buttons)
+const KEYS={t:'.modes button[data-m=teleop]',f:'.modes button[data-m=free]',h:'.modes button[data-m=hold]',s:'.modes button[data-m=stop]',l:'#lockbtn',n:'#recnext',r:'#recredo',q:'#recstop',d:'.modes button[data-m=dance]',w:'.modes button[data-m=wave]',e:'.modes button[data-m=replay]',p:'.modes button[data-m=policy]',v:'.modes button[data-m=vla]',c:'#recbtn'};
+for(const [k,sel] of Object.entries(KEYS)){const el=document.querySelector(sel);if(el&&!el.querySelector('kbd.key')){const tag=document.createElement('kbd');tag.className='key';tag.textContent=k.toUpperCase();el.appendChild(tag)}}
+addEventListener('keydown',ev=>{if(typing(ev)||ev.metaKey||ev.ctrlKey||ev.altKey)return;if($('#recmodal').classList.contains('on'))return;const k=ev.key.toLowerCase();const sel=KEYS[k];if(!sel)return;
+ if('nrq'.includes(k)&&!recRunning)return;   // record controls only during a session
+ if(k==='p'&&recRunning){ev.preventDefault();$('#recpause').click();return}   // p = pause/resume while a session runs, policy otherwise
+ if(k==='l'&&lockedNow)return;
+ const el=document.querySelector(sel);if(!el)return;ev.preventDefault();el.classList.add('busy');setTimeout(()=>el.classList.remove('busy'),300);el.click()});
+startTempest();refresh();setInterval(refresh,3000);
+</script>
+<script>
+// ---- calibration (from /api/calib): measured mat pose + joint offsets for the 3D stage; null when there is no calibration yet ----
+// window.calib / calibOffsets / calibSeq and the 'calib' event come from calibPoll() in the main script (shared with the top-feed overlay)
+</script>
+<script src="skins/skins.js"></script>
+<script type="importmap">{"imports":{"three":"https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js","three/examples/jsm/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/","urdf-loader":"https://cdn.jsdelivr.net/npm/urdf-loader@0.12.6/src/URDFLoader.js"}}</script>
+<script type="module">
+// ---- 3D wireframe of the real SO-101 (URDF + STL meshes from TheRobotStudio/SO-ARM100, "new calib" = LeRobot's zero pose) ----
+import * as THREE from 'three';
+import {STLLoader} from 'three/examples/jsm/loaders/STLLoader.js';
+import URDFLoader from 'urdf-loader';
+import {OrbitControls} from 'three/examples/jsm/controls/OrbitControls.js';
+const box=document.getElementById('arm3d');const W=()=>box.clientWidth,H=()=>box.clientHeight;
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});renderer.setPixelRatio(Math.min(2,devicePixelRatio));renderer.setSize(W(),H());box.appendChild(renderer.domElement);
+const scene=new THREE.Scene();scene.add(new THREE.HemisphereLight(0xdbe9ff,0x2a1a0a,1.1));const sun=new THREE.DirectionalLight(0xfff1dc,1.6);sun.position.set(0.5,1.3,0.7);scene.add(sun);const fill=new THREE.DirectionalLight(0x4fd6ff,0.5);fill.position.set(-0.6,0.4,-0.8);scene.add(fill);const cam=new THREE.PerspectiveCamera(32,W()/H(),0.01,10);
+const ctl=new OrbitControls(cam,renderer.domElement);ctl.target.set(0.26,0.08,0);ctl.enableDamping=true;ctl.dampingFactor=0.08;ctl.minDistance=0.2;ctl.maxDistance=2.5;ctl.maxPolarAngle=Math.PI*0.5;ctl.autoRotate=true;ctl.autoRotateSpeed=1.0;
+cam.position.set(0.95,0.5,0.75);ctl.update();
+let auto=true,hover=false,showLeader=false;const VIEWS={front:[1.15,0.35,0],side:[0.26,0.3,1.05],top:[0.259,1.25,0],reset:[0.95,0.5,0.75]};
+box.addEventListener('mouseenter',()=>hover=true);box.addEventListener('mouseleave',()=>hover=false);
+box.querySelectorAll('.armctl button').forEach(b=>b.addEventListener('click',e=>{const a=b.dataset.a;
+ if(a==='auto'){auto=!auto;b.classList.toggle('on',auto)}else if(a==='leader'){showLeader=!showLeader;b.classList.toggle('on',showLeader)}else{const v=VIEWS[a];cam.position.set(...v);ctl.target.set(0.26,0.08,0);ctl.update()}}));
+// ---- environment: table, the real 18x12" cutting mat placed from /api/calib (arm.base_in + yaw_deg), ArUco markers, overhead camera, handoff zone ----
+// Mat frame: origin at the mat corner on the arm's side, left; X along the 18 in edge, Y away from the arm; inches. Arm frame = URDF base_link (X fwd, Y left, Z up) = stage (x, -z, y).
+const IN=0.0254,MAT_W=18*IN,MAT_D=12*IN,MARK=2*IN;   // 18 in along mat X, 12 in along mat Y, 2 in ArUco squares
+const DEFAULT_POSE={base_in:[9,-1],yaw_deg:90,table_z_mm:0,markers:{"0":[16,10],"1":[2,10],"2":[15,4],"3":[3,4]}};   // no calibration yet: mat squared up and centred just in front of the base, today's guess
+function calibPose(c){const ok=c&&c.ok,a=ok&&c.arm,cam=(ok&&c.camera&&c.camera.pose)||null,front=(ok&&c.camera&&c.camera.front&&c.camera.front.pose)||null;   // cam: camera_pose_est passed through by /api/calib (table frame, z up), or null; front: the FRONT camera's solved pose (camera.front.pose), or null
+ if(!a)return {...DEFAULT_POSE,markers:(ok&&c.layout_markers_in)||DEFAULT_POSE.markers,calibrated:false,cam,front};
+ const base_in=a.base_mm?[a.base_mm[0]/25.4,a.base_mm[1]/25.4]:a.base_in;return {base_in:[+base_in[0],+base_in[1]],yaw_deg:+a.yaw_deg,table_z_mm:+(a.table_z_mm||0),markers:c.layout_markers_in||DEFAULT_POSE.markers,calibrated:true,cam,front}}
+let POSE=calibPose(window.calib);
+function matBasis(pose){const y=pose.yaw_deg*Math.PI/180,c=Math.cos(y),sn=Math.sin(y);   // mat X = arm (cos,-sin) -> stage (cos,0,sin); mat Y = arm (sin,cos) -> stage (sin,0,-cos)
+ const ex=new THREE.Vector3(c,0,sn),ey=new THREE.Vector3(sn,0,-c),m=new THREE.Matrix4().makeBasis(ex,ey,new THREE.Vector3(0,1,0));
+ const o=ex.clone().multiplyScalar(-pose.base_in[0]*IN).add(ey.clone().multiplyScalar(-pose.base_in[1]*IN));o.y=pose.table_z_mm/1000;   // mat origin: the base sits at mat (bx,by), so the origin is -bx along mat X and -by along mat Y from it
+ return {m,o}}
+function matToWorld(mx_in,my_in,pose=POSE){const{m,o}=matBasis(pose);return new THREE.Vector3(mx_in*IN,my_in*IN,0).applyMatrix4(m).add(o)}   // mat inches -> stage metres (on the mat surface)
+function matTexture(){const c=document.createElement('canvas');c.width=1800;c.height=1200;const x=c.getContext('2d');x.fillStyle='#1f2226';x.fillRect(0,0,c.width,c.height);
+ const ppi=c.width/18,X=i=>i*ppi,Y=j=>c.height-j*ppi;   // canvas bottom-left = mat origin, canvas x = mat X, canvas up = mat Y
+ x.strokeStyle='rgba(225,230,235,.28)';x.lineWidth=1;for(let i=0;i<=18;i++){x.beginPath();x.moveTo(X(i),0);x.lineTo(X(i),c.height);x.stroke()}for(let j=0;j<=12;j++){x.beginPath();x.moveTo(0,Y(j));x.lineTo(c.width,Y(j));x.stroke()}
+ x.strokeStyle='rgba(235,238,242,.55)';x.lineWidth=2.5;for(let i=0;i<=18;i+=6){x.beginPath();x.moveTo(X(i),0);x.lineTo(X(i),c.height);x.stroke()}for(let j=0;j<=12;j+=6){x.beginPath();x.moveTo(0,Y(j));x.lineTo(c.width,Y(j));x.stroke()}
+ x.strokeStyle='rgba(255,179,71,.9)';x.lineWidth=6;x.strokeRect(3,3,c.width-6,c.height-6);
+ x.fillStyle='rgba(230,235,240,.5)';x.font='bold 30px Rajdhani,sans-serif';x.textAlign='center';for(let i=1;i<18;i++)x.fillText(i,X(i),c.height-10);x.textAlign='left';for(let j=1;j<12;j++)x.fillText(j,8,Y(j)-6);
+ const t=new THREE.CanvasTexture(c);t.anisotropy=8;return t}
+function arucoTexture(id){const c=document.createElement('canvas');c.width=c.height=128;const x=c.getContext('2d');x.fillStyle='#f2f2f2';x.fillRect(0,0,128,128);x.fillStyle='#111';x.fillRect(16,16,96,96);
+ x.fillStyle='#f2f2f2';x.font='bold 56px Rajdhani,sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText(String(id),64,66);return new THREE.CanvasTexture(c)}
+const table=new THREE.Mesh(new THREE.PlaneGeometry(1.5,1.1),new THREE.MeshBasicMaterial({color:0x2a1d12,transparent:true,opacity:.55,depthWrite:false}));table.rotation.x=-Math.PI/2;table.position.set(0.25,-0.004,0);scene.add(table);
+const tableEdge=new THREE.LineSegments(new THREE.EdgesGeometry(table.geometry),new THREE.LineBasicMaterial({color:0x3a2a1a}));tableEdge.rotation.x=-Math.PI/2;tableEdge.position.copy(table.position);scene.add(tableEdge);
+table.renderOrder=-3;tableEdge.renderOrder=-3;window.__scene=scene;window.__cam=cam;window.__ctl=ctl;window.__THREE=THREE;
+const glow=new THREE.Mesh(new THREE.CircleGeometry(0.9,48),new THREE.MeshBasicMaterial({color:0x4fd6ff,transparent:true,opacity:.035,depthWrite:false}));glow.rotation.x=-Math.PI/2;glow.position.set(0.25,-0.002,0);glow.renderOrder=-4;scene.add(glow);
+function frustum(color,w,h,len){const g=new THREE.BufferGeometry();const p=[0,0,0,-w,-h,-len,0,0,0,w,-h,-len,0,0,0,w,h,-len,0,0,0,-w,h,-len,-w,-h,-len,w,-h,-len,w,-h,-len,w,h,-len,w,h,-len,-w,h,-len,-w,h,-len,-w,-h,-len];
+ g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));const l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color,transparent:true,opacity:.8}));
+ const body=new THREE.Mesh(new THREE.BoxGeometry(0.03,0.03,0.025),new THREE.MeshBasicMaterial({color,wireframe:true,transparent:true,opacity:.6}));l.add(body);return l}
+function label(text,color,pos,parent=scene,w=256){const c=document.createElement('canvas');c.width=w;c.height=64;const x=c.getContext('2d');x.font='bold 30px Rajdhani,sans-serif';x.fillStyle=color;x.textAlign='center';x.fillText(text,w/2,42);
+ const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),transparent:true,depthWrite:false}));sp.scale.set(0.16*w/256,0.04,1);sp.position.copy(pos);parent.add(sp);return sp}
+const TOP_H=0.50,TOP_POS=new THREE.Vector3(0.22,TOP_H,0);let topCam=frustum(0x4fd6ff,0.169,0.094,0.24);scene.add(topCam);   // C920 overhead: without a pose estimate it is drawn square to the mat over its centre, long side along mat X (placeTopCam)
+const topRay=new THREE.Line(new THREE.BufferGeometry().setFromPoints([TOP_POS.clone(),new THREE.Vector3(TOP_POS.x,0.001,0)]),new THREE.LineDashedMaterial({color:0x4fd6ff,dashSize:0.02,gapSize:0.015,transparent:true,opacity:.35}));scene.add(topRay);
+let topLabel=label('TOP CAM','#4fd6ff',new THREE.Vector3(TOP_POS.x,0.56,0)),topLabelText='TOP CAM';
+const FRONT_POS=new THREE.Vector3(0.62,0.07,0.40);let frontCam=frustum(0xffb347,0.085,0.047,0.12);scene.add(frontCam);const frontLabel=label('FRONT CAM','#ffb347',new THREE.Vector3(0.62,0.16,0.40));window.__frontCam=frontCam;window.__topPos=TOP_POS;window.__frontPos=FRONT_POS;   // static guess (no front pose): table height, past the far edge, on the arm's left as you face it (+z); placeFrontCam decides
+const frontRay=new THREE.Line(new THREE.BufferGeometry().setFromPoints([FRONT_POS.clone(),FRONT_POS.clone()]),new THREE.LineDashedMaterial({color:0xffb347,dashSize:0.02,gapSize:0.015,transparent:true,opacity:.35}));frontRay.name='front_ray';frontRay.visible=false;scene.add(frontRay);
+// a camera pose from cam_calib.py campose (position_mm in the table frame, z up; optical_axis / up_table unit vectors in the table frame), validated, and the
+// frustum orientation it implies in the mat group: the frustum looks down its -z, its +y along up_table (projected off the axis), x = y cross z.
+const validPose=cp=>cp&&[cp.position_mm,cp.optical_axis].every(v=>Array.isArray(v)&&v.length===3&&v.every(x=>isFinite(+x)))?cp:null;
+function camQuat(P){const z=new THREE.Vector3(+P.optical_axis[0],+P.optical_axis[1],+P.optical_axis[2]).normalize().negate();
+ let u=Array.isArray(P.up_table)&&P.up_table.length===3&&P.up_table.every(x=>isFinite(+x))?new THREE.Vector3(+P.up_table[0],+P.up_table[1],+P.up_table[2]):new THREE.Vector3(0,1,0);
+ u.sub(z.clone().multiplyScalar(u.dot(z)));if(u.lengthSq()<1e-6){u=new THREE.Vector3(1,0,0);u.sub(z.clone().multiplyScalar(u.dot(z)))}u.normalize();const x=new THREE.Vector3().crossVectors(u,z);
+ return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,u,z))}
+// TOP CAM frustum: at camera.pose when /api/calib has one (camera_pose_est from cam_calib.py campose: position_mm in the table frame, z up; -z of the
+// frustum along optical_axis, its +y along up_table; width from hfov_deg at 16:9), drawn in the mat group so it moves with the mat; else the old guess
+// over the mat centre at 0.5 m. "est." in the label while the source is nominal (the lens height is not tape-measured yet). Not an object of the mat map.
+function placeTopCam(pose,m){const P=validPose(pose.cam);
+ if(topCam.parent)topCam.parent.remove(topCam);topCam.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose()});
+ const hf=Math.min(170,Math.max(10,+(P&&P.hfov_deg)||70.4))*Math.PI/180,len=0.24,fw=len*Math.tan(hf/2),fh=fw*9/16;   // C920: 70.4 deg horizontal, 16:9
+ topCam=frustum(0x4fd6ff,fw,fh,len);topCam.name='top_cam';topCam.userData.pose=P;topCam.userData.hfov_deg=hf*180/Math.PI;
+ const centre=matToWorld(9,6,pose);let hit=new THREE.Vector3(centre.x,centre.y+0.001,centre.z);
+ if(P){topCam.quaternion.copy(camQuat(P));topCam.position.set(+P.position_mm[0]/1000,+P.position_mm[1]/1000,+P.position_mm[2]/1000);matG.add(topCam);
+  topCam.updateWorldMatrix(true,false);topCam.getWorldPosition(TOP_POS);const ah=Array.isArray(P.axis_hits_mm)&&P.axis_hits_mm.length===2?P.axis_hits_mm:P.position_mm;hit=matToWorld(+ah[0]/25.4,+ah[1]/25.4,pose);hit.y+=0.001}
+ else{TOP_POS.set(centre.x,TOP_H,centre.z);topCam.position.copy(TOP_POS);topCam.quaternion.setFromRotationMatrix(m);scene.add(topCam)}   // frustum -z looks down the mat normal, its long side along mat X
+ topRay.geometry.dispose();topRay.geometry=new THREE.BufferGeometry().setFromPoints([TOP_POS.clone(),hit]);topRay.computeLineDistances();
+ const text=P&&/nominal/i.test(String(P.source||''))?'TOP CAM est.':'TOP CAM';if(text!==topLabelText){scene.remove(topLabel);if(topLabel.material.map)topLabel.material.map.dispose();topLabel.material.dispose();topLabel=label(text,'#4fd6ff',new THREE.Vector3());topLabelText=text}
+ topLabel.position.set(TOP_POS.x,TOP_POS.y+0.06,TOP_POS.z);window.__topCam=topCam;window.__topLabelText=topLabelText}
+// FRONT CAM frustum (orange): at camera.front.pose when /api/calib has one (front_campose.json from cam_calib.py campose --name front), in the mat group
+// exactly like the top one, with a dashed ray to axis_hits_mm; without a pose it keeps the old static guess at table height past the far edge, no ray.
+function placeFrontCam(pose){const P=validPose(pose.front);
+ if(frontCam.parent)frontCam.parent.remove(frontCam);frontCam.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose()});
+ if(P){const hf=Math.min(170,Math.max(10,+P.hfov_deg||68.9))*Math.PI/180,len=0.12,fw=len*Math.tan(hf/2),fh=fw*9/16;
+  frontCam=frustum(0xffb347,fw,fh,len);frontCam.userData.hfov_deg=hf*180/Math.PI;frontCam.quaternion.copy(camQuat(P));frontCam.position.set(+P.position_mm[0]/1000,+P.position_mm[1]/1000,+P.position_mm[2]/1000);matG.add(frontCam);
+  frontCam.updateWorldMatrix(true,false);frontCam.getWorldPosition(FRONT_POS);const ah=Array.isArray(P.axis_hits_mm)&&P.axis_hits_mm.length===2&&P.axis_hits_mm.every(x=>isFinite(+x))?P.axis_hits_mm:P.position_mm;
+  const hit=matToWorld(+ah[0]/25.4,+ah[1]/25.4,pose);hit.y+=0.001;frontRay.geometry.dispose();frontRay.geometry=new THREE.BufferGeometry().setFromPoints([FRONT_POS.clone(),hit]);frontRay.computeLineDistances();frontRay.visible=true}
+ else{frontCam=frustum(0xffb347,0.085,0.047,0.12);FRONT_POS.set(0.62,0.07,0.40);frontCam.position.copy(FRONT_POS);frontCam.lookAt(new THREE.Vector3(0.05,0.05,0.06));frontCam.rotateY(Math.PI);scene.add(frontCam);frontRay.visible=false}
+ frontCam.name='front_cam';frontCam.userData.pose=P;frontLabel.position.set(FRONT_POS.x,FRONT_POS.y+(P?0.06:0.09),FRONT_POS.z);window.__frontCam=frontCam}
+let matG=null;const objs=new Map();   // objs: mat-map objects by id (see scenePoll); everything that lives in the mat frame (local x = mat X, y = mat Y, z = up, metres); rebuilt when the calibration changes
+function buildMat(pose){objs.clear();/* mat-map meshes are children of the old group: disposed with it, redrawn by the next scenePoll */if(matG){scene.remove(matG);matG.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material&&o.material.map)o.material.map.dispose();if(o.material)o.material.dispose()})}
+ const{m,o}=matBasis(pose);matG=new THREE.Group();matG.name='mat_frame';matG.quaternion.setFromRotationMatrix(m);matG.position.copy(o);matG.userData.pose=pose;scene.add(matG);
+ const mat=new THREE.Mesh(new THREE.PlaneGeometry(MAT_W,MAT_D),new THREE.MeshBasicMaterial({map:matTexture(),transparent:true,opacity:.92}));mat.name='mat';mat.position.set(MAT_W/2,MAT_D/2,0.0005);mat.renderOrder=-2;matG.add(mat);
+ const edge=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0.001),new THREE.Vector3(MAT_W,0,0.001),new THREE.Vector3(MAT_W,MAT_D,0.001),new THREE.Vector3(0,MAT_D,0.001)]),new THREE.LineBasicMaterial({color:pose.calibrated?0xffb347:0x6a5a40,transparent:true,opacity:.9}));matG.add(edge);
+ for(const [id,xy] of Object.entries(pose.markers||{})){const mk=new THREE.Mesh(new THREE.PlaneGeometry(MARK,MARK),new THREE.MeshBasicMaterial({map:arucoTexture(id),transparent:true,opacity:.95}));mk.name='aruco_'+id;mk.userData={aruco:+id,mat_in:[xy[0],xy[1]]};mk.position.set(xy[0]*IN,xy[1]*IN,0.0012);mk.renderOrder=-1;matG.add(mk)}
+ matG.add(new THREE.ArrowHelper(new THREE.Vector3(1,0,0),new THREE.Vector3(0,0,0.002),2*IN,0xff3b30,0.012,0.008));matG.add(new THREE.ArrowHelper(new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,0.002),2*IN,0x34c759,0.012,0.008));   // mat X red, mat Y green
+ label(pose.calibrated?'MAT 18×12 · CALIBRATED':'MAT 18×12 · NOT CALIBRATED',pose.calibrated?'#ffb347':'#8a7a60',new THREE.Vector3(0.02,-0.035,0.03),matG,512);   // caption by the origin corner, clear of the base plate
+ const hx=pose.base_in[0]*IN;   // handoff zone: just past the far edge, straight ahead of the arm
+ const handZone=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(hx-0.12,MAT_D-0.02,0.002),new THREE.Vector3(hx+0.12,MAT_D-0.02,0.002),new THREE.Vector3(hx+0.12,MAT_D+0.1,0.002),new THREE.Vector3(hx-0.12,MAT_D+0.1,0.002)]),new THREE.LineDashedMaterial({color:0xffd166,dashSize:0.015,gapSize:0.01,transparent:true,opacity:.6}));handZone.computeLineDistances();handZone.name='handoff';matG.add(handZone);
+ label('HANDOFF','#ffd166',new THREE.Vector3(hx,MAT_D+0.04,0.07),matG);
+ placeTopCam(pose,m);placeFrontCam(pose);
+ window.__mat=matG;window.__calibPose=pose;window.__matToWorld=(x,y)=>{const v=matToWorld(x,y,pose);return [v.x,v.y,v.z]}}
+buildMat(POSE);
+addEventListener('calib',e=>{const np=calibPose(e.detail);if(JSON.stringify(np)!==JSON.stringify(POSE)){POSE=np;buildMat(POSE)}});
+// ---- mat map: what the overhead camera sees on the mat (/api/scene, docs/mat-scene.md), drawn in the mat frame as flat footprints ----
+// Each object is a w_mm x h_mm x 8 mm box at (x_mm, y_mm), turned by angle_deg about the mat normal (local z), in its own colour, named obj_<id>,
+// with a small id tag (objtag_<id>). An object missing from two polls in a row is removed (one miss only fades it). Polled at 2 Hz; scenePoll() is
+// global so the tests drive it with the timers frozen. The caption on the stage says why the map is empty (no background, mat moved, holding).
+const OBJ_H=0.008;let sceneLiveAt=null;
+const matcap=document.createElement('div');matcap.id='matcap';matcap.className='matcap';box.appendChild(matcap);
+const objHex=c=>{const v=Array.isArray(c)&&c.length===3?c.map(x=>Math.max(0,Math.min(255,Math.round(+x||0)))):[200,200,200];return (v[0]<<16)|(v[1]<<8)|v[2]};
+function objMake(o){const hex=objHex(o.color),m=new THREE.Mesh(new THREE.BoxGeometry(1,1,OBJ_H),new THREE.MeshStandardMaterial({color:hex,emissive:hex,emissiveIntensity:.3,roughness:.6,transparent:true,opacity:.92}));
+ m.name='obj_'+o.id;m.add(new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:.7})));matG.add(m);
+ const tag=label('#'+o.id,'#f2efe6',new THREE.Vector3(),matG,128);tag.scale.set(0.03,0.015,1);tag.name='objtag_'+o.id;return {mesh:m,tag,miss:0}}
+function objPlace(e,o){const m=e.mesh,hex=objHex(o.color);m.scale.set(Math.max(0.002,(+o.w_mm||0)/1000),Math.max(0.002,(+o.h_mm||0)/1000),1);m.position.set(o.x_mm/1000,o.y_mm/1000,OBJ_H/2+0.002);m.rotation.set(0,0,(+o.angle_deg||0)*Math.PI/180);   // mm -> m from the mat corner; z up the mat normal
+ m.material.color.setHex(hex);m.material.emissive.setHex(hex);m.material.opacity=.92;e.tag.material.opacity=1;e.tag.position.set(o.x_mm/1000,o.y_mm/1000,OBJ_H+0.016);m.userData.obj=o;m.userData.hex=hex}
+function objDrop(id){const e=objs.get(id);if(!e)return;objs.delete(id);matG.remove(e.mesh);matG.remove(e.tag);e.mesh.traverse(x=>{if(x.geometry)x.geometry.dispose();if(x.material)x.material.dispose()});if(e.tag.material.map)e.tag.material.map.dispose();e.tag.material.dispose()}
+async function scenePoll(){let s=null;try{s=await(await fetch('/api/scene',{cache:'no-store'})).json()}catch(e){}
+ const ok=!!(s&&typeof s==='object'&&s.ok&&Array.isArray(s.objects)&&matG);window.sceneLast=ok?s:null;const seen=new Set();
+ if(ok)for(const o of s.objects){if(!o||o.id==null||!isFinite(+o.x_mm)||!isFinite(+o.y_mm))continue;let e=objs.get(o.id);if(!e){e=objMake(o);objs.set(o.id,e)}e.miss=0;objPlace(e,o);seen.add(o.id)}
+ for(const [id,e] of [...objs]){if(seen.has(id))continue;if(++e.miss>=2)objDrop(id);else{e.mesh.material.opacity=.3;e.tag.material.opacity=.35}}   // gone from the camera (or the camera gone): fade, then remove
+ let cap='';if(ok){if(s.background==='missing')cap='MAT MAP: NO BACKGROUND — tap SET BACKGROUND';else if(s.calib_ok===false)cap='MAT MAP: '+(s.calib_note||'calibration check failed');else if(s.holding)cap=`MAT MAP: HOLDING THE LAST CAMERA SOLVE (${s.n_markers_seen||0} markers visible)`}
+ if(matcap.textContent!==cap)matcap.textContent=cap;
+ const la=ok?(s.calib_live_at||null):null;if(la!==sceneLiveAt){sceneLiveAt=la;if(typeof calibPoll==='function')calibPoll()}   // the camera solve changed (or was written back): refresh the overlay and the mat pose now, not in a minute
+ window.sceneSeq=(window.sceneSeq||0)+1;return ok}
+window.scenePoll=scenePoll;window.__objs=objs;
+scenePoll();setInterval(scenePoll,500);
+// simulation props: red 25 mm cube + blue 5 cm disc driven by /tmp/so101_sim_state.json (sim frame x fwd, y left, z up -> stage x, -z, y)
+const simCube=new THREE.Mesh(new THREE.BoxGeometry(0.025,0.025,0.025),new THREE.MeshStandardMaterial({color:0xff2a2a,emissive:0x550000,roughness:.5}));simCube.visible=false;scene.add(simCube);
+const simCubeEdges=new THREE.LineSegments(new THREE.EdgesGeometry(simCube.geometry),new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:.6}));simCube.add(simCubeEdges);
+const simDisc=new THREE.Mesh(new THREE.CircleGeometry(0.05,40),new THREE.MeshBasicMaterial({color:0x2b5cff,transparent:true,opacity:.85,side:THREE.DoubleSide}));simDisc.rotation.x=-Math.PI/2;simDisc.visible=false;scene.add(simDisc);
+const simRing=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({length:48},(_,i)=>new THREE.Vector3(Math.cos(i/48*Math.PI*2)*0.05,0.0015,Math.sin(i/48*Math.PI*2)*0.05))),new THREE.LineBasicMaterial({color:0x8fb4ff}));simRing.visible=false;scene.add(simRing);
+const simTcp=new THREE.Mesh(new THREE.SphereGeometry(0.006,12,12),new THREE.MeshBasicMaterial({color:0x7cff6b}));simTcp.visible=false;scene.add(simTcp);
+const S2W=(p)=>new THREE.Vector3(p[0],p[2],-p[1]);
+let simLabel=label('SIMULATION','#4fd6ff',new THREE.Vector3(0.0,0.42,0));simLabel.scale.set(0.26,0.065,1);simLabel.visible=false;
+let wristCam=null;function attachWristCam(robot){   // WRIST CAM frustum on the follower's gripper_link: from calib.camera.wrist (jetson/calib/wrist_campose.json, cam_calib.py handeye: position_mm + rotation in URDF gripper_link axes, which ARE the link object's local axes; hfov_deg at 4:3) when /api/calib carries one, else the old guess from TheRobotStudio's Wrist_Cam_Mount STL (69 mm off the gripper axis, 24 deg toward the fingertips). Re-attached by the 'calib' event when the wrist pose changes. Frustum -z = optical axis, +y = image up.
+ robot=robot||attachWristCam.robot;if(!robot)return;attachWristCam.robot=robot;const W=(window.calib&&window.calib.camera&&window.calib.camera.wrist)||null,v3=a=>Array.isArray(a)&&a.length===3&&a.every(x=>isFinite(+x));const P=W&&v3(W.position_mm)&&W.rotation&&(v3(W.rotation.optical_axis_gripper)||(Array.isArray(W.rotation.quaternion_xyzw)&&W.rotation.quaternion_xyzw.length===4))?W:null;attachWristCam.key=JSON.stringify(P);
+ let link=(robot.links&&robot.links.gripper_link)||null;if(!link)robot.traverse(o=>{if(!link&&o.isURDFLink&&/gripper/i.test(o.name))link=o});if(!link)return;
+ if(wristCam){if(wristCam.parent)wristCam.parent.remove(wristCam);wristCam.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose()})}
+ const hf=Math.min(170,Math.max(10,+(P&&P.hfov_deg)||60.2))*Math.PI/180,len=0.08,fw=P?len*Math.tan(hf/2):0.046,fh=P?fw*3/4:0.035;   // without a pose: the old 0.046 x 0.035 x 0.08 frustum
+ wristCam=frustum(0x7cff6b,fw,fh,len);wristCam.name='wrist_cam';wristCam.userData={pose:P,hfov_deg:hf*180/Math.PI};
+ if(P){wristCam.position.set(+P.position_mm[0]/1000,+P.position_mm[1]/1000,+P.position_mm[2]/1000);const r=P.rotation,q=Array.isArray(r.quaternion_xyzw)&&r.quaternion_xyzw.length===4&&r.quaternion_xyzw.every(x=>isFinite(+x))?new THREE.Quaternion(+r.quaternion_xyzw[0],+r.quaternion_xyzw[1],+r.quaternion_xyzw[2],+r.quaternion_xyzw[3]):null;
+  if(q&&q.lengthSq()>1e-6)wristCam.quaternion.copy(q.normalize().multiply(new THREE.Quaternion(1,0,0,0)));   // camera axes (z forward, y down) -> frustum axes (-z forward, y up): half a turn about x
+  else{const z=new THREE.Vector3(+r.optical_axis_gripper[0],+r.optical_axis_gripper[1],+r.optical_axis_gripper[2]).normalize().negate();let u=v3(r.up_gripper)?new THREE.Vector3(+r.up_gripper[0],+r.up_gripper[1],+r.up_gripper[2]):new THREE.Vector3(0,0,-1);u.sub(z.clone().multiplyScalar(u.dot(z)));if(u.lengthSq()<1e-6){u=new THREE.Vector3(1,0,0);u.sub(z.clone().multiplyScalar(u.dot(z)))}u.normalize();wristCam.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3().crossVectors(u,z),u,z))}}
+ else{wristCam.position.set(-0.046,-0.022,-0.012);wristCam.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),new THREE.Vector3(-0.28,-0.3,0.91).normalize())}
+ link.add(wristCam);window.__wristCam=wristCam;
+ if(!attachWristCam.bound){attachWristCam.bound=true;addEventListener('calib',()=>{const W=(window.calib&&window.calib.camera&&window.calib.camera.wrist)||null;if(JSON.stringify(W&&v3(W.position_mm)&&W.rotation?W:null)!==attachWristCam.key)attachWristCam()})}}
+const JOINTS=['shoulder_pan','shoulder_lift','elbow_flex','wrist_flex','wrist_roll','gripper'],GRIP=[-0.174533,1.74533];
+function wireify(robot,color,ghost){robot.traverse(o=>{if(o.isMesh&&!o.userData.wire){if(!o.userData.edged){o.add(new THREE.LineSegments(new THREE.EdgesGeometry(o.geometry,28),new THREE.LineBasicMaterial({color,transparent:true,opacity:ghost?0.35:0.85})));o.userData.edged=true}
+ o.material=ghost?new THREE.MeshBasicMaterial({color,transparent:true,opacity:0.02,depthWrite:false}):new THREE.MeshStandardMaterial({color:0xd9d3c6,roughness:.55,metalness:.08,emissive:0x1a1309,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1});o.userData.wire=true}})}  // urdf-loader re-assigns URDF materials after load (lit = black with no lights), so frame() re-wireifies stragglers
+function load(color,ghost){return new Promise(res=>{const m=new THREE.LoadingManager();const l=new URDFLoader(m);
+ l.loadMeshCb=(path,mgr,done)=>new STLLoader(mgr).load(path,g=>{g.computeVertexNormals();done(new THREE.Mesh(g))},undefined,e=>{console.warn('mesh',path,e);done(new THREE.Mesh(new THREE.BoxGeometry(0.01,0.01,0.01)))});
+ l.load('/urdf/so101.urdf',r=>{r.rotation.x=-Math.PI/2;m.onLoad=()=>{wireify(r,color,ghost);scene.add(r);res(r)}})})}
+const smooth={f:{},l:{}},SM=0.3;
+function apply(robot,p,key){if(!robot||!p||!Object.keys(p).length)return false;const off=window.calibOffsets||{};for(const j of JOINTS){const target=j==='gripper'?GRIP[0]+(p[j]||0)/100*(GRIP[1]-GRIP[0]):((p[j]||0)+(+off[j]||0))*Math.PI/180;   // LeRobot zeroes each joint mid-range; arm.joint_offsets_deg (measured) bring lift/elbow/wrist_flex to the URDF zero
+ smooth[key][j]=(smooth[key][j]??target)+SM*(target-(smooth[key][j]??target));robot.setJointValue(j,smooth[key][j])}return true}
+let follower=null,leader=null,t0=performance.now();
+Promise.all([load(0xffb347,false),load(0x4fd6ff,true)]).then(([f,l])=>{follower=f;leader=l;attachWristCam(f);window.__robots={follower,leader}});
+let fixTick=0;function frame(){requestAnimationFrame(frame);const a=window.armsNow||{};if(++fixTick%30===0){if(follower)wireify(follower,0xffb347,false);if(leader)wireify(leader,0x4fd6ff,true)}
+ const sim=window.simArm;const simFresh=!!(window.simDrive&&sim&&sim.pos&&(Date.now()/1000-(window.simArmSeen||0))<2.5);
+ const hf=apply(follower,simFresh?sim.pos:(a.follower&&a.follower.pos),'f'),hl=apply(leader,a.leader&&a.leader.pos,'l');
+ simCube.visible=simDisc.visible=simRing.visible=simTcp.visible=simLabel.visible=simFresh;
+ if(simFresh){if(sim.obj){simCube.position.copy(S2W(sim.obj))}if(sim.target){const t=S2W(sim.target);simDisc.position.set(t.x,0.0012,t.z);simRing.position.set(t.x,0,t.z)}if(sim.tcp)simTcp.position.copy(S2W(sim.tcp));simCube.material.emissive.setHex(sim.success?0x225500:0x550000)}
+ const tele=(window.so101Kinds||[]).some(k=>k==='teleoperate'||k==='record');if(leader)leader.visible=hl&&(showLeader||tele);if(follower)follower.visible=true;
+ ctl.autoRotate=auto&&!hover;ctl.update();
+ if(renderer.domElement.width!==Math.round(W()*renderer.getPixelRatio())||renderer.domElement.height!==Math.round(H()*renderer.getPixelRatio())){renderer.setSize(W(),H());cam.aspect=W()/H();cam.updateProjectionMatrix()}
+ renderer.render(scene,cam)}
+frame();
+</script>
+</body></html>

@@ -1,0 +1,215 @@
+<title>MLflow Field Guide</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{--bg:#f7f4ee;--surface:#ffffff;--fg:#1d1b17;--muted:#6b665c;--line:#e2dcd0;--accent:#b5741a;--accent-soft:#f6e9d2;--code-bg:#f0ebe1;--good:#2f7d4f;--warn:#a1521b;color-scheme:light}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0b0d11;--surface:#13161c;--fg:#ece7dc;--muted:#9a9488;--line:#262b34;--accent:#ffb347;--accent-soft:#2a2010;--code-bg:#171b22;--good:#7cd49a;--warn:#f0a070;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b0d11;--surface:#13161c;--fg:#ece7dc;--muted:#9a9488;--line:#262b34;--accent:#ffb347;--accent-soft:#2a2010;--code-bg:#171b22;--good:#7cd49a;--warn:#f0a070;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:16px;line-height:1.6;padding-block:40px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:760px;margin:0 auto;min-width:0}
+h1,h2,h3{text-wrap:balance;line-height:1.2;margin:0}
+h1{font-size:2.1rem;font-weight:600;letter-spacing:-.01em}
+.eyebrow{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:.72rem;letter-spacing:.28em;text-transform:uppercase;color:var(--accent);margin-bottom:12px}
+.lede{font-size:1.12rem;color:var(--muted);margin:14px 0 0}
+header{padding-bottom:28px;border-bottom:1px solid var(--line);margin-bottom:36px}
+section{margin-bottom:44px}
+h2{font-size:1.35rem;font-weight:600;margin-bottom:14px;padding-top:6px}
+h3{font-size:1rem;font-weight:600;margin:22px 0 8px}
+p{margin:0 0 12px}
+ul,ol{margin:0 0 12px;padding-left:1.3em}
+li{margin-bottom:6px}
+li::marker{color:var(--accent)}
+code,kbd{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:.86em;background:var(--code-bg);padding:.1em .35em;border-radius:4px}
+pre{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;margin:0 0 14px;line-height:1.5}
+pre code{background:none;padding:0;font-size:.82rem}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:0 0 16px}
+.card.accent{border-color:var(--accent);background:var(--accent-soft)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:16px}
+.grid .card{margin:0;min-width:0}
+.card h3{margin-top:0}
+.tree{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:.84rem;line-height:1.7;white-space:pre;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.92rem;margin:0 0 14px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.wrap{overflow-x:auto;min-width:0}
+.ex{counter-increment:ex;position:relative;padding-left:0}
+.ex h3::before{content:counter(ex,decimal-leading-zero);font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;color:var(--accent);margin-right:10px;font-weight:600}
+.exlist{counter-reset:ex}
+.note{color:var(--muted);font-size:.92rem}
+.tag{display:inline-block;font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;padding:2px 8px;border:1px solid var(--line);border-radius:999px;color:var(--muted);margin-right:6px}
+.answer{border-left:3px solid var(--good);padding:6px 12px;margin:8px 0 0;color:var(--muted);font-size:.93rem}
+a{color:var(--accent)}
+footer{border-top:1px solid var(--line);padding-top:18px;color:var(--muted);font-size:.9rem}
+@media (max-width:480px){h1{font-size:1.7rem}body{font-size:15px}}
+</style>
+<main>
+<header>
+<div class="eyebrow">SO-101 Arm Lab · Tooling</div>
+<h1>MLflow Field Guide</h1>
+<p class="lede">A working introduction to MLflow built around your own training runs. Your sandbox is already running with ten real runs loaded, so every exercise below uses data you recognise.</p>
+</header>
+
+<section>
+<h2>Your sandbox</h2>
+<div class="card accent">
+<p style="margin:0 0 6px"><strong>Open the UI:</strong> <a href="http://127.0.0.1:5050">http://127.0.0.1:5050</a> on the Mac.</p>
+<p style="margin:0" class="note">Local only. It is not reachable from the Jetson or other machines until we bind it to the LAN, which is step one of wiring it into training.</p>
+</div>
+<div class="tree">~/so101/mlflow/
+├── mlflow.db          the backend store: experiments, runs, params, metrics, tags (SQLite)
+├── artifacts/         the artifact store: files attached to runs (logs, configs, later checkpoints)
+└── import/            the Jetson training log copied over for the backfill
+
+~/so101/tools/mlflow_backfill.py   re-importable: builds the runs from outputs/train/*.log + train_config.json
+~/so101/tools/mlflow_ui.sh         start | stop | status for the server on port 5050</div>
+<p>Experiment <code>so101-act</code> holds one run per training folder. Each run carries the parameters from its saved <code>train_config.json</code>, the loss and learning-rate curve parsed from its log, tags for host and task family, and the raw log plus config as artifacts. The sim round four run also carries the measured rollout success numbers, because that is the number you actually pick checkpoints by.</p>
+<div class="wrap"><table>
+<tr><th>Run</th><th>Family</th><th>Host</th><th>Chunk</th><th>Loss points</th><th>Notes</th></tr>
+<tr><td>act_lighter</td><td>lighter</td><td>mac</td><td>100</td><td>125</td><td>the chunk-100 lighter model</td></tr>
+<tr><td>act_lighter_c50</td><td>lighter</td><td>jetson</td><td>50</td><td>125</td><td>chunk-50 variant; no config saved on the Mac, so no params</td></tr>
+<tr><td>ft_lighter</td><td>lighter</td><td>mac</td><td>100</td><td>40</td><td>warm-started fine-tune</td></tr>
+<tr><td>act_sim_pick_v1 … v4b</td><td>sim_pick</td><td>mac</td><td>100</td><td>100–200</td><td>v4b carries sim_success_pooled 0.84</td></tr>
+<tr><td>act_bottle_pick, act_jar_pocket</td><td>bottle, jar</td><td>cloud</td><td>100</td><td>0</td><td>checkpoints only; the cloud logs were never pulled</td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>The mental model in five nouns</h2>
+<p>MLflow is four products in one package. For this lab only two matter: <strong>Tracking</strong> and the <strong>Model Registry</strong>. Projects, Recipes, Evaluation and Tracing exist and are aimed at other workflows. Tracing in particular is for LLM applications and you can ignore it entirely.</p>
+<div class="grid">
+<div class="card"><h3>Tracking server</h3><p class="note">The process on port 5050. It owns a backend store (the SQLite file) and an artifact store (the folder). Clients talk to it over HTTP, or skip it and open the SQLite file directly, which is what the backfill did.</p></div>
+<div class="card"><h3>Experiment</h3><p class="note">A named folder of runs. One per question you are asking: <code>so101-act</code> for training, later <code>so101-eval</code> for rollouts. Not one per day and not one per dataset.</p></div>
+<div class="card"><h3>Run</h3><p class="note">One execution. It has a start and end time, a status, and the four things below. A run is the unit you compare, delete, and register from.</p></div>
+<div class="card"><h3>Params · Metrics · Tags · Artifacts</h3><p class="note"><strong>Params</strong> are inputs, written once, strings. <strong>Metrics</strong> are numbers over time, logged with a step. <strong>Tags</strong> are free labels you can edit later. <strong>Artifacts</strong> are files.</p></div>
+<div class="card"><h3>Registered model</h3><p class="note">A named thing like <code>so101-sim-pick</code> with numbered versions, each pointing at an artifact. Aliases such as <code>champion</code> or <code>jetson</code> point at one version and move when you promote a new one.</p></div>
+</div>
+<p>The distinction that trips most people: a <strong>param</strong> is a fact about how the run was configured and never changes. A <strong>metric</strong> is a measurement and has a history. Chunk size is a param. Loss at step 4000 is a metric. "Picked for the Jetson" is a tag, because you decide it afterwards and might change your mind.</p>
+</section>
+
+<section>
+<h2>A thirty-minute tour of the UI</h2>
+<ol>
+<li><strong>Experiments page.</strong> Click <code>so101-act</code>. You land on the run table. Use the <em>Columns</em> button to show <code>chunk_size</code>, <code>dataset</code>, <code>warm_start</code> and <code>final_loss</code>, then drag them next to the run name. The layout is remembered per browser.</li>
+<li><strong>Search bar.</strong> It takes a small SQL-like language. Try each of these and watch the table filter:
+<pre><code>params.chunk_size = "50"
+metrics.final_loss &lt; 0.08
+tags.family = "sim_pick" and tags.host = "mac"
+params.warm_start != "scratch"</code></pre>
+Param values are strings, so they go in quotes even when they look like numbers. Metric comparisons use the last logged value.</li>
+<li><strong>Chart view.</strong> The toggle at the top switches the table to charts. Add a line chart for <code>loss</code> with the x-axis set to step. Every visible run gets a line, so filter first.</li>
+<li><strong>Compare.</strong> Tick v1, v2, v3m, v4 and v4b and press <em>Compare</em>. You get a parameter diff table, which shows at a glance which runs were warm-started from which, and a parallel-coordinates plot where you can drag a range on any axis.</li>
+<li><strong>Run page.</strong> Open <code>act_sim_pick_v4b</code>. Expand <em>Parameters</em>, <em>Metrics</em> and <em>Tags</em>. Under <em>Artifacts</em>, click the log file and the config: MLflow previews text and JSON in the browser. Try editing a tag here, then search for it.</li>
+<li><strong>Models page.</strong> Empty for now. Exercise four fills it.</li>
+</ol>
+</section>
+
+<section class="exlist">
+<h2>Six exercises with real stakes</h2>
+<p class="note">Each one teaches a thing you will use when this is wired into live training. Answers are under each exercise, so do the exercise first.</p>
+
+<div class="ex"><h3>Lowest loss is not best policy</h3>
+<p>Sort the table by <code>final_loss</code> ascending. Which run wins? Now add the column <code>sim_success_pooled</code>. Which run has a value there, and how does its loss rank?</p>
+<div class="answer">The point of the exercise is the gap between the two columns. Loss ranks training runs by how well they imitate the demos; rollout success ranks them by whether the arm does the job. You already learned this the hard way picking checkpoints. MLflow makes it visible so you do not have to remember.</div></div>
+
+<div class="ex"><h3>Chunk 100 versus chunk 50</h3>
+<p>Filter to <code>tags.family = "lighter"</code>, switch to chart view, plot <code>loss</code> by step. The Mac run and the Jetson run trained on the same data with different action-chunk sizes.</p>
+<div class="answer">Note what is missing: <code>act_lighter_c50</code> has no params, because the Jetson run's config was never copied to the Mac. That is exactly what a tracking server fixes once both machines log to it directly instead of being backfilled.</div></div>
+
+<div class="ex"><h3>Log something yourself</h3>
+<p>Run this from the Mac venv. It creates a second experiment and one run inside it with a fake rollout result. Then find it in the UI.</p>
+<pre><code>~/so101/.venv/bin/python - &lt;&lt;'PY'
+import mlflow
+mlflow.set_tracking_uri("http://127.0.0.1:5050")
+mlflow.set_experiment("so101-eval")
+with mlflow.start_run(run_name="practice-rollout"):
+    mlflow.log_params({"policy": "act_sim_pick_v4b", "checkpoint": "last", "episodes": 20})
+    for ep, ok in enumerate([1,1,0,1,1,1,0,1,1,1]):
+        mlflow.log_metric("success", ok, step=ep)
+    mlflow.log_metric("success_rate", 0.8)
+    mlflow.set_tag("note", "practice run from the field guide")
+PY</code></pre>
+<div class="answer">Three things to notice. The tracking URI is the HTTP server now, not the SQLite file, which is how the Jetson will log too. <code>log_metric</code> with <code>step</code> builds a series; without it you get a single value. Everything inside the <code>with</code> block belongs to that run, and the run is marked FINISHED when the block exits, or FAILED if it raises.</div></div>
+
+<div class="ex"><h3>Register a model and give it an alias</h3>
+<p>Turn the best sim checkpoint into version 1 of a registered model, then point an alias at it. The source is the checkpoint folder that already exists on disk.</p>
+<pre><code>~/so101/.venv/bin/python - &lt;&lt;'PY'
+import mlflow
+from mlflow import MlflowClient
+mlflow.set_tracking_uri("http://127.0.0.1:5050")
+c = MlflowClient()
+run = mlflow.search_runs(experiment_names=["so101-act"], filter_string="tags.mlflow.runName = 'act_sim_pick_v4b'").iloc[0]
+c.create_registered_model("so101-sim-pick", description="ACT pick policy trained in MuJoCo")
+v = c.create_model_version("so101-sim-pick", source="file://~/so101/outputs/train/act_sim_pick_v4b/checkpoints/last/pretrained_model", run_id=run.run_id)
+c.set_registered_model_alias("so101-sim-pick", "jetson", v.version)
+print("version", v.version, "alias jetson")
+PY</code></pre>
+<div class="answer">Open the Models page. The version links back to its training run, so success numbers, params and the loss curve are one click away from the thing deployed. When round five beats it, you create version 2 and move the <code>jetson</code> alias. Nothing else has to change, and the dashboard's POLICY button can one day resolve <code>models:/so101-sim-pick@jetson</code> instead of a hard-coded folder.</div></div>
+
+<div class="ex"><h3>Talk to it without Python</h3>
+<p>The dashboard will read MLflow over its REST API. Ask for every run in the training experiment:</p>
+<pre><code>curl -s -X POST http://127.0.0.1:5050/api/2.0/mlflow/runs/search \
+  -H "Content-Type: application/json" \
+  -d '{"experiment_ids":["1"],"filter":"metrics.final_loss &lt; 0.1","max_results":20}' | python3 -m json.tool | head -60</code></pre>
+<div class="answer">The JSON has the same shape as the UI: <code>info</code> for identity and status, <code>data</code> for params, metrics and tags. The experiment id is the number in the UI's URL. Metric history for a chart comes from <code>GET /api/2.0/mlflow/metrics/get-history?run_id=…&amp;metric_key=loss</code>.</div></div>
+
+<div class="ex"><h3>Delete, restore, and look under the hood</h3>
+<p>Delete the practice run from the UI, then restore it from the <em>Deleted runs</em> filter. Then open the store directly:</p>
+<pre><code>sqlite3 ~/so101/mlflow/mlflow.db ".tables"
+sqlite3 ~/so101/mlflow/mlflow.db "select key, count(*) from metrics group by key"</code></pre>
+<div class="answer">Deletion is soft. Runs sit in a deleted state until <code>mlflow gc</code> removes them, which is why restore works. The SQLite look is to demystify the thing: experiments, runs, params, metrics and tags are plain tables. Back up the file and the artifacts folder together and you have backed up everything.</div></div>
+</section>
+
+<section>
+<h2>Python API on one screen</h2>
+<pre><code>import mlflow
+mlflow.set_tracking_uri("http://127.0.0.1:5050")      # or sqlite:///path, or an env var MLFLOW_TRACKING_URI
+mlflow.set_experiment("so101-act")
+
+with mlflow.start_run(run_name="act_round5", tags={"host": "mac"}) as run:
+    mlflow.log_params({"chunk_size": 100, "lr": 1e-5})   # once, strings
+    mlflow.log_metric("loss", 0.123, step=200)           # many times, numbers
+    mlflow.log_metrics({"loss": 0.1, "lr": 1e-5}, step=400)
+    mlflow.set_tag("note", "warm start from v4b")       # editable later
+    mlflow.log_artifact("train.log", artifact_path="logs")
+    mlflow.log_artifacts("checkpoints/last", artifact_path="model")
+    run.info.run_id                                      # keep this to log more later
+
+df = mlflow.search_runs(experiment_names=["so101-act"], filter_string="params.chunk_size = '100'", order_by=["metrics.final_loss ASC"])
+client = mlflow.MlflowClient()
+client.log_metric(run_id, "rollout_success", 0.84)       # add to a finished run
+client.get_metric_history(run_id, "loss")                # list of Metric(step, value, timestamp)</code></pre>
+<h3>Things that bite</h3>
+<ul>
+<li><strong>Autolog will not help here.</strong> <code>mlflow.pytorch.autolog()</code> only instruments Lightning. LeRobot has its own loop, so the plugin logs explicitly from the trainer's own logging call.</li>
+<li><strong><code>mlflow ui</code> versus <code>mlflow server</code>.</strong> They are nearly the same thing. <code>server</code> is the one to run for a tracking server other machines log to, and it needs the artifact root passed on the command line.</li>
+<li><strong>Artifacts live where the server says.</strong> A client that logs an artifact to an HTTP server ships the file over HTTP. A client pointed straight at the SQLite file writes into the artifact folder itself and needs to see that folder, which the Jetson cannot.</li>
+<li><strong>Run names are tags.</strong> The name you see is <code>tags.mlflow.runName</code>. Search by it the same way as any tag.</li>
+<li><strong>One active run per process.</strong> Starting a run inside another makes a nested run unless you pass <code>nested=True</code> deliberately. Nested runs are a fine way to put each checkpoint's evaluation under its training run.</li>
+<li><strong>MLflow 3 added "logged models".</strong> You will see a Models tab inside runs. It is optional, and the registry works the same without it.</li>
+</ul>
+</section>
+
+<section>
+<h2>Where this goes in the lab</h2>
+<ol>
+<li><span class="tag">next</span> Bind the server to the LAN and install <code>mlflow-skinny</code> on the Jetson, so both machines log to the same place. The backfill becomes unnecessary.</li>
+<li><span class="tag">next</span> A <code>lerobot_robot_mlflow</code> plugin, same auto-import mechanism as the bus-heal plugin, that mirrors every training step's loss and learning rate into the run and attaches each checkpoint as an artifact.</li>
+<li><span class="tag">then</span> Rollout logging: every policy run from the dashboard or the eval scripts writes success per episode as a nested run under the checkpoint it used.</li>
+<li><span class="tag">then</span> The dashboard's TRAINING panel reads the REST API instead of tailing logs, and the POLICY button resolves the registered model's <code>jetson</code> alias.</li>
+<li><span class="tag">later</span> HF Jobs runs log through a Cloudflare Tunnel to the same server, so cloud rounds stop being invisible.</li>
+</ol>
+</section>
+
+<section>
+<h2>Reading list, in order</h2>
+<ul>
+<li>MLflow Tracking quickstart, the official one on mlflow.org. Twenty minutes, covers runs, params and metrics with a toy model.</li>
+<li>The Tracking concepts page, for the backend store versus artifact store distinction and the search syntax reference.</li>
+<li>Model Registry guide, specifically the sections on aliases and tags. Skip stages, they are the old mechanism.</li>
+<li>The REST API reference, kept open while the dashboard integration gets built.</li>
+</ul>
+</section>
+
+<footer>Server: <code>~/so101/tools/mlflow_ui.sh start|stop|status</code>. Rebuild the sandbox from scratch any time with <code>~/so101/.venv/bin/python ~/so101/tools/mlflow_backfill.py</code>; it replaces runs with the same name rather than duplicating them.</footer>
+</main>

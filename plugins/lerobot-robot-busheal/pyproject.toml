@@ -1,0 +1,12 @@
+[project]
+name = "lerobot_robot_busheal"
+version = "0.1.0"
+description = "LeRobot plugin: Feetech motor bus reopens its serial port and retries when the adapter stalls (no status packet)"
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["lerobot_robot_busheal*"]

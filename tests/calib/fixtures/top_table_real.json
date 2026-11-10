@@ -1,0 +1,200 @@
+{
+ "dictionary": "DICT_4X4_50",
+ "marker_size_mm": 50.8,
+ "markers_used": [
+  0,
+  1,
+  2,
+  3
+ ],
+ "units": "in",
+ "points_used": 16,
+ "layout_markers": {
+  "0": [
+   406.4,
+   254.0
+  ],
+  "1": [
+   50.8,
+   254.0
+  ],
+  "2": [
+   381.0,
+   101.6
+  ],
+  "3": [
+   76.19999999999999,
+   101.6
+  ]
+ },
+ "image_size": [
+  640,
+  360
+ ],
+ "arm_base_mm": [
+  229.5525346058916,
+  -80.76241364553879
+ ],
+ "arm_yaw_deg": 90.14712321122015,
+ "created": "2026-11-09 21:49:06",
+ "homography_px_to_table": [
+  [
+   -0.8877389487841951,
+   -0.057362250036723926,
+   501.2398426524566
+  ],
+  [
+   -0.05022695472099194,
+   0.872099156589787,
+   26.53474479037738
+  ],
+  [
+   -4.0959810704574285e-05,
+   -5.669814571874631e-05,
+   1.0
+  ]
+ ],
+ "note": "no intrinsics: valid only for points on the table surface (height 0)",
+ "residual_mm_max": 0.19,
+ "residual_in_max": 0.00748,
+ "arm_fit": {
+  "arm_base_mm": [
+   229.5525346058916,
+   -80.76241364553879
+  ],
+  "arm_yaw_deg": 90.14712321122015,
+  "table_z_mm": 3.2820002773642503,
+  "joint_offsets_deg": {
+   "shoulder_lift": -3.9064029639969235,
+   "elbow_flex": -5.176063884728806,
+   "wrist_flex": -0.6874934439678994
+  },
+  "offsets_fitted": false,
+  "residual_xy_mm": [
+   0.9427054671881686,
+   0.708195099267483,
+   1.0924720804826487,
+   0.8584826758024295
+  ],
+  "residual_z_mm": [
+   -1.3104386327935373,
+   0.7040528595064623,
+   0.34921163865708715,
+   0.2571741346299863
+  ],
+  "rms_mm": 0.6905160383832034,
+  "rigid_only_residual_mm": [
+   0.942705467188086,
+   0.7081950992675498,
+   1.0924720804826897,
+   0.8584826758023665
+  ],
+  "n_points": 4,
+  "source": "jetson/calib/top_armfit.json",
+  "fitted": "2026-11-09 21:49:54",
+  "points": [
+   [
+    "table",
+    [
+     9.0,
+     3.0
+    ]
+   ],
+   [
+    "table",
+    [
+     6.0,
+     5.0
+    ]
+   ],
+   [
+    "table",
+    [
+     9.0,
+     7.0
+    ]
+   ],
+   [
+    "table",
+    [
+     12.0,
+     5.0
+    ]
+   ]
+  ],
+  "wrist_roll_deg": 0.46,
+  "wrist_roll_spread_deg": 2.11,
+  "note": "contact point moves with wrist roll (fixed jaw is off the roll axis): jog and command with wrist_roll near wrist_roll_deg"
+ },
+ "camera_pose_est": {
+  "position_mm": [
+   220.55782532567835,
+   160.8095775169851,
+   419.1000036696409
+  ],
+  "rvec": [
+   -0.07720903535328434,
+   3.1201239816082276,
+   0.04036008424655605
+  ],
+  "tvec": [
+   220.02053492336896,
+   -160.75363508425718,
+   419.40376801920695
+  ],
+  "optical_axis": [
+   -0.020882931361921306,
+   0.025347084437296746,
+   -0.9994605687510947
+  ],
+  "tilt_deg": 1.882024208502455,
+  "axis_hits_mm": [
+   211.80106504512977,
+   171.43827414876918
+  ],
+  "up_table": [
+   0.049185522109839154,
+   -0.9984420451140595,
+   -0.026348946150402598
+  ],
+  "reproj_rms_px": 0.569420814534854,
+  "markers_used": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "camera_matrix": [
+   [
+    465.14896618790846,
+    0.0,
+    320.0
+   ],
+   [
+    0.0,
+    465.14896618790846,
+    180.0
+   ],
+   [
+    0.0,
+    0.0,
+    1.0
+   ]
+  ],
+  "hfov_deg": 69.05218293616642,
+  "image_size": [
+   640,
+   360
+  ],
+  "source": "lens height 16.5 in (tape measure) -> hfov 69.05 deg",
+  "units_note": "position_mm in the table frame (z up from the mat surface)",
+  "created": "2026-11-09 22:50:37"
+ },
+ "live_solve": {
+  "at": "2026-11-09 22:49:31",
+  "shift_px": 3.4,
+  "markers_seen": 4,
+  "residual_mm_max": 0.19,
+  "note": "homography re-solved from the markers by the dashboard after the camera moved; arm pose and 'created' are from the original calibration"
+ }
+}

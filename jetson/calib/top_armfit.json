@@ -1,0 +1,126 @@
+{
+ "arm_units": "mm",
+ "pairs": [
+  {
+   "arm": [
+    127.54673046880666,
+    0.7835695483539363
+   ],
+   "joints": {
+    "shoulder_pan": -0.57,
+    "shoulder_lift": 9.98,
+    "elbow_flex": 36.0,
+    "wrist_flex": 73.93,
+    "wrist_roll": 0.66,
+    "gripper": 0.0
+   },
+   "tip_mm": [
+    127.5,
+    0.8,
+    -4.9
+   ],
+   "tip_in": [
+    5.022,
+    0.031,
+    -0.191
+   ],
+   "gripper_down_deg": 29.9,
+   "t": "21:33:07",
+   "table": [
+    9.0,
+    3.0
+   ]
+  },
+  {
+   "arm": [
+    179.2454269594456,
+    63.50263585664256
+   ],
+   "joints": {
+    "shoulder_pan": -24.4,
+    "shoulder_lift": 10.77,
+    "elbow_flex": 27.74,
+    "wrist_flex": 60.84,
+    "wrist_roll": 1.1,
+    "gripper": 0.0
+   },
+   "tip_mm": [
+    179.2,
+    63.5,
+    -13.8
+   ],
+   "tip_in": [
+    7.057,
+    2.5,
+    -0.543
+   ],
+   "gripper_down_deg": 9.3,
+   "t": "21:34:09",
+   "table": [
+    6.0,
+    5.0
+   ]
+  },
+  {
+   "arm": [
+    227.59977319016372,
+    -0.5956109584686745
+   ],
+   "joints": {
+    "shoulder_pan": 0.13,
+    "shoulder_lift": 20.88,
+    "elbow_flex": 13.58,
+    "wrist_flex": 60.66,
+    "wrist_roll": 1.1,
+    "gripper": 0.0
+   },
+   "tip_mm": [
+    227.6,
+    -0.6,
+    -18.1
+   ],
+   "tip_in": [
+    8.961,
+    -0.023,
+    -0.714
+   ],
+   "gripper_down_deg": 5.1,
+   "t": "21:35:27",
+   "table": [
+    9.0,
+    7.0
+   ]
+  },
+  {
+   "arm": [
+    179.46737113020748,
+    -62.34244984955935
+   ],
+   "joints": {
+    "shoulder_pan": 23.96,
+    "shoulder_lift": 8.57,
+    "elbow_flex": 30.81,
+    "wrist_flex": 58.11,
+    "wrist_roll": -1.01,
+    "gripper": 0.0
+   },
+   "tip_mm": [
+    179.5,
+    -62.3,
+    -14.7
+   ],
+   "tip_in": [
+    7.066,
+    -2.454,
+    -0.578
+   ],
+   "gripper_down_deg": 7.5,
+   "t": "21:37:01",
+   "table": [
+    12.0,
+    5.0
+   ]
+  }
+ ],
+ "note": "tip positions from jog_capture.py (dashboard joints -> cam_calib.fk_tip), arm frame = base_link, mm"
+}

@@ -1,0 +1,19 @@
+# so101-arm-lab: lint and test configuration. Run `ruff check .` and `python -m pytest tests -q` from the repo root.
+[tool.ruff]
+line-length = 200
+target-version = "py310"
+exclude = ["sim/so101-lerobot", ".venv", "dashboard/urdf", "site", "attic"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP"]
+# why: several statements per line (E701/E702), `import os, sys` (E401), lambdas bound to names (E731) and short loop names (E741) are house style;
+# E402: scripts deliberately put constants, argparse and the `--help` fast path before the slow lerobot imports; E501: a few dense lines run past 200 and wrapping them is churn;
+# B905 (zip strict=) would touch 40 call sites for no behaviour change; UP015/B007/B023 are noise here
+ignore = ["E701", "E702", "E731", "E741", "E401", "E402", "E501", "B905", "UP015", "B007", "B023"]
+
+[tool.ruff.lint.per-file-ignores]
+# why: test conftests load the module under test with globals().update(...) shims, so names look unused/redefined and imports sit below sys.path edits
+"tests/**" = ["E402", "F401", "F811"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

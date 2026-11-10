@@ -1,0 +1,175 @@
+{
+ "arm_units": "mm",
+ "pairs": [
+  {
+   "arm": [
+    108.9654383754473,
+    144.60840244410682
+   ],
+   "joints": {
+    "shoulder_pan": -64.48,
+    "shoulder_lift": 11.3,
+    "elbow_flex": 28.18,
+    "wrist_flex": 57.32,
+    "wrist_roll": 7.16,
+    "gripper": 0.2
+   },
+   "tip_mm": [
+    109.0,
+    144.6,
+    -17.4
+   ],
+   "tip_in": [
+    4.29,
+    5.693,
+    -0.686
+   ],
+   "gripper_down_deg": 6.8,
+   "t": "16:40:01",
+   "marker": 0
+  },
+  {
+   "arm": [
+    116.74373962610122,
+    -153.58726152292527
+   ],
+   "joints": {
+    "shoulder_pan": 62.99,
+    "shoulder_lift": 11.03,
+    "elbow_flex": 26.77,
+    "wrist_flex": 55.47,
+    "wrist_roll": 2.42,
+    "gripper": 0.2
+   },
+   "tip_mm": [
+    116.7,
+    -153.6,
+    -15.4
+   ],
+   "tip_in": [
+    4.596,
+    -6.047,
+    -0.605
+   ],
+   "gripper_down_deg": 3.3,
+   "t": "16:40:52",
+   "marker": 1
+  },
+  {
+   "arm": [
+    258.80781478943146,
+    136.7243322458021
+   ],
+   "joints": {
+    "shoulder_pan": -30.9,
+    "shoulder_lift": 48.75,
+    "elbow_flex": -31.78,
+    "wrist_flex": 72.53,
+    "wrist_roll": -33.71,
+    "gripper": 0.0
+   },
+   "tip_mm": [
+    258.8,
+    136.7,
+    -23.9
+   ],
+   "tip_in": [
+    10.189,
+    5.383,
+    -0.941
+   ],
+   "gripper_down_deg": 0.5,
+   "t": "16:43:49",
+   "marker": 2
+  },
+  {
+   "arm": [
+    257.72074626122424,
+    -139.18538059279396
+   ],
+   "joints": {
+    "shoulder_pan": 31.6,
+    "shoulder_lift": 52.44,
+    "elbow_flex": -37.49,
+    "wrist_flex": 75.78,
+    "wrist_roll": 28.79,
+    "gripper": 0.0
+   },
+   "tip_mm": [
+    257.7,
+    -139.2,
+    -25.9
+   ],
+   "tip_in": [
+    10.146,
+    -5.48,
+    -1.018
+   ],
+   "gripper_down_deg": 0.7,
+   "t": "16:44:42",
+   "marker": 3
+  },
+  {
+   "arm": [
+    202.26993382612298,
+    -0.323092797645186
+   ],
+   "joints": {
+    "shoulder_pan": 0.04,
+    "shoulder_lift": 6.73,
+    "elbow_flex": 32.48,
+    "wrist_flex": 53.63,
+    "wrist_roll": 1.36,
+    "gripper": 0.07
+   },
+   "tip_mm": [
+    202.3,
+    -0.3,
+    -14.8
+   ],
+   "tip_in": [
+    7.963,
+    -0.013,
+    -0.582
+   ],
+   "gripper_down_deg": 2.8,
+   "t": "16:51:56",
+   "table": [
+    9.0,
+    6.0
+   ]
+  },
+  {
+   "arm": [
+    227.110454341752,
+    -67.52342265770507
+   ],
+   "joints": {
+    "shoulder_pan": 19.03,
+    "shoulder_lift": 26.68,
+    "elbow_flex": 4.62,
+    "wrist_flex": 64.62,
+    "wrist_roll": 17.8,
+    "gripper": 0.07
+   },
+   "tip_mm": [
+    227.1,
+    -67.5,
+    -18.6
+   ],
+   "tip_in": [
+    8.941,
+    -2.658,
+    -0.733
+   ],
+   "gripper_down_deg": 5.9,
+   "t": "16:53:36",
+   "table": [
+    12.0,
+    7.0
+   ],
+   "note": "relabelled: TC read the mat's printed grid, which runs from the opposite corner"
+  }
+ ],
+ "note": "tip positions from jog_capture.py (dashboard joints -> cam_calib.fk_tip), arm frame = base_link, mm"
+}
