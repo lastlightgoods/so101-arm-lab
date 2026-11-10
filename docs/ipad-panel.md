@@ -20,7 +20,7 @@ so101-dash pad            # starts server.py if it is not running, then the gate
 The gateway prints one line, for example
 
 ```
-pad page on http://192.168.1.23:8780/?k=Xy7...   (the full dashboard, /api and /cam forwarded (shell and terminal denied) to http://127.0.0.1:8765)
+pad page on http://<mac-lan-ip>:8780/?k=Xy7...   (the full dashboard, /api and /cam forwarded (shell and terminal denied) to http://127.0.0.1:8765)
 ```
 
 Open that link on the iPad once (same Wi-Fi). The gateway trades the `?k=` token for an `HttpOnly`, `SameSite=Strict`
