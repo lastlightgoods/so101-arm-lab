@@ -47,6 +47,17 @@ These are the reasons the tool is more than three `v4l2-ctl` lines:
 5. The top C920 re-enumerates on USB now and then (it was USB device 34 on a bus where the others are 8 and 9) and comes
    back with factory defaults, i.e. auto on. The udev rule and the guard both catch that.
 
+## The icSpring wrist camera looks green
+
+Measured 10 Nov 2026 on a grey patch of the mat, centre of the frame: with the captured values (white balance 4000, saturation 25)
+the green channel sat 21 % above red and 29 % above blue. The module has a fixed green bias that its controls cannot remove:
+`white_balance_temperature` only trades red against blue (3000 K: R 142 / B 187; 6500 K: R 208 / B 81; green stayed at 166 to 178
+throughout), and `hue` only rotates the cast. `saturation` is the one control that shrinks it: 18 -> G/R 1.14, 12 -> 1.10, 8 -> 1.06,
+4 -> 1.02. The file now pins the wrist at white balance 4000, hue 0, saturation 8 (G/R 1.06, G/B 1.08 on the same patch); go to 4 if
+a neutral picture matters more than object colour. Changing it: edit `calib/cam_settings.json`, `so101-cams-lock`, `so101-cams-check`.
+Stopping the guard to experiment (`systemctl --user stop so101-cam-lock`) lets the C920s drift at the next stream start; start it
+again and `so101-cams-check` within a few seconds.
+
 ## Commands (`source ~/so101/env.sh` first)
 
 | command | what it does |
