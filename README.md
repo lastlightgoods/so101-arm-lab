@@ -4,7 +4,7 @@ A small, well-instrumented robot-arm lab built around a prebuilt **SO-ARM101** (
 Feetech STS3215 servos) running **LeRobot 0.6.1**. A Jetson Orin Nano drives the arm and the cameras,
 a Mac trains policies, records, and shows a wall dashboard, and this repo holds everything that glues
 the two together: calibration, camera tooling, a live map of the work mat, scripted picking, LeRobot
-plugins, and a 600-test harness that runs without any hardware.
+plugins, MLflow tracking with a model registry and a deploy path to the Jetson, and a 759-test harness that runs without any hardware.
 
 Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend, Oregon.
 
