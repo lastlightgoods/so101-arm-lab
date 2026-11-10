@@ -3,14 +3,543 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>so101 arm lab</title>
-<style>
-  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-         font-family: system-ui, -apple-system, sans-serif; background:#111; color:#eee; }
-  p { font-size:1.4rem; letter-spacing:0.02em; }
-</style>
+<title>SO-101 Arm Lab</title>
+<meta name="description" content="Field notes from five weeks with an SO-ARM101: three cameras held at a locked exposure, a cutting mat with four ArUco markers, a self-healing calibration, a live map of the mat, and an honest account of a pick loop that is not finished.">
+<link rel="canonical" href="https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="SO-101 Arm Lab">
+<meta property="og:title" content="SO-101 Arm Lab">
+<meta property="og:description" content="A desk-sized robot arm, three locked cameras, four stickers on a cutting mat, and five weeks of notes on teaching them to agree about where things are.">
+<meta property="og:url" content="https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/">
+<meta property="og:image" content="https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/img/scene.png">
+<meta property="og:image:width" content="916">
+<meta property="og:image:height" content="608">
+<meta property="og:image:alt" content="The live mat map: the kinematic arm mask in red, four marker exclusion squares in yellow, one tracked object boxed in green.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#1a191f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fdfbf6" media="(prefers-color-scheme: light)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1.5' y='1.5' width='29' height='29' rx='3' fill='%231a191f' stroke='%23aeb4bb' stroke-width='1.5'/%3E%3Ccircle cx='9.5' cy='9.5' r='3' fill='%23fdfbf6'/%3E%3Ccircle cx='22.5' cy='9.5' r='3' fill='%23fdfbf6'/%3E%3Ccircle cx='9.5' cy='22.5' r='3' fill='%23fdfbf6'/%3E%3Ccircle cx='22.5' cy='22.5' r='3' fill='%23b98526'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/style.css">
+<script>
+  // Apply a remembered theme before first paint. Falls back to the system theme.
+  try { var t = localStorage.getItem('so101-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
 </head>
 <body>
-<p>so101 arm lab, coming up</p>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="SO-101 Arm Lab, home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="1.5" y="1.5" width="29" height="29" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9.5" cy="9.5" r="3.5" fill="currentColor"/><circle cx="22.5" cy="9.5" r="3.5" fill="currentColor"/><circle cx="9.5" cy="22.5" r="3.5" fill="currentColor"/><circle cx="22.5" cy="22.5" r="3.5" fill="#b98526"/></svg>
+      SO-101 Arm Lab
+    </a>
+    <nav aria-label="Sections">
+      <a href="#built">Built</a>
+      <a href="#notes">Notes</a>
+      <a href="#gallery">Gallery</a>
+      <a href="#status">Status</a>
+      <a href="#timeline">Timeline</a>
+    </nav>
+    <button class="theme-btn" type="button" id="theme" aria-pressed="false">theme</button>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============ 1. HERO ============ -->
+  <section class="hero" aria-labelledby="h-hero">
+    <div class="wrap">
+      <p class="eyebrow">Lastlight Goods &middot; Bend, Oregon &middot; Field notes</p>
+      <div class="hero-top">
+        <div>
+          <h1 id="h-hero">SO-101 Arm Lab</h1>
+          <p class="lede">A desk-sized robot arm, three cameras held at a fixed exposure, a cutting mat with four stickers on it, and five weeks of notes on teaching them to agree about where things are.</p>
+          <p class="status"><span class="dot" aria-hidden="true"></span><span>cameras locked &middot; 30.00 fps &middot; captured 9 Nov 23:06</span></p>
+        </div>
+      </div>
+
+      <figure class="hero-figure">
+        <div class="frame">
+          <img src="/img/scene.png" width="916" height="608" alt="The live mat map: a top-down view of the cutting mat with a one-inch grid, the kinematic arm mask in red reaching up from the arm side, the four marker exclusion squares in yellow, and one tracked object, id 514, boxed in green." fetchpriority="high">
+        </div>
+        <figcaption><b>The live mat map</b>, as the wall dashboard drew it shortly after midnight on 10 Nov. The red silhouette is not seen; it is computed from the follower's joints and projected through the camera pose. The green box is a hex nut at (11.26, 6.33) in.</figcaption>
+      </figure>
+
+      <ul class="stats" aria-label="Key numbers">
+        <li><div class="num">600</div><div class="what">tests, no hardware</div></li>
+        <li><div class="num">0.19<small>mm</small></div><div class="what">worst marker residual</div></li>
+        <li><div class="num">30.00<small>fps</small></div><div class="what">both C920s, locked</div></li>
+        <li><div class="num">36<small>days</small></div><div class="what">since 5 October</div></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ 2. HOW IT IS BUILT ============ -->
+  <section id="built" aria-labelledby="h-built">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">How it is built</p>
+        <h2 id="h-built">Two computers, one bench</h2>
+        <p>The Mac trains and watches. The Jetson owns the arm and the cameras. The mat is where they have to agree.</p>
+      </div>
+
+      <figure class="diagram">
+        <!-- wide layout -->
+        <svg class="wide" viewBox="0 0 960 330" role="img" aria-labelledby="dg-t dg-d">
+          <title id="dg-t">System diagram</title>
+          <desc id="dg-d">A Mac trains policies and runs the wall dashboard, reaching the Jetson tc-nano over SSH. The Jetson owns the SO-ARM101 arm, three cameras and the camera lock guard. The arm works over an 18 by 12 inch cutting mat with four ArUco markers.</desc>
+
+          <!-- Mac -->
+          <rect class="box" x="20" y="40" width="240" height="250" rx="2"/>
+          <text class="t-label" x="36" y="68">01 &middot; TRAIN + WATCH</text>
+          <text class="t-title" x="36" y="96">MAC</text>
+          <text class="t-sub" x="36" y="116">M1 Max &middot; Python 3.12 &middot; MPS</text>
+          <line class="hair" x1="36" y1="134" x2="244" y2="134"/>
+          <g class="t-sub">
+            <circle class="node" cx="40" cy="158" r="2"/><text x="52" y="162">ACT and SmolVLA training</text>
+            <circle class="node" cx="40" cy="184" r="2"/><text x="52" y="188">datasets and checkpoints</text>
+            <circle class="node" cx="40" cy="210" r="2"/><text x="52" y="214">wall dashboard, 3D arm, map</text>
+            <circle class="node" cx="40" cy="236" r="2"/><text x="52" y="240">600 tests against fakes</text>
+          </g>
+
+          <!-- link Mac <-> Jetson -->
+          <line class="hair-accent" x1="260" y1="165" x2="360" y2="165"/>
+          <path class="hair-accent" d="M266 161 L260 165 L266 169 M354 161 L360 165 L354 169"/>
+          <text class="t-link" x="310" y="150" text-anchor="middle">SSH</text>
+          <text class="t-link" x="310" y="184" text-anchor="middle">tegrastats</text>
+          <text class="t-link" x="310" y="197" text-anchor="middle">joints &middot; mjpeg</text>
+
+          <!-- Jetson -->
+          <rect class="box" x="360" y="40" width="240" height="250" rx="2"/>
+          <text class="t-label" x="376" y="68">02 &middot; EDGE</text>
+          <text class="t-title" x="376" y="96">JETSON ORIN NANO</text>
+          <text class="t-sub" x="376" y="116">tc-nano &middot; JetPack 6.2 &middot; 25 W</text>
+          <line class="hair" x1="376" y1="134" x2="584" y2="134"/>
+          <g class="t-sub">
+            <circle class="node" cx="380" cy="158" r="2"/><text x="392" y="162">arm: teleop, record, rollout</text>
+            <circle class="node" cx="380" cy="184" r="2"/><text x="392" y="188">3 cameras, 30 fps, frozen</text>
+            <circle class="node" cx="380" cy="210" r="2"/><text x="392" y="214">cam_lock guard, every 1 s</text>
+            <circle class="node" cx="380" cy="236" r="2"/><text x="392" y="240">calibration heals if bumped</text>
+          </g>
+
+          <!-- link Jetson <-> arm -->
+          <line class="hair-accent" x1="600" y1="165" x2="700" y2="165"/>
+          <path class="hair-accent" d="M606 161 L600 165 L606 169 M694 161 L700 165 L694 169"/>
+          <text class="t-link" x="650" y="150" text-anchor="middle">USB</text>
+          <text class="t-link" x="650" y="184" text-anchor="middle">serial 1 Mbaud</text>
+          <text class="t-link" x="650" y="197" text-anchor="middle">3 cameras</text>
+
+          <!-- Arm + mat -->
+          <rect class="box" x="700" y="40" width="240" height="250" rx="2"/>
+          <text class="t-label" x="716" y="68">03 &middot; BENCH</text>
+          <text class="t-title" x="716" y="96">SO-ARM101 + MAT</text>
+          <text class="t-sub" x="716" y="116">six STS3215 &middot; 18 &times; 12 in mat</text>
+          <line class="hair" x1="716" y1="134" x2="924" y2="134"/>
+          <!-- mat in plan at the measured marker layout, arm side at the bottom -->
+          <rect class="mat" x="742" y="156" width="165" height="110"/>
+          <g class="marker">
+            <rect x="881" y="166" width="16" height="16"/>
+            <rect x="752" y="166" width="16" height="16"/>
+            <rect x="872" y="221" width="16" height="16"/>
+            <rect x="762" y="221" width="16" height="16"/>
+          </g>
+          <!-- top camera footprint at the mat centre, front camera past the far edge -->
+          <g class="cam">
+            <circle cx="824" cy="211" r="5"/><line x1="824" y1="202" x2="824" y2="220"/><line x1="815" y1="211" x2="833" y2="211"/>
+            <path d="M817 141 L824 151 L831 141 Z"/>
+          </g>
+          <text class="t-link" x="834" y="214">top</text>
+          <text class="t-link" x="836" y="150">front</text>
+          <!-- arm from the base below the arm-side edge -->
+          <g class="arm">
+            <circle cx="824" cy="282" r="4"/>
+            <polyline points="824,278 824,262 800,238 786,222 780,214"/>
+            <rect class="cam" x="780" y="216" width="6" height="6" transform="rotate(-40 783 219)"/>
+          </g>
+          <text class="t-link" x="748" y="256">wrist</text>
+          <text class="t-link" x="834" y="286">base</text>
+        </svg>
+
+        <!-- tall layout for phones -->
+        <svg class="tall" viewBox="0 0 360 870" role="img" aria-labelledby="dg-t2 dg-d2">
+          <title id="dg-t2">System diagram</title>
+          <desc id="dg-d2">A Mac trains policies and runs the wall dashboard, reaching the Jetson tc-nano over SSH. The Jetson owns the SO-ARM101 arm, three cameras and the camera lock guard. The arm works over an 18 by 12 inch cutting mat with four ArUco markers.</desc>
+
+          <rect class="box" x="10" y="10" width="340" height="200" rx="2"/>
+          <text class="t-label" x="30" y="38">01 &middot; TRAIN + WATCH</text>
+          <text class="t-title" x="30" y="66">MAC</text>
+          <text class="t-sub" x="30" y="86">M1 Max &middot; Python 3.12 &middot; Apple MPS</text>
+          <line class="hair" x1="30" y1="102" x2="330" y2="102"/>
+          <g class="t-sub">
+            <circle class="node" cx="34" cy="124" r="2"/><text x="46" y="128">ACT and SmolVLA training</text>
+            <circle class="node" cx="34" cy="148" r="2"/><text x="46" y="152">datasets and checkpoints</text>
+            <circle class="node" cx="34" cy="172" r="2"/><text x="46" y="176">wall dashboard, 3D arm, mat map</text>
+            <circle class="node" cx="34" cy="196" r="2"/><text x="46" y="200">600 tests against fakes</text>
+          </g>
+
+          <line class="hair-accent" x1="60" y1="210" x2="60" y2="280"/>
+          <path class="hair-accent" d="M56 216 L60 210 L64 216 M56 274 L60 280 L64 274"/>
+          <text class="t-link" x="76" y="240">SSH &middot; tegrastats</text>
+          <text class="t-link" x="76" y="254">joints &middot; mjpeg</text>
+
+          <rect class="box" x="10" y="280" width="340" height="200" rx="2"/>
+          <text class="t-label" x="30" y="308">02 &middot; EDGE</text>
+          <text class="t-title" x="30" y="336">JETSON ORIN NANO</text>
+          <text class="t-sub" x="30" y="356">tc-nano &middot; JetPack 6.2 &middot; 25 W</text>
+          <line class="hair" x1="30" y1="372" x2="330" y2="372"/>
+          <g class="t-sub">
+            <circle class="node" cx="34" cy="394" r="2"/><text x="46" y="398">owns the arm: teleop, record, rollout</text>
+            <circle class="node" cx="34" cy="418" r="2"/><text x="46" y="422">three cameras, 30 fps, frozen settings</text>
+            <circle class="node" cx="34" cy="442" r="2"/><text x="46" y="446">cam_lock guard, checks every second</text>
+            <circle class="node" cx="34" cy="466" r="2"/><text x="46" y="470">calibration that heals when bumped</text>
+          </g>
+
+          <line class="hair-accent" x1="60" y1="480" x2="60" y2="550"/>
+          <path class="hair-accent" d="M56 486 L60 480 L64 486 M56 544 L60 550 L64 544"/>
+          <text class="t-link" x="76" y="510">USB &middot; serial 1 Mbaud</text>
+          <text class="t-link" x="76" y="524">3 cameras</text>
+
+          <rect class="box" x="10" y="550" width="340" height="310" rx="2"/>
+          <text class="t-label" x="30" y="578">03 &middot; BENCH</text>
+          <text class="t-title" x="30" y="606">SO-ARM101 + MAT</text>
+          <text class="t-sub" x="30" y="626">6 &times; STS3215 &middot; 18 &times; 12 in &middot; 4 markers</text>
+          <line class="hair" x1="30" y1="642" x2="330" y2="642"/>
+          <!-- mat in plan, 12 px per inch -->
+          <rect class="mat" x="72" y="660" width="216" height="144"/>
+          <g class="marker">
+            <rect x="256" y="674" width="16" height="16"/>
+            <rect x="88" y="674" width="16" height="16"/>
+            <rect x="244" y="746" width="16" height="16"/>
+            <rect x="100" y="746" width="16" height="16"/>
+          </g>
+          <g class="cam">
+            <circle cx="180" cy="732" r="5"/><line x1="180" y1="723" x2="180" y2="741"/><line x1="171" y1="732" x2="189" y2="732"/>
+            <path d="M173 652 L180 662 L187 652 Z"/>
+          </g>
+          <text class="t-link" x="191" y="735">top</text>
+          <text class="t-link" x="193" y="659">front</text>
+          <g class="arm">
+            <circle cx="180" cy="842" r="4"/>
+            <polyline points="180,838 180,818 150,784 134,762 128,754"/>
+            <rect class="cam" x="128" y="756" width="6" height="6" transform="rotate(-40 131 759)"/>
+          </g>
+          <text class="t-link" x="100" y="812">wrist</text>
+          <text class="t-link" x="191" y="846">base</text>
+        </svg>
+        <figcaption>Hairlines are links; the gold ones carry data between machines. The mat is drawn in plan at the measured marker layout, with the arm base below the arm-side edge where the jog-and-fit put it.</figcaption>
+      </figure>
+
+      <div class="spec">
+        <div>
+          <h3>Arm</h3>
+          <ul>
+            <li>SO-ARM101, leader and follower <span class="k">&middot; prebuilt</span></li>
+            <li>Six Feetech STS3215 per arm <span class="k">&middot; firmware 3.15, 1 Mbaud</span></li>
+            <li>Waveshare bus boards <span class="k">&middot; follower 12 V</span></li>
+            <li>LeRobot 0.6.1 on both machines</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Cameras</h3>
+          <ul>
+            <li>Top: Logitech C920 <span class="k">&middot; 640&times;360 MJPG, 30 fps, 16.5 in up</span></li>
+            <li>Front: Logitech C920 <span class="k">&middot; 42&deg; tilt from the far side</span></li>
+            <li>Wrist: icSpring UVC on the gripper <span class="k">&middot; 640&times;480, 22 fps by firmware</span></li>
+            <li>Settings captured per session, then frozen</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Bench</h3>
+          <ul>
+            <li>Fiskars 18&times;12 in cutting mat <span class="k">&middot; printed inch grid</span></li>
+            <li>Four 2 in ArUco markers <span class="k">&middot; DICT_4X4_50</span></li>
+            <li>Jetson Orin Nano, tc-nano <span class="k">&middot; 8 GB, 25 W</span></li>
+            <li>Mac, M1 Max <span class="k">&middot; trains on MPS, serves the wall</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3. FIELD NOTES ============ -->
+  <section id="notes" aria-labelledby="h-notes">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">Field notes</p>
+        <h2 id="h-notes">Seven short notes from five weeks with an SO-ARM101</h2>
+        <p>Every number comes from the repository; the source files are named at the end of each note.</p>
+      </div>
+
+      <div class="notes">
+
+        <article class="note" id="note-1">
+          <div class="note-body">
+            <p class="eyebrow">Field note <span class="n">01</span></p>
+            <h3>The camera that fought back</h3>
+            <p>We bought two Logitech C920s because they are the camera everyone has. Then we tried to freeze their exposure so the arm sweeping through the frame would stop changing the picture, and the first attempt came back pure white.</p>
+            <p>The revision we have (USB id 046d:08e5) does three things that a plain <code>v4l2-ctl</code> script cannot see coming. A manual control is flagged <code>inactive</code> while its auto flag is on, so the write fails with EACCES unless the auto flag goes first. About one second after <code>auto_exposure</code> goes from 3 to 1 the camera forces <code>gain</code> to 255 on its own, clobbering whatever we wrote in between: that was the white frame. And at every stream start in Manual Mode it re-derives the exposure; we watched 78 come up as 156, then 312.</p>
+            <p>So the lock became three layers. <code>cam_lock.py capture</code> lets auto settle for 4 s, reads what it chose, locks, waits 1.5 s for the gain clobber to pass, then tunes gain until the locked picture matches auto's mean grey within 8 levels. A resident guard checks every second and re-applies within about a second of any drift, because LeRobot opens the cameras itself when a recording starts. A udev rule re-applies 3 s after a camera re-enumerates with factory defaults. And <code>so101-record</code> refuses to start unless <code>check --strict</code> passes.</p>
+            <p>On 9 Nov at 23:06 the top camera locked at exposure 38 and gain 42 where auto had chosen 83 and 109, and the picture's mean grey stayed at 112.6 with the arm in and out of frame.</p>
+            <p class="src">docs/camera-settings.md, jetson/cam_lock.py, jetson/calib/cam_settings.json &middot; <a href="/notes/c920-gain-lock">the full write-up</a></p>
+          </div>
+          <figure class="note-fig">
+            <div class="frame"><img src="/img/top.jpg" width="640" height="360" loading="lazy" alt="The overhead C920 at the locked exposure: the Fiskars 18 by 12 inch mat with four 2 inch ArUco markers, the follower parked at the top edge, the arm base in blue tape at the bottom centre, and the hex nut as a small dark dot left of centre."></div>
+            <figcaption>The overhead C920 at the locked exposure: the mat with its four markers, the follower parked at the top edge, the hex nut a small dark dot left of centre.</figcaption>
+          </figure>
+        </article>
+
+        <article class="note" id="note-2">
+          <div class="note-body">
+            <p class="eyebrow">Field note <span class="n">02</span></p>
+            <h3>Four stickers and a cutting mat</h3>
+            <p>The work surface is a Fiskars 18x12 in self-healing cutting mat, chosen because it has an inch grid printed on it and costs very little. We glued four 2 in ArUco markers from <code>DICT_4X4_50</code> onto it at grid positions (16,10), (2,10), (15,4) and (3,4), with the origin at the mat corner nearest the arm and X running along the 18 in edge.</p>
+            <p>That is the whole table calibration. <code>cam_calib.py table</code> finds the four markers in one overhead frame, snaps each to an exact square, and fits a homography from 16 corner points to mat millimetres. The current solve, from 9 Nov at 23:06, puts the worst marker 0.19 mm from where the layout says it is. Under 2 mm is normal; over 5 mm means someone measured a marker wrong.</p>
+            <p>A homography only knows the mat surface, so height matters. <code>locate</code> takes a pixel and a height above the mat; a 60 mm tall box read as if it were flat lands centimetres off. We also pinned each camera's field of view from a tape-measured lens height, 16.5 in for the top camera (69.16 degrees) and 18.375 in for the oblique front camera (68.88 degrees), and treat those numbers as belonging to the lens, not the mount.</p>
+            <p>Nothing learned uses any of this. ACT and SmolVLA look at pixels. The calibration exists for the scripted moves, for the map on the wall, and for being able to say where things are in inches.</p>
+            <p class="src">docs/camera-calibration.md, jetson/calib/top_layout.json, jetson/calib/top_table.json</p>
+          </div>
+          <figure class="note-fig">
+            <div class="frame"><img src="/img/fixture_bg_empty_mat.jpg" width="640" height="360" loading="lazy" alt="The empty mat seen from the overhead camera on 9 Nov, before it was re-squared: the earlier marker layout, the arm parked at the top edge."></div>
+            <figcaption>The empty-mat background frame the scene tests use, from 9 Nov before the mat was re-squared: the earlier marker layout, the arm parked at the top edge.</figcaption>
+          </figure>
+        </article>
+
+        <article class="note" id="note-3">
+          <div class="note-body">
+            <p class="eyebrow">Field note <span class="n">03</span></p>
+            <h3>Teaching the arm where it is</h3>
+            <p>Knowing where the mat is in the camera does not tell us where the arm is on the mat. For that we switched torque off, pushed the closed jaw tip onto known grid points, and recorded the joints each time. Forward kinematics from the URDF, which match the dashboard's 3D arm to 0.1 mm, turn those joints into tip positions, and a rigid fit gives the base pose.</p>
+            <p>The first rigid fits left 15 to 30 mm of residual, far too much. The reason is a LeRobot convention: it zeroes each joint at the middle of its calibrated range, which is not exactly the URDF zero. A few degrees of offset in the lift, elbow and wrist make the kinematics read short near the base and right far out. So the fit now solves the base pose, the table height and three joint offsets together. On the real arm the offsets came out at shoulder_lift -3.9 degrees, elbow_flex -5.2 degrees and wrist_flex -0.7 degrees, and the residuals fell to 0.7 to 1.1 mm on the four points of the current fit, with an RMS of 0.69 mm. The base sits at (9.04, -3.18) in on the mat frame, heading 90.15 degrees.</p>
+            <p>One more rule came out of the jogging. The SO-101 gripper has one fixed jaw that is off the roll axis, so the contact point moves when the wrist rolls. We jogged everything at a wrist roll of 0.46 degrees and now command near that value; <code>/api/ik</code> defaults to it.</p>
+            <p class="src">docs/camera-calibration.md "Joint zero offsets", jetson/calib/top_table.json, jetson/calib/top_armfit.json</p>
+          </div>
+          <figure class="note-fig">
+            <div class="frame"><img src="/img/dashboard.png" width="1200" height="758" loading="lazy" alt="The wall dashboard in its default tempest skin: turntable header, MISSION STATUS reading IDLE READY with tc-nano up 3 days, six Jetson gauges for GPU, bus, CPU, RAM, temperature and power, the three live camera feeds with a CAL chip reading 0.2 mm and arm fit 1.1 mm, and the self-playing Tempest attract screen."></div>
+            <figcaption>The wall dashboard, default <code>tempest</code> skin. The CAL chip over the top feed reads 0.2 mm for the table and 1.1 mm for the arm fit; the portrait wall kiosk shows more rows below this.</figcaption>
+          </figure>
+        </article>
+
+        <article class="note" id="note-4">
+          <div class="note-body">
+            <p class="eyebrow">Field note <span class="n">04</span></p>
+            <h3>A map of the mat</h3>
+            <p>The wall dashboard draws a live top-down map of whatever is lying on the mat. <code>scene_detect.py</code> warps each overhead frame into mat space at 0.5 px per mm (229 x 152 pixels, 2 mm per pixel), subtracts a stored picture of the empty mat, and reports every blob between 40 mm&sup2; and a third of the mat with its centroid in inches, its size and its mean colour. It takes 5 to 8 ms a frame and runs twice a second.</p>
+            <p>The hard part was the arm. Our first rule said any blob touching the arm-side edge is the arm. On 9 Nov TC watched the arm reach across the mat and saw the gripper appear on the map as an object, because the forearm had left the edge through the air. The fix masks the arm from what we know rather than from what we see: the follower's joints go through the forward kinematics, each joint origin gets a radius (30 to 50 mm, times 1.3 for the shadow), and the points are projected through the camera pose as 3D points. That last part matters; an elbow 200 mm up under a camera 419 mm up is seen more than 100 mm away from the spot beneath it.</p>
+            <p>Flicker was the other enemy. A track now has to be seen in 3 consecutive detections, about 1.5 s, before it is listed, and it survives 3 missed ones, so an object the gripper passes over keeps its id.</p>
+            <p>When we fetched the map while writing this, it showed one object, id 514, at (11.26, 6.33) in, 10 by 6 mm. That is the hex nut.</p>
+            <p class="src">docs/mat-scene.md, dashboard/scene_detect.py</p>
+          </div>
+          <figure class="note-fig pixel">
+            <div class="frame"><img src="/img/top_mat_bg.png" width="229" height="152" loading="lazy" alt="The learned empty-mat background in mat space: a small 229 by 152 pixel top-down image of the mat, 2 millimetres per pixel, shown enlarged with visible pixels."></div>
+            <figcaption>The learned empty-mat background in mat space, all 229 &times; 152 pixels of it at 2 mm each. This is what the detector subtracts from every frame; it is shown here at its true, blocky resolution.</figcaption>
+          </figure>
+        </article>
+
+        <article class="note" id="note-5">
+          <div class="note-body">
+            <p class="eyebrow">Field note <span class="n">05</span></p>
+            <h3>When the stand gets bumped</h3>
+            <p>The overhead camera hangs on a stand the arm can reach, and the mat is only taped down. On the evening of 9 Nov the mat moved 13 to 19 mm between two frames half an hour apart, and the camera has been nudged more than once. A calibration that goes stale without saying so is worse than none.</p>
+            <p>So the four markers are detected in every frame, 2.6 ms each. When they land more than 3 mm from where the stored homography puts them, and at least 3 are visible, a fresh homography is fitted and used from then on. The server compares the stored and live solves; once the largest marker shift passes 3 px, <code>/api/calib</code> serves the live solve, the overlays and the 3D stage follow within a second, one event line is written ("overhead camera moved 11 px, re-solved from 4 markers (0.2 mm)"), and the file is rewritten at most once a minute, keeping the arm fit because the arm did not move when the camera did.</p>
+            <p>The camera poses heal the same way, with one thing held fixed: the field of view belongs to the lens and was pinned once from a tape measure, so only position and orientation are re-solved, with a 5 mm / 1 degree hysteresis so noise never jitters the frustums on the wall.</p>
+            <p>There are limits, and they are reported rather than hidden. Fewer than 3 markers visible means the last good solve is held. A mat moved more than 150 mm or 30 degrees, or markers re-glued, means <code>calib_ok</code> goes false and the chip on the feed reads CHECK MAT.</p>
+            <p class="src">docs/mat-scene.md "Self-healing calibration", docs/camera-calibration.md section 6</p>
+          </div>
+          <figure class="note-fig">
+            <div class="frame"><img src="/img/fixture_mat_turned.jpg" width="640" height="360" loading="lazy" alt="The overhead view with the mat turned round and the markers re-glued: a congruent rectangle of four markers the refit cannot tell from a rigid move."></div>
+            <figcaption>The mat turned round and the markers re-glued, 9 Nov: a congruent rectangle the marker refit cannot tell from a rigid move, and the reason <code>mat_shift_mm</code> and <code>mat_rot_deg</code> exist.</figcaption>
+          </figure>
+        </article>
+
+        <article class="note" id="note-6">
+          <div class="note-body">
+            <p class="eyebrow">Field note <span class="n">06</span></p>
+            <h3>The nut moves in the jaws</h3>
+            <p>With a calibrated camera and a fitted arm we wrote the obvious script: find the hex nut in the overhead frame, plan nine waypoints through <code>/api/ik</code>, pick it up, carry it to a target, set it down, measure where it landed, repeat and learn.</p>
+            <p>Two kinds of learning are in the loop. Servo sag under load, which we measured at 1 to 3.5 degrees, is corrected per waypoint from last time's error with a gain of 0.7. We tried summing the errors first and overshot by 24 mm, so only the last error is fed forward. The landing error, measured by the camera, shifts the place target with a gain of 0.5.</p>
+            <p>The sag learning worked. Over the first four runs on 10 Nov the hover error fell from 3.17 to 0.97 degrees and the lift error from 4.58 to 0.97. All four picks succeeded, each run took about 18 s, and the arm reaches within about 3 mm of a commanded point.</p>
+            <p>The nut still landed 31, 10, 39 and 21 mm from the target. The reason is mechanical and we are not going to pretend otherwise: the SO-101 gripper has one moving jaw, and a 10 mm nut shifts inside it during the grasp, so the part is no longer where the tip is. The next step is to look at the part in the jaws with the wrist camera before placing, which is why that camera now has a solved hand-eye pose (1.2, 67.9, -11.3) mm from the gripper link, good to a few millimetres and about 1.5 degrees.</p>
+            <p class="src">tools/pick_loop.py, jetson/pick_seq.py, jetson/calib/pick_state.json, README.md, jetson/calib/wrist_campose.json</p>
+          </div>
+          <figure class="note-fig">
+            <div class="frame"><img src="/img/wrist.jpg" width="640" height="480" loading="lazy" alt="The icSpring wrist camera's view: the gripper jaws enter from the bottom of the frame, the hex nut sits just right of the fingertips on the mat grid, with strong barrel distortion and a green-tinted white balance."></div>
+            <figcaption>The wrist camera: the jaws enter from the bottom, the hex nut sits just right of the fingertips. Strong barrel distortion (k1 &minus;0.41 in the hand-eye solve) and the green-tinted white balance before the gain match.</figcaption>
+          </figure>
+        </article>
+
+        <article class="note" id="note-7">
+          <div class="note-body">
+            <p class="eyebrow">Field note <span class="n">07</span></p>
+            <h3>600 tests and no robot</h3>
+            <p>Most evenings the arm is busy, or the Jetson is training, or the cameras are being re-aimed. The code still has to be checked, so the test suite does not touch any of it. <code>python -m pytest tests -q</code> collects 600 tests and takes about 3 minutes with nothing plugged in.</p>
+            <p>The calibration tests render checkerboards and ArUco tables through a synthetic camera with known intrinsics, distortion and pose, then check what the tool gets back: the lens model within 1.5 px, the camera position within 6 mm, pixel-to-mat within 1.5 mm, and that the arm fit refuses a mirror image. The hand-eye solver is run on a synthetic wrist camera placed on the real kinematics and must come back within 2 mm, 0.5 degrees and 2 percent of focal length. The camera lock is driven against a fake <code>v4l2-ctl</code> that reproduces every behaviour we measured on the real C920, the gain clobber included. The bus plugin runs on a fake Feetech bus that drops packets on cue.</p>
+            <p>The dashboard page gets the same treatment with no framework and no npm: a Python stub server answers every API route from objects a test can mutate, a small Node driver opens the page in headless Chrome, blocks every external request, freezes the page's timers, and fails any test whose page threw or logged an error. Forty-five of those run in about 35 s. The real frames in the fixtures are from 9 Nov: an empty mat, one hex nut at (10.97, 6.94) in, and the arm raised.</p>
+            <p class="src">tests/, tests/ui/README.md, README.md</p>
+          </div>
+          <figure class="note-fig">
+            <div class="frame"><img src="/img/fixture_arm_raised.jpg" width="640" height="360" loading="lazy" alt="The arm raised over the mat as seen by the overhead camera: the forearm leaves the mat edge through the air, the frame that exposed the edge-only arm rule."></div>
+            <figcaption>One of the real fixture frames, 9 Nov: the arm raised over the mat, the forearm leaving the edge through the air. The kinematic mask was written for this case.</figcaption>
+          </figure>
+        </article>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4. GALLERY ============ -->
+  <section id="gallery" aria-labelledby="h-gallery">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">Gallery</p>
+        <h2 id="h-gallery">Real frames</h2>
+        <p>Live frames and screenshots from the running wall dashboard shortly after midnight on 10 Nov 2026; fixture frames are the 9 Nov captures checked into the tests. Each opens at full size.</p>
+      </div>
+      <ul class="gallery">
+        <li><figure>
+          <a href="/img/top.jpg"><div class="frame"><img src="/img/thumb/top.jpg" width="480" height="270" loading="lazy" alt="Overhead camera: the mat with four ArUco markers, the follower parked at the top edge."></div></a>
+          <figcaption><b>Top</b> &middot; the overhead C920 at the locked exposure, markers 0 to 3 at their inch positions, the arm base in blue tape at bottom centre.</figcaption>
+        </figure></li>
+        <li><figure>
+          <a href="/img/front.jpg"><div class="frame"><img src="/img/thumb/front.jpg" width="480" height="270" loading="lazy" alt="Front camera: the mat seen obliquely with three markers in view and the black articulated lamp stand across the frame."></div></a>
+          <figcaption><b>Front</b> &middot; the second C920, 42 degrees down from past the far edge. The black articulated arm across the frame is the lamp stand, not the robot.</figcaption>
+        </figure></li>
+        <li><figure>
+          <a href="/img/wrist.jpg"><div class="frame"><img src="/img/thumb/wrist.jpg" width="480" height="360" loading="lazy" alt="Wrist camera: the jaws enter from the bottom, the hex nut just right of the fingertips."></div></a>
+          <figcaption><b>Wrist</b> &middot; the icSpring module bolted to the gripper: jaws from the bottom, the hex nut just right of the fingertips, one marker corner at lower right.</figcaption>
+        </figure></li>
+        <li><figure>
+          <a href="/img/scene.png"><div class="frame"><img src="/img/thumb/scene.jpg" width="480" height="318" loading="lazy" alt="The live mat map with the red kinematic arm mask, yellow marker squares and one green object box."></div></a>
+          <figcaption><b>Mat map</b> &middot; rendered by <code>scene_detect.py</code>: a 1 inch grid, the arm's silhouette from the follower's joints, object id 514 at (11.26, 6.33) in.</figcaption>
+        </figure></li>
+        <li><figure>
+          <a href="/img/wristcam_view_w1.jpg"><div class="frame"><img src="/img/thumb/wristcam_view_w1.jpg" width="480" height="360" loading="lazy" alt="Hand-eye capture w1: the wrist camera looking at a single mat marker."></div></a>
+          <figcaption><b>Hand-eye w1</b> &middot; the wrist camera looking at a single mat marker with the follower's joints recorded; one of five views that solved the camera's pose. Rigid residual 3.0 px.</figcaption>
+        </figure></li>
+        <li><figure>
+          <a href="/img/wristcam_view_w3.jpg"><div class="frame"><img src="/img/thumb/wristcam_view_w3.jpg" width="480" height="360" loading="lazy" alt="Hand-eye capture w3: another single-marker view from a different height and tilt."></div></a>
+          <figcaption><b>Hand-eye w3</b> &middot; another single-marker view from a different height and tilt. Rigid residual 7.5 px.</figcaption>
+        </figure></li>
+        <li><figure>
+          <a href="/img/fixture_hex_nut.jpg"><div class="frame"><img src="/img/thumb/fixture_hex_nut.jpg" width="480" height="270" loading="lazy" alt="One hex nut on the mat at (10.97, 6.94) inches, the arm parked at the top."></div></a>
+          <figcaption><b>Fixture: one nut</b> &middot; a hex nut at (10.97, 6.94) in, the frame the object tests measure.</figcaption>
+        </figure></li>
+        <li><figure>
+          <a href="/img/dashboard.png"><div class="frame"><img src="/img/thumb/dashboard.jpg" width="480" height="303" loading="lazy" alt="The wall dashboard in its default tempest skin: gauges, live feeds and the Tempest attract screen."></div></a>
+          <figcaption><b>Dashboard, tempest</b> &middot; the default skin in a landscape window: mission status, the six Jetson gauges, three live feeds, the attract screen.</figcaption>
+        </figure></li>
+        <li><figure>
+          <a href="/img/dashboard_dystopian.png"><div class="frame"><img src="/img/thumb/dashboard_dystopian.jpg" width="480" height="303" loading="lazy" alt="The dashboard in the Lastlight Goods DYSTOPIAN skin: silver only, JetBrains Mono, facility signage, and the card ARM BAY. IDLE."></div></a>
+          <figcaption><b>Dashboard, dystopian</b> &middot; the Lastlight Goods DYSTOPIAN skin: silver only, JetBrains Mono, facility signage, and the live follower pose as a silhouette.</figcaption>
+        </figure></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ 5. STATUS ============ -->
+  <section id="status" aria-labelledby="h-status">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">Status, honestly</p>
+        <h2 id="h-status">The pick loop is not finished</h2>
+      </div>
+      <div class="status-grid">
+        <div class="prose">
+          <p>The arm reaches within about 3 mm of a commanded point. The hex nut still lands 10 to 40 mm from where it was meant to go, and we know why: the SO-101 gripper has one moving jaw, and a 10 mm nut shifts inside it during the grasp, so the part is no longer where the fingertip is. No amount of sag learning fixes that, and the first four runs show it plainly: the joint errors converged in one run and the landing error did not.</p>
+          <p>What does work is the plumbing underneath. The table calibration holds to a fifth of a millimetre and repairs itself when the stand is bumped. Both C920s stream at a true 30.00 frames per second with frozen settings, and a guard puts them back within a second if anything changes them. The mat map runs in under 8 ms a frame and no longer mistakes the gripper for an object. Six hundred tests cover all of it without a robot in the room.</p>
+          <p>Open items, in order: look at the part in the jaws with the wrist camera before placing, using the hand-eye pose solved on 9 Nov; keep in mind that the wrist camera paces itself at about 22 fps by firmware, so one frame in four is a repeat in a 30 Hz recording; and the real-robot learned policies are still early, the first one having learned to reach and then hover because every training frame showed the leader arm and a hand.</p>
+        </div>
+        <aside class="panel" aria-labelledby="h-runs">
+          <h3 id="h-runs">First four runs &middot; 10 Nov, about 00:03</h3>
+          <dl class="kv">
+            <dt>picks</dt><dd><span class="num">4 of 4</span> succeeded, about 18.3 s each</dd>
+            <dt>reach</dt><dd>within about <span class="num">3 mm</span> of a commanded point</dd>
+            <dt>landing</dt><dd><span class="num">10&ndash;40 mm</span> off, the nut shifting in the jaws</dd>
+          </dl>
+          <table class="runs">
+            <caption class="eyebrow" style="text-align:left;margin:1.25rem 0 0.5rem">Per run</caption>
+            <thead><tr><th scope="col">run</th><th scope="col">hover err &deg;</th><th scope="col">lift err &deg;</th><th scope="col">landing mm</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>3.17</td><td>4.58</td><td>31.2</td></tr>
+              <tr><td>2</td><td>1.07</td><td>0.99</td><td>10.4</td></tr>
+              <tr><td>3</td><td>1.02</td><td>1.07</td><td>39.3</td></tr>
+              <tr><td>4</td><td>0.97</td><td>0.97</td><td>21.2</td></tr>
+            </tbody>
+          </table>
+          <p class="src" style="margin-top:1rem">jetson/calib/pick_state.json, tools/pick_loop.py</p>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 6. TIMELINE ============ -->
+  <section id="timeline" aria-labelledby="h-timeline">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">Timeline</p>
+        <h2 id="h-timeline">5 October to 10 November 2026</h2>
+      </div>
+      <ol class="timeline">
+        <li><time datetime="2026-10-05">5 Oct</time><div class="ev"><b>Arms answer on the bus.</b> Port mapping confirmed by a wiggle test; the bus-dropout root cause found the same night: cameras and servo boards shared one USB 2.0 hub, and opening a stream stalled the serial chip in 0.3 s.</div></li>
+        <li><time datetime="2026-10-06">6 Oct</time><div class="ev"><b>The gripper that quit mid-grasp</b> traced to the STS3215 overload trip and fixed in the bus plugin.</div></li>
+        <li><time datetime="2026-10-07">7 Oct</time><div class="ev"><b>First dataset,</b> <code>bottle-pick</code>: 50 raw episodes, 40 kept, 28,288 frames; ACT trained 50k steps on the Mac. A second dataset, <code>jar-pocket</code>, followed.</div></li>
+        <li><time datetime="2026-10-14">14 Oct</time><div class="ev"><b>The Jetson arrives</b> and is imaged with JetPack 6.2.1. The wall dashboard is born: gauges, live feeds, an embedded terminal, the 3D arm from the URDF.</div></li>
+        <li><time datetime="2026-10-15">15 Oct</time><div class="ev"><b>Synchronous inference reaches only 13 Hz</b> on the Jetson; the async path holds 30 Hz. A policy that froze at rest is traced to idle time at the start of 13 of 16 episodes.</div></li>
+        <li><time datetime="2026-10-16">16 Oct</time><div class="ev"><b>Theatre.</b> The turntable header, the self-playing Tempest attract screen, the retinal-scan lock, and a SmolVLA fine-tune in the cloud: 10k steps, 61 minutes, about $2.55.</div></li>
+        <li><time datetime="2026-10-18">18 Oct</time><div class="ev"><b>First git commit.</b> The 3D stage gets the mat, the camera frustums and solid follower meshes.</div></li>
+        <li><time datetime="2026-10-19">19&ndash;21 Oct</time><div class="ev"><b>Simulation rounds.</b> The best sim policy reaches 84% over 100 unseen layouts; re-planning more often made this policy worse, not better.</div></li>
+        <li><time datetime="2026-10-28">28 Oct</time><div class="ev"><b>Two C920s installed</b> as top and front cameras; three-camera recording config.</div></li>
+        <li><time datetime="2026-10-29">29 Oct</time><div class="ev"><b>Grippers recalibrated;</b> teleop repaired after the calibration JSON drifted from servo EEPROM.</div></li>
+        <li><time datetime="2026-11-09">9 Nov</time><div class="ev"><b>The calibration day.</b> Arm base jog-and-fit with joint zero offsets, the camera settings lock with guard and udev rule, camera health and drift tools, the kinematic arm mask, live camera poses, the wrist camera hand-eye solve, and the single-session waypoint runner.</div></li>
+        <li><time datetime="2026-11-10">10 Nov</time><div class="ev"><b>The pick loop learns.</b> Mat-map persistence filter, wrist pose on the 3D stage, and the iterative pick-and-place learner with its first four runs. This page.</div></li>
+      </ol>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <div>
+      <div class="mark">A Lastlight Goods project</div>
+      <div>Bend, Oregon</div>
+      <p class="fine">Every number on this page comes from the lab's repository as of 10 November 2026. Images are real captures; nothing is rendered or staged.</p>
+    </div>
+    <ul>
+      <li><a href="https://github.com/lastlightgoods/so101-arm-lab">github.com/lastlightgoods/so101-arm-lab</a> <span class="k">(repo, public soon)</span></li>
+      <li><a href="/notes/c920-gain-lock">Note: the C920 that un-locks itself</a></li>
+      <li><a href="#main">Back to top</a></li>
+    </ul>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var btn = document.getElementById('theme');
+    if (!btn) return;
+    var root = document.documentElement;
+    function current() {
+      var t = root.getAttribute('data-theme');
+      if (t) return t;
+      return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    }
+    function paint() {
+      var c = current();
+      btn.textContent = c === 'dark' ? 'light' : 'dark';
+      btn.setAttribute('aria-label', 'Switch to ' + (c === 'dark' ? 'light' : 'dark') + ' theme');
+      btn.setAttribute('aria-pressed', root.hasAttribute('data-theme') ? 'true' : 'false');
+    }
+    btn.addEventListener('click', function () {
+      var next = current() === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('so101-theme', next); } catch (e) {}
+      paint();
+    });
+    paint();
+  })();
+</script>
 </body>
 </html>

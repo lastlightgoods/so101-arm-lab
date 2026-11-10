@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Logitech C920 that un-locks itself &middot; SO-101 Arm Lab</title>
+<meta name="description" content="Gain 255, re-derived exposure, and how we keep a Logitech C920 frozen for LeRobot recordings: measured firmware behaviour of USB id 046d:08e5 and a three-layer fix.">
+<link rel="canonical" href="https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/notes/c920-gain-lock">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SO-101 Arm Lab">
+<meta property="og:title" content="The Logitech C920 that un-locks itself">
+<meta property="og:description" content="Gain 255, re-derived exposure, and how we keep a C920 frozen for LeRobot.">
+<meta property="og:url" content="https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/notes/c920-gain-lock">
+<meta property="og:image" content="https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/img/top.jpg">
+<meta property="og:image:alt" content="The overhead C920 at the locked exposure: the cutting mat with four ArUco markers.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#1a191f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fdfbf6" media="(prefers-color-scheme: light)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1.5' y='1.5' width='29' height='29' rx='3' fill='%231a191f' stroke='%23aeb4bb' stroke-width='1.5'/%3E%3Ccircle cx='9.5' cy='9.5' r='3' fill='%23fdfbf6'/%3E%3Ccircle cx='22.5' cy='9.5' r='3' fill='%23fdfbf6'/%3E%3Ccircle cx='9.5' cy='22.5' r='3' fill='%23fdfbf6'/%3E%3Ccircle cx='22.5' cy='22.5' r='3' fill='%23b98526'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/style.css">
+<script>
+  try { var t = localStorage.getItem('so101-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="SO-101 Arm Lab, home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="1.5" y="1.5" width="29" height="29" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9.5" cy="9.5" r="3.5" fill="currentColor"/><circle cx="22.5" cy="9.5" r="3.5" fill="currentColor"/><circle cx="9.5" cy="22.5" r="3.5" fill="currentColor"/><circle cx="22.5" cy="22.5" r="3.5" fill="#b98526"/></svg>
+      SO-101 Arm Lab
+    </a>
+    <nav aria-label="Sections">
+      <a href="/#notes">Notes</a>
+      <a href="/#gallery">Gallery</a>
+      <a href="/#status">Status</a>
+    </nav>
+    <button class="theme-btn" type="button" id="theme" aria-pressed="false">theme</button>
+  </div>
+</header>
+
+<main id="main">
+  <article class="article">
+    <div class="wrap">
+      <a class="back" href="/">&larr; back to the lab</a>
+      <header class="prose" style="margin-top:2rem">
+        <p class="eyebrow">Note &middot; Cameras</p>
+        <h1>The Logitech C920 that un-locks itself: gain 255, re-derived exposure, and how we keep it frozen for LeRobot</h1>
+        <p class="meta">Measured 9 Nov 2026 on a Jetson Orin Nano &middot; USB id 046d:08e5 &middot; ~6 minutes</p>
+      </header>
+
+      <div class="prose">
+        <p>If you record SO-101 datasets with a Logitech C920 and have tried to pin its exposure so the arm moving through the frame stops changing the picture, this is for you. We spent an evening on it and measured some firmware behaviour worth knowing before you write the three <code>v4l2-ctl</code> lines everyone writes first.</p>
+
+        <figure style="margin:2rem 0">
+          <div class="frame"><img src="/img/top.jpg" width="640" height="360" alt="The overhead C920 at the locked exposure: the cutting mat with four ArUco markers, the follower parked at the top edge."></div>
+          <figcaption>The top C920 after the lock: exposure 38, gain 42, mean grey 112.6 with the arm in or out of the frame.</figcaption>
+        </figure>
+
+        <h2>Why lock at all</h2>
+        <p>Out of the box a C920 runs auto exposure, auto white balance and continuous autofocus. When the arm enters the frame the camera re-exposes on the arm, so brightness becomes a function of arm pose, and a policy can learn the brightness cue instead of the scene. Our rule: vary lighting between sessions deliberately, re-capture settings at the start of each session, keep them fixed within a session.</p>
+
+        <h2>What this revision does</h2>
+        <p>The controls, by their v4l2 names: <code>auto_exposure</code> (3 = Aperture Priority, 1 = Manual Mode), <code>exposure_time_absolute</code>, <code>exposure_dynamic_framerate</code>, <code>gain</code>, <code>white_balance_automatic</code>, <code>white_balance_temperature</code>, <code>focus_automatic_continuous</code>, <code>focus_absolute</code>, <code>power_line_frequency</code>, <code>backlight_compensation</code>.</p>
+        <ol>
+          <li><strong>Manual controls are <code>inactive</code> while their auto flag is on.</strong> A write to <code>exposure_time_absolute</code> or <code>gain</code> in that state fails with EACCES. Set <code>auto_exposure=1</code> first, then the manual values.</li>
+          <li><strong>Exposure snaps to a stop table.</strong> <code>exposure_time_absolute</code> is in 100 &micro;s units and the camera only exposes in 1/2<sup>n</sup>-second stops: 78 (1/128 s), 156, 312. The same stop reads back as 77 or 78, so verify with a tolerance of 2. At 30 fps exposure must stay at or below 333, so 312 is the longest usable stop; if auto wanted more, start at 312 and raise gain.</li>
+          <li><strong>About one second after <code>auto_exposure</code> goes 3 &rarr; 1, the camera forces <code>gain</code> to 255.</strong> This one cost us the evening. The sequence we saw: write <code>auto_exposure=1</code>, write <code>gain=42</code>, read back 42, and roughly a second later read back 255 and a white picture. Any gain written inside that window is clobbered. We now wait 1.5 s after the transition and rewrite whatever moved.</li>
+          <li><strong>At every stream start in Manual Mode the camera re-derives its exposure.</strong> We had 78 locked; opening the stream brought it up as 156, the next open 312. A write issued while the stream runs holds for that stream. LeRobot opens the cameras itself when <code>lerobot-record</code> starts, so a one-shot apply before recording is not enough.</li>
+          <li><strong>The camera occasionally re-enumerates on USB</strong> and comes back with factory defaults, auto on.</li>
+        </ol>
+
+        <h2>The fix, in three layers</h2>
+        <p><strong>Capture once per lighting session.</strong> <code>cam_lock.py capture</code> streams each camera in the exact mode recording uses (640x360 MJPG 30 fps), hands it to auto, waits 4 s, reads what auto chose and the picture's mean grey, locks, then tunes <code>gain</code> until the locked picture matches auto's mean within 8 grey levels (clamped to 100-140). A locked picture outside 60-190 is put back on auto and not saved. The result is one JSON block per camera keyed by its <code>/dev/v4l/by-id</code> name. For us on 9 Nov: top C920 exposure 38, gain 42, white balance 3377 K, focus 30; front C920 exposure 38, gain 85, white balance 3388 K, focus 35. Auto had chosen exposure 83 and gain 109 on both. We also force <code>power_line_frequency=2</code> and <code>backlight_compensation=0</code>, and switch off <code>exposure_dynamic_framerate</code> so the camera cannot halve the frame rate to buy light.</p>
+        <p><strong>A resident guard.</strong> <code>cam_lock.py guard</code> runs as a systemd user unit (<code>Restart=always</code>, with <code>loginctl enable-linger</code> so it starts at boot). It checks every second and re-applies the saved values within about a second of any drift, logging each fix. That catches the stream-start jump.</p>
+        <p><strong>A udev rule for re-plugs.</strong> On <code>ACTION=="add"</code> for the C920's capture node, a transient <code>systemd-run --on-active=3</code> unit re-applies the file 3 s later, because udev kills <code>RUN+=</code> programs after a few seconds and the camera is not always ready to take controls the instant its node exists.</p>
+        <div class="callout">And a guard rail: our <code>so101-record</code> wrapper runs <code>cam_lock.py check --strict</code> first and refuses to start if any camera is unplugged, uncaptured or drifted. Recording on auto is the expensive mistake, so the tool does not let it happen quietly.</div>
+
+        <h2>How to tell it worked</h2>
+        <p>Pull a frame with the arm out of the picture and one with the arm waved through it; the mean grey should not move (ours stays at 112.6 on the top camera). This should show the auto flags off and no <code>inactive</code> anywhere:</p>
+<pre><code>v4l2-ctl -d /dev/video0 --list-ctrls | grep -E "auto|absolute|gain"</code></pre>
+        <p><code>journalctl --user -u so101-cam-lock -n 20</code> shows one line per re-lock, typically right after LeRobot opens a camera. The whole tool is covered by tests against a fake <code>v4l2-ctl</code> that reproduces every behaviour above, so it can be worked on without the camera.</p>
+
+        <h2>Where the code is</h2>
+        <p><code>jetson/cam_lock.py</code>, <code>jetson/99-so101-cams.rules</code>, <code>jetson/so101-cam-lock.service</code> and <code>docs/camera-settings.md</code> in the so101-arm-lab repository at <a href="https://github.com/lastlightgoods/so101-arm-lab">github.com/lastlightgoods/so101-arm-lab</a>. The repo will be public soon. If your C920 revision behaves differently, we would like the numbers.</p>
+
+        <p style="margin-top:3rem"><a class="back" href="/#note-1">&larr; back to field note 01</a></p>
+      </div>
+    </div>
+  </article>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <div>
+      <div class="mark">A Lastlight Goods project</div>
+      <div>Bend, Oregon</div>
+    </div>
+    <ul>
+      <li><a href="https://github.com/lastlightgoods/so101-arm-lab">github.com/lastlightgoods/so101-arm-lab</a> <span class="k">(repo, public soon)</span></li>
+      <li><a href="/">SO-101 Arm Lab</a></li>
+    </ul>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var btn = document.getElementById('theme');
+    if (!btn) return;
+    var root = document.documentElement;
+    function current() {
+      var t = root.getAttribute('data-theme');
+      if (t) return t;
+      return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    }
+    function paint() {
+      var c = current();
+      btn.textContent = c === 'dark' ? 'light' : 'dark';
+      btn.setAttribute('aria-label', 'Switch to ' + (c === 'dark' ? 'light' : 'dark') + ' theme');
+      btn.setAttribute('aria-pressed', root.hasAttribute('data-theme') ? 'true' : 'false');
+    }
+    btn.addEventListener('click', function () {
+      var next = current() === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('so101-theme', next); } catch (e) {}
+      paint();
+    });
+    paint();
+  })();
+</script>
+</body>
+</html>
