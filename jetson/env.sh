@@ -31,6 +31,8 @@ so101-cams-locked-or-bail() { python3 ~/so101/cam_lock.py check --strict && { so
 # MLflow tracking (docs/mlops/tracking.md): ~/so101/.mlflow_uri holds the Mac server's URL on one line (written once by
 # `tools/mlflow_ui.sh uri | ssh jetson 'cat > ~/so101/.mlflow_uri'`); absent = nothing is logged and nothing waits.
 [ -s ~/so101/.mlflow_uri ] && export SO101_MLFLOW_URI="$(head -n1 ~/so101/.mlflow_uri)"
+# why: the container server (docs/mlops/colima.md) keeps artifacts in S3; mlflow >= 3.17 clients would otherwise move them via presigned http://s3:9000 URLs only the containers can reach
+export MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD=${MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD:-false} MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=${MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD:-false}
 so101-track() { [ -f ~/so101/record_track.py ] && python3 ~/so101/record_track.py "$@"; return 0; }   # one run per recording session; never blocks or fails a recording
 # so101-record <dataset-name> "<task description>" [num_episodes]   -> local dataset, no upload
 so101-record() {

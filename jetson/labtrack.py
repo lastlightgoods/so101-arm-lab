@@ -30,6 +30,15 @@ PROBE_S = 1.0
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1")
 os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "5")
+# why: against an http server (never against sqlite) mlflow writes "View run ... at: http://..." to STDOUT when a run ends; cam_calib.py
+# and pick_loop.py print JSON on stdout that callers parse, and tracking must not change it (seen on the first container server, 10 Nov 2026)
+os.environ.setdefault("MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT", "1")
+# why: mlflow >= 3.17 clients ask the server whether its artifact store can hand out presigned URLs and, when it can (S3, which the
+# container stack is), download EVERY artifact straight from that URL. The local stack signs them for http://s3:9000, a name only the
+# containers can resolve, so downloads hang and retry for minutes; large uploads would take the same presigned road. "false" keeps
+# both streaming through the server (10 Nov 2026).
+os.environ.setdefault("MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD", "false")
+os.environ.setdefault("MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD", "false")
 _KEY_BAD = re.compile(r"[^A-Za-z0-9_\-./ ]")
 
 

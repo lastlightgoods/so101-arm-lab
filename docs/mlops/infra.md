@@ -18,6 +18,11 @@ which nothing runs for you.
 `--serve-artifacts` matters: clients upload and download artifacts through the server, so the Jetson, a cloud job or the
 dashboard needs only the server's URL and the plain `mlflow` package. No S3 keys, no boto3, no bucket name anywhere but on
 the server.
+One wrinkle, found on the first bring-up: an mlflow 3.17 client asks the server whether the store does presigned URLs and,
+since S3 does, would move every artifact through a URL signed for `http://s3:9000`, which only the containers resolve. Lab
+clients set `MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD=false` and `MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=false` (`labtrack.py`,
+`so101_policy.py`, both `env.sh`); anything else talking to the local stack needs the same two lines. Details and
+measurements in [`colima.md`](colima.md).
 
 Why not MinIO: MinIO archived its repository in April 2026 and removed its Docker Hub images in September 2026, so
 `minio/minio` no longer pulls. RustFS has the same shape (S3 on 9000, console on 9001, one data volume, two key variables)
@@ -35,8 +40,9 @@ tools/mlflow_ui.sh down              # stop; the data stays in the docker volume
 
 The UI is at `http://127.0.0.1:5050` as before, so the field guide and `MLFLOW_TRACKING_URI=http://127.0.0.1:5050` stay
 true. The bare server and the stack both want port 5050: `tools/mlflow_ui.sh stop` first, or set `MLFLOW_PORT` in `.env`.
-Docker Desktop or OrbStack must be installed; `up` says so if not (neither is installed on the Mac as of 10 Nov 2026, so
-the stack has not been run here yet; `tests/infra` validates the files). One difference from the bare server: a compose
+A Docker engine must be running: on this Mac it is Colima, installed and first brought up on 10 Nov 2026 ([`colima.md`](colima.md):
+install, VM size, start and stop, the measured bring-up, what broke and the fixes); Docker Desktop or OrbStack work the same
+way, and `up` says so when `docker` is missing. One difference from the bare server: a compose
 port mapping `"5050:5050"` publishes on every interface, the same as `start --lan`, so the no-auth caveat in `tracking.md`
 applies to the stack as soon as it is up; write `"127.0.0.1:${MLFLOW_PORT}:5050"` in the compose file to keep it Mac-only.
 

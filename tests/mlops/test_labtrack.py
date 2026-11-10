@@ -131,3 +131,48 @@ def test_selftest_cli(store, tmp_path):
     (run, paths), = runs(store, "so101-labtrack-selftest"); assert run.info.run_id == tail["run_id"] and paths == {"hello.json"} and run.data.metrics == {"ok": 1.0}
     r = subprocess.run([PY, os.path.join(JETSON, "labtrack.py"), f"http://127.0.0.1:{free_port()}"], capture_output=True, text=True, timeout=30)
     assert r.returncode == 1 and json.loads(r.stdout.splitlines()[0])["enabled"] is False and "tracking off" in r.stderr
+
+
+# ---------------------------------------------------------------- against a real http server (what the container stack is to every client)
+def test_module_sets_the_client_defaults_a_proxied_s3_server_needs(lt):
+    """Found on the first container server (10 Nov 2026): mlflow 3.17 printed "View run" URLs into cam_calib.py's JSON stdout, and fetched
+    every artifact from a presigned http://s3:9000 URL only the containers can resolve. labtrack must turn both off before mlflow loads."""
+    from mlflow.environment_variables import MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD, MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD, MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT
+    assert MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD.is_set() and MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD.get() is False
+    assert MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD.is_set() and MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD.get() is False
+    assert MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT.get() is True
+    src = open(os.path.join(JETSON, "labtrack.py")).read()
+    assert src.index('setdefault("MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT"') < src.index("import mlflow")   # a default set after the import is too late
+
+
+@pytest.fixture
+def http_server(tmp_path):
+    """A real `mlflow server` (sqlite + --serve-artifacts, the client-facing shape of the container stack) on a free localhost port."""
+    port = free_port(); art = tmp_path / "art"; art.mkdir()
+    env = dict(os.environ, MLFLOW_DISABLE_AGENT_HINT="1")
+    p = subprocess.Popen([os.path.join(os.path.dirname(PY), "mlflow"), "server", "--backend-store-uri", sqlite_uri(tmp_path), "--artifacts-destination", str(art), "--serve-artifacts",
+                          "--host", "127.0.0.1", "--port", str(port), "--workers", "1"], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, env=env)
+    import urllib.request
+    try:
+        for _ in range(300):
+            if p.poll() is not None: pytest.skip(f"mlflow server would not start: {p.stderr.read()[-400:]}")
+            try:
+                if urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1).status == 200: break
+            except OSError: time.sleep(0.2)
+        else: pytest.skip("mlflow server did not become healthy in 60 s")
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        p.terminate()
+        try: p.wait(10)
+        except subprocess.TimeoutExpired: p.kill()
+
+
+def test_selftest_against_a_real_server_keeps_stdout_json_and_artifacts_fetchable(http_server, tmp_path):
+    r = subprocess.run([PY, os.path.join(JETSON, "labtrack.py"), http_server], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.strip().splitlines(); assert len(lines) == 2 and all(l.startswith("{") for l in lines), r.stdout   # no "View run ... at:" lines
+    tail = json.loads(lines[1])
+    (run, paths), = runs(http_server, "so101-labtrack-selftest"); assert run.info.run_id == tail["run_id"] and paths == {"hello.json"}
+    from mlflow import MlflowClient
+    t0 = time.monotonic(); local = MlflowClient(tracking_uri=http_server).download_artifacts(tail["run_id"], "hello.json", str(tmp_path / "dl"))
+    assert json.load(open(local)) == {"hello": "lab"} and time.monotonic() - t0 < 10   # through the server, not a presigned detour

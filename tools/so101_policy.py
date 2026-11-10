@@ -14,6 +14,9 @@ root for the registry experiment when the URI is not an http server), SO101_JETS
 directory standing in for the Jetson's $HOME: ssh becomes `bash -s` and rsync a local copy; the tests use it), HF_HUB_OFFLINE (honoured)."""
 import argparse, getpass, glob, hashlib, json, os, platform, shlex, subprocess, sys, time
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1"); os.environ.setdefault("MLFLOW_ENABLE_ARTIFACTS_PROGRESS_BAR", "false")
+# why: against the container stack (S3 behind --serve-artifacts) mlflow >= 3.17 would fetch/push artifacts from presigned http://s3:9000 URLs that only
+# the containers can resolve, and would print "View run" lines into the one-line answers; jetson/labtrack.py sets the same defaults (10 Nov 2026)
+for _k, _v in (("MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD", "false"), ("MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD", "false"), ("MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT", "1")): os.environ.setdefault(_k, _v)
 HOME = os.path.expanduser("~"); HERE = os.path.dirname(os.path.abspath(__file__)); REPO = os.path.dirname(HERE)
 EXPERIMENT = "so101-registry"; REQUIRED = ("train_config.json", "model.safetensors", "config.json"); KEEP_VERSIONS = 3
 DEPLOYED = "$HOME/so101/policies/DEPLOYED.json"; SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]

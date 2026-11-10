@@ -63,7 +63,7 @@ def test_image_and_entrypoint():
     assert re.search(r'pip install .*"mlflow==\$\{MLFLOW_VERSION\}".*psycopg2-binary==.*boto3==', df)
     for f in re.search(r"^COPY (.+) /app/$", df, re.M).group(1).split(): assert os.path.exists(os.path.join(H.INFRA, f)), f
     assert 'CMD ["/app/entrypoint.sh"]' in df and "USER mlflow" in df
-    for flag in ('--backend-store-uri "postgresql://', '--artifacts-destination "s3://${MLFLOW_ARTIFACT_BUCKET}/"', "--serve-artifacts", "--host 0.0.0.0", '--port "${MLFLOW_PORT}"'):
+    for flag in ('--backend-store-uri "postgresql+psycopg2://', '--artifacts-destination "s3://${MLFLOW_ARTIFACT_BUCKET}/"', "--serve-artifacts", "--host 0.0.0.0", '--port "${MLFLOW_PORT}"'):
         assert flag in ep, flag
     for path in (H.ENTRYPOINT, H.MIGRATE, H.MLFLOW_UI):
         r = H.sh_syntax_ok(path); assert r.returncode == 0, r.stderr
@@ -118,7 +118,39 @@ def test_terraform_fmt_clean():
 
 def test_no_secrets_lan_ips_or_home_paths_in_infra():
     files = [os.path.join(d, f) for d, _, fs in os.walk(H.INFRA) for f in fs if ".terraform" not in d and f != ".env" and not f.endswith(".lock.hcl")]
-    files += [H.MLFLOW_UI, os.path.join(H.ROOT, "docs", "mlops", "infra.md")]
+    files += [H.MLFLOW_UI, os.path.join(H.ROOT, "docs", "mlops", "infra.md"), os.path.join(H.ROOT, "docs", "mlops", "colima.md")]
     bad = re.compile(r"/Users/[a-z]|/home/[a-z]|192\.168\.|10\.0\.\d+\.\d+|@gmail|AKIA[0-9A-Z]{16}")
     for f in files:
         m = bad.search(H.read(f)); assert not m, f"{f}: {m.group(0)}"
+
+
+# ---------------------------------------------------------------- found on the first Colima start (10 Nov 2026, docs/mlops/colima.md)
+def test_entrypoint_names_the_postgres_driver_the_image_installs():
+    """SQLAlchemy 2.1 resolves a bare postgresql:// to psycopg 3; the image ships psycopg2-binary, so the URI must say +psycopg2.
+    The first container crash-looped with "No module named 'psycopg'" until it did."""
+    ep, df = H.read(H.ENTRYPOINT), H.read(H.DOCKERFILE)
+    assert "psycopg2-binary==" in df and "psycopg[" not in df
+    assert 'postgresql+psycopg2://' in ep and '"postgresql://' not in ep
+
+
+def test_clients_of_the_proxied_s3_store_turn_presigned_transfers_off():
+    """mlflow >= 3.17 clients ask the server whether its artifact store does presigned URLs and, when it does (S3), move every artifact
+    through them; the local stack signs them for http://s3:9000, which only the containers resolve. Every lab client must say no."""
+    want = ("MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD", "MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD")
+    mig = H.read(H.MIGRATE)
+    for k in want: assert f"{k}=false" in mig.split("\n", 1)[1], k
+    assert "MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT=1" in mig   # the migration log is the lab's record; keep mlflow's "View run" lines out of it
+    for env_sh in (os.path.join(H.ROOT, "env.sh"), os.path.join(H.ROOT, "jetson", "env.sh")):
+        t = H.tf_code(H.read(env_sh))   # comments stripped: the export must be live, not explained
+        for k in want: assert re.search(rf"^export .*{k}=\$\{{{k}:-false\}}", t, re.M), f"{env_sh}: {k}"
+    for py in (os.path.join(H.ROOT, "jetson", "labtrack.py"), os.path.join(H.ROOT, "tools", "so101_policy.py")):
+        t = H.read(py)
+        for k in want: assert f'"{k}", "false"' in t, f"{py}: {k}"
+        assert '"MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT", "1"' in t, py
+
+
+def test_colima_runbook_exists_and_is_linked():
+    doc = os.path.join(H.ROOT, "docs", "mlops", "colima.md"); t = H.read(doc)
+    for s in ("brew install colima docker docker-compose", "colima start", "cliPluginsExtraDirs", "brew services start colima", "down -v", "colima delete"): assert s in t, s
+    assert "colima.md" in H.read(os.path.join(H.ROOT, "docs", "mlops", "infra.md"))
+    assert "colima" in H.read(H.MLFLOW_UI).split("stack()")[1].split("}")[0]   # the no-docker hint points at the runbook's install line

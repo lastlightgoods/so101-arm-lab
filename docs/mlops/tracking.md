@@ -14,7 +14,7 @@ and the smoke run described at the end (10 Nov 2026, mlflow 3.17.2 on the Mac).
 | `jetson/cam_calib.py` | One run per written calibration file in **`so101-calibration`** (`table`, `campose`, `armfit`, `handeye`). |
 | `jetson/record_track.py` | One run per `so101-record` / `so101-record-more` session in **`so101-recordings`**, called from `jetson/env.sh` around `lerobot-record`. |
 | `tools/mlflow_ui.sh` | The server: `start [--lan] | stop | status | uri` (alias `so101-mlflow` in the Mac `env.sh`). |
-| `tests/mlops/` | 34 tests, all against a temp SQLite store or a closed localhost port; about a minute (most of it the `cam_calib.py` subprocesses). |
+| `tests/mlops/` | 36 tests, against a temp SQLite store, a closed localhost port, or (two of them) a real `mlflow server --serve-artifacts` on a free port; about a minute (most of it the `cam_calib.py` subprocesses). |
 
 ## Where things go
 
@@ -132,6 +132,7 @@ Every rule is a test in `tests/mlops/test_labtrack.py`:
 | http URI, host asleep (packets dropped) | the 1 s TCP probe gives up, same line, no-op | bounded by the probe (test with a 0.3 s probe: < 3 s) |
 | `mlflow` not installed | same line (ImportError), no-op | |
 | the server dies mid-run | the failing call prints the one line, every later call is a no-op; the run stays RUNNING server-side | `MLFLOW_HTTP_REQUEST_MAX_RETRIES=1`, `MLFLOW_HTTP_REQUEST_TIMEOUT=5` are set by `labtrack.py` unless you set them, so one dead request costs at most 5 s, not MLflow's default seven retries with backoff |
+| the server is the container stack (S3 artifacts, `docs/mlops/infra.md`) | artifacts still stream through the server: `labtrack.py` also defaults `MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD=false` and `MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=false` (mlflow 3.17 would otherwise fetch from presigned `http://s3:9000` URLs only the containers resolve) and `MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT=1` (no `View run` lines in the callers' JSON stdout) | 1.4 s per download with the default, 64 s to fail without; `docs/mlops/colima.md` |
 | the caller's block raises | the run is marked FAILED and the exception propagates (Ctrl-C included) | |
 | a param is `None`, a metric is `None`/text/NaN | skipped | |
 
@@ -179,7 +180,7 @@ for e in c.search_experiments(): print(e.name, len(c.search_runs([e.experiment_i
 PY
 
 # tests
-~/so101/.venv/bin/python -m pytest tests/mlops -q        # 34 passed in 68 s on the Mac
+~/so101/.venv/bin/python -m pytest tests/mlops -q        # 36 passed in about 80 s on the Mac (10 Nov 2026)
 ```
 
 ## The smoke run behind the numbers above

@@ -100,3 +100,12 @@ def test_pick_checkpoint_prefers_flat_dir_then_newest_step_and_skips_last(lab, t
     assert t.pick_checkpoint(root, "001000").endswith(os.path.join("checkpoints", "001000", "pretrained_model"))
     assert t.ckpt_step(os.path.join(root, "checkpoints", "last", "pretrained_model")) == "002000" and t.ckpt_step(str(tmp_path)) is None
     assert t.ckpt_params(json.load(open(os.path.join(lab.ckpt, "train_config.json")))) == {"policy": "act", "chunk_size": 100, "n_action_steps": 100, "lr": 1e-05, "dim_model": 512, "use_vae": True, "batch_size": 8, "steps": 5000, "seed": 1000, "dataset": "lastlight/fake-set", "warm_start": "scratch", "device": "mps"}
+
+
+def test_tool_turns_presigned_transfers_and_url_printing_off_before_mlflow_loads(tool):
+    """`deploy` downloads a version's files through mlflow.artifacts; against the container stack (S3 behind --serve-artifacts) mlflow >= 3.17
+    would fetch them from presigned http://s3:9000 URLs only the containers can resolve, and print "View run" lines into the one-line answers.
+    Same defaults as jetson/labtrack.py (docs/mlops/colima.md, 10 Nov 2026)."""
+    from mlflow.environment_variables import MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD, MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD, MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT
+    assert MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD.get() is False and MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD.get() is False and MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT.get() is True
+    src = open(tool.__file__).read(); assert src.index("MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD") < src.index("import logging, mlflow")

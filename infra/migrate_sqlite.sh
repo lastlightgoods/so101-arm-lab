@@ -7,7 +7,7 @@
 # Safe to re-run: runs already on the target (tag source_run_id) are skipped. Add --dry-run to see the plan.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); VENV=$HOME/so101/.venv/bin; SRC_DB=${SO101_MLFLOW_DB:-$HOME/so101/mlflow/mlflow.db}
-TARGET=${1:-http://127.0.0.1:${MLFLOW_PORT:-5050}}; export MLFLOW_DISABLE_AGENT_HINT=1 MLFLOW_ENABLE_ARTIFACTS_PROGRESS_BAR=false
+TARGET=${1:-http://127.0.0.1:${MLFLOW_PORT:-5050}}; export MLFLOW_DISABLE_AGENT_HINT=1 MLFLOW_ENABLE_ARTIFACTS_PROGRESS_BAR=false MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT=1 MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD=false MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=false
 [ -x "$VENV/python" ] || { echo "venv not found at $VENV"; exit 1; }
 [ -f "$SRC_DB" ] || { echo "source store not found: $SRC_DB (set SO101_MLFLOW_DB to point elsewhere)"; exit 1; }
 curl -fsS --max-time 5 "$TARGET/health" >/dev/null || { echo "no MLflow server answering at $TARGET: run tools/mlflow_ui.sh up first"; exit 1; }

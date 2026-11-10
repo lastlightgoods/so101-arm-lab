@@ -48,6 +48,8 @@ alias so101-dash='$HOME/so101/dashboard/dash.sh'
 # SQLite store by default; ~/so101/.mlflow_uri (one line, the server URL) makes them log through the server instead, like the Jetson.
 alias so101-mlflow='$HOME/so101/tools/mlflow_ui.sh'
 [ -s ~/so101/.mlflow_uri ] && export SO101_MLFLOW_URI="$(head -n1 ~/so101/.mlflow_uri)"
+# why: the container server (docs/mlops/colima.md) keeps artifacts in S3; mlflow >= 3.17 clients would otherwise move them via presigned http://s3:9000 URLs only the containers can reach
+export MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD=${MLFLOW_ENABLE_PROXY_MULTIPART_DOWNLOAD:-false} MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD=${MLFLOW_ENABLE_PROXY_MULTIPART_UPLOAD:-false}
 # so101-finetune <dataset> <checkpoint-dir> [job] [steps]  -> continue training from a pretrained_model dir (ACT config comes from it).
 so101-finetune() { local ds="$1" ckpt="$2" job="${3:-ft_$1}" steps="${4:-8000}"
   lerobot-train --dataset.repo_id=lastlight/$ds --policy.path="$ckpt" --output_dir=$HOME/so101/outputs/train/$job --job_name=$job \

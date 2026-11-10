@@ -12,7 +12,7 @@ DB=$HOME/so101/mlflow/mlflow.db; ART=$HOME/so101/mlflow/artifacts; HOST=${MLFLOW
 lan_ip() { for i in en0 en1 en2; do ipconfig getifaddr $i 2>/dev/null && return 0; done; hostname -I 2>/dev/null | awk '{print $1}'; }
 INFRA=$(cd "$(dirname "$0")/../infra" && pwd); COMPOSE="docker compose --project-name so101-mlflow --env-file $INFRA/.env -f $INFRA/docker-compose.yml"
 stack() {   # why: the two ways the stack commands fail (no Docker, no .env) should each read as one plain line, not a compose stack trace
-  command -v docker >/dev/null || { echo "docker not found: install Docker Desktop or OrbStack, then retry"; exit 1; }
+  command -v docker >/dev/null || { echo "docker not found: brew install colima docker docker-compose && colima start (docs/mlops/colima.md), or Docker Desktop / OrbStack, then retry"; exit 1; }
   [ -f "$INFRA/.env" ] || { cp "$INFRA/.env.example" "$INFRA/.env"; echo "created infra/.env from .env.example: change the two change-me passwords before trusting it"; }
   SPORT=${MLFLOW_PORT:-$(grep -E '^MLFLOW_PORT=' "$INFRA/.env" | cut -d= -f2)}   # the shell overrides .env, as compose itself does
 }
