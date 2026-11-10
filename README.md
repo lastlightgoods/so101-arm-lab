@@ -18,7 +18,7 @@ Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend,
 | `infra/` | The MLflow server as containers (`docker-compose.yml`, `Dockerfile.mlflow`, `migrate_sqlite.sh` for the SQLite store) and the same shape on AWS (`terraform/`: S3, RDS, one Fargate task), nothing applied: [`docs/mlops/infra.md`](docs/mlops/infra.md) |
 | `plugins/` | LeRobot plugins: `lerobot-robot-busheal` (bus recovery, gripper limits, state relay), `lerobot-camera-avf` (AVFoundation cameras by name), `lerobot-policy-actasync` (ACT with the async engine) |
 | `sim/` | Simulation rounds: ACT on a simulated pick task, cloud training notes, success tables |
-| `tests/` | 600 tests, all synthetic (rendered boards and markers, fake `v4l2-ctl`, fake bus, stub HTTP server). `python -m pytest tests -q`, about 3 minutes |
+| `tests/` | 759 tests, all synthetic (rendered boards and markers, fake `v4l2-ctl`, fake bus, fake `nmcli`, stub HTTP server, temp MLflow stores). `python -m pytest tests -q`, about 5 minutes |
 | `docs/` | The guides below, the MLflow field guide, plus CNC panel notes from a side project |
 | `env.sh` | Mac shell commands (`so101-train`, `so101-finetune`, `so101-dash`, ...) |
 | `NEXT_STEPS.md` | The running log: what works, what broke and why, what is next |
