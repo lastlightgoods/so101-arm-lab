@@ -15,7 +15,7 @@ def portable(x):
     return x
 
 
-GOLDEN_OFF = ("ab1d345ce1fc4216b7a0cc08d5f449bb7ec54744f151e1fba0d9d82eaeea02a4", 63)   # sha256 of the normalised dry-run output of main's autoloop.py (6 cycles, seed 11, dry-miss 0.3), before --record-demos existed (regenerated from caa06b5 with portable(), same value under OpenCV 4.13 and 5.0)
+GOLDEN_OFF = ("26eb79b28c8aa35fe0375d63a1ee6fc564b414f86adcb1ec376c27ca2fd153d8", 63)   # sha256 of the normalised dry-run output of main's autoloop.py (6 cycles, seed 11, dry-miss 0.3, learned biases {}), before --record-demos existed (regenerated from caa06b5 with portable())
 
 
 @pytest.fixture(scope="module")
@@ -159,7 +159,8 @@ def test_record_demos_needs_dry_run_until_the_camera_tee_exists(al, tmp_path):
     with pytest.raises(SystemExit, match="phase 2"): al.main(["--record-demos", "--cycles", "1", "--out-dir", str(tmp_path)])
 
 
-def test_with_the_flag_off_the_dry_run_output_is_what_main_printed_before_the_flag_existed(al, tmp_path, capsys):
+def test_with_the_flag_off_the_dry_run_output_is_what_main_printed_before_the_flag_existed(al, tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(al, "load_biases", lambda path: {})   # why: the runner reads the live jetson/calib/pick_state.json, which every real pick rewrites; the golden must not depend on it
     out_dir = tmp_path / "gold"; rc = al.main(["--dry-run", "--cycles", "6", "--seed", "11", "--session", "gold", "--out-dir", str(out_dir), "--dry-miss", "0.3", "--settle", "0", "--stop-file", str(tmp_path / "none.stop")])
     lines = [json.loads(l) for l in capsys.readouterr().out.splitlines() if l.startswith("{")]
     norm = [portable({k: v for k, v in d.items() if k not in ("cycle_s", "duration_s")}) for d in lines]
