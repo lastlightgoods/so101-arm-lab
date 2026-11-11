@@ -37,14 +37,14 @@ the backfill created it with MLflow's default location before this wrapper exist
 
 Measured on the smoke run (counts are the number of keys MLflow holds for the run).
 
-### `so101-picks` (pick_loop.py, host mac): 9 params, 14 metrics, 4 artifacts
+### `so101-picks` (pick_loop.py, host mac): 12 params, 14 metrics open loop / 23 closed loop, 4 artifacts
 
 | | Keys |
 | --- | --- |
 | run name | `pick-<session>-r<n>`; tags `host=mac`, `run`, `session`, `nut_in` (where the nut was found, mat inches), `target_in` |
-| params | `target_in`, `alt_in`, `place_in` (target plus the learned offset), `gain`, `outcome_gain`, `max_deg_s`, `runs`, `state` (the state file), `dash` |
-| metrics | `landing_err_mm`, `before_mm`, `seconds`, `picked` (0/1), `found_at_landing` (0/1), `sag_<waypoint>` for all nine waypoints (`max_err_deg` from pick_seq: `sag_hover_nut`, `sag_grasp`, `sag_close`, `sag_lift`, `sag_hover_tgt`, `sag_place`, `sag_open`, `sag_lift2`, `sag_rest`) |
-| artifacts | `frames/landing.jpg` (the dashboard's overhead frame the landing was measured in), `plan.json`, `waypoints.json` (the per-waypoint target/reached rows), `state/pick_state.json` |
+| params | `target_in`, `alt_in`, `place_in` (target plus the learned offset), `gain`, `outcome_gain`, `max_deg_s`, `runs`, `state` (the state file), `dash`, `mode` (`closed` / `open`), `jaw_open`, `wrist_check` (0/1) |
+| metrics | `landing_err_mm`, `before_mm`, `seconds`, `picked` (0/1), `found_at_landing` (0/1), `jaw_open`, `sag_<waypoint>` (`max_err_deg` from pick_seq; open loop: all nine, `sag_hover_nut` ... `sag_rest`; closed loop: the final stage's eight, `sag_grasp` ... `sag_rest`). Closed loop adds the stage numbers of [docs/pick-loop.md](../pick-loop.md): `corr1_mm`, `corr1_x_mm`, `corr1_y_mm` (hover readback correction), `corr2_mm`, `corr2_x_mm`, `corr2_y_mm` (grasp-pose readback correction), `grasp_h_mm` (tip height read back at grasp height), `grasp_lowered_mm`, `final_residual_mm` (FK of the final grasp vs the command) and, with `--wrist-check`, `wrist_offset_mm` |
+| artifacts | `frames/landing.jpg` (the dashboard's overhead frame the landing was measured in), `plan.json` (closed loop: the final stage's plan), `waypoints.json` (the per-waypoint target/reached rows), `state/pick_state.json`; with `--wrist-check`, `frames/wrist_check_<session>_r<n>.jpg` |
 
 If `pick_seq` dies over ssh the run is marked FAILED with the plan attached and the loop exits exactly as before.
 A lost nut is a FINISHED run with `picked=0`, `found_at_landing=0` and no `landing_err_mm`.

@@ -1,6 +1,7 @@
 """tools/pick_loop.py's MLflow logging, driven with every hardware edge stubbed: the dashboard's /api/ik and overhead JPEG,
 the ssh'd pick_seq rows, and cam_calib's pixel<->table maps. One run per pick in `so101-picks`; with tracking off the
-stdout lines are byte-identical to the tracked run's."""
+stdout lines are byte-identical to the tracked run's. Everything here runs `--open-loop` (the fixture's table has no arm fit and
+cam_calib is a stub); the closed loop and its MLflow fields are covered in tests/tools/test_pick_closed_loop.py."""
 import json, os, sys
 import pytest
 from mlhelpers import JETSON, TOOLS, load, runs
@@ -43,7 +44,7 @@ def pl(tmp_path, monkeypatch):
 
 def drive(pl, monkeypatch, capsys, arm, argv):
     monkeypatch.setattr(pl, "find_nut", arm.find_nut); monkeypatch.setattr(pl, "api", arm.api); monkeypatch.setattr(pl, "run_plan", arm.run_plan)
-    monkeypatch.setattr(sys, "argv", ["pick_loop.py", *argv]); pl.main()
+    monkeypatch.setattr(sys, "argv", ["pick_loop.py", "--open-loop", *argv]); pl.main()
     return [json.loads(l) for l in capsys.readouterr().out.strip().splitlines()]
 
 
@@ -76,7 +77,7 @@ def test_ssh_failure_marks_the_run_failed_and_still_exits_like_before(pl, store,
     monkeypatch.setenv("SO101_MLFLOW_URI", store); arm = FakeArm()
     def dead(plan, max_deg_s): raise SystemExit("pick_seq produced no waypoint rows")
     monkeypatch.setattr(pl, "find_nut", arm.find_nut); monkeypatch.setattr(pl, "api", arm.api); monkeypatch.setattr(pl, "run_plan", dead)
-    monkeypatch.setattr(sys, "argv", ["pick_loop.py", "--runs", "2", "--state", str(tmp_path / "s.json")])
+    monkeypatch.setattr(sys, "argv", ["pick_loop.py", "--open-loop", "--runs", "2", "--state", str(tmp_path / "s.json")])
     with pytest.raises(SystemExit, match="no waypoint rows"): pl.main()
     (r, p), = runs(store, "so101-picks"); assert r.info.status == "FAILED" and p == {"plan.json"} and r.data.params["gain"] == "0.7"
 

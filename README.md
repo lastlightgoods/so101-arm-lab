@@ -31,6 +31,10 @@ Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend,
   markers on a Fiskars 18x12 in cutting mat, the arm base pose by jogging to grid points, the LeRobot
   joint zero offsets, and why wrist roll must be held constant. Also the self-healing re-solve when the
   camera stand gets bumped.
+- [`docs/pick-loop.md`](docs/pick-loop.md): the closed-loop pick (`tools/pick_loop.py`). The open-loop command
+  reaches 5-8 mm short; the servo readback through the arm fit is good to a millimetre, so: command, read back,
+  correct twice, jaws at 35. With the 10 Nov 2026 numbers, the wrist-camera check (`tools/wrist_check.py`) and
+  what each pick logs to MLflow.
 - [`docs/camera-settings.md`](docs/camera-settings.md): locking exposure, white balance and focus, and
   the measured behaviour of the Logitech C920 revision 046d:08e5 that makes a naive lock white out
   (gain forced to 255 after auto to manual, exposure re-derived at every stream start). A guard service

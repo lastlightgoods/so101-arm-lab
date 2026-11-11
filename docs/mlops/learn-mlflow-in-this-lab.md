@@ -94,7 +94,7 @@ tmp = tempfile.mkdtemp(prefix="picks_"); os.makedirs(f"{tmp}/jetson/calib")
 json.dump({"units": "in"}, open(f"{tmp}/jetson/calib/top_table.json", "w")); os.symlink(os.path.join(H.JETSON, "labtrack.py"), f"{tmp}/jetson/labtrack.py")
 pl.ROOT = tmp; pl.cam_calib = lambda: object(); pl.time.sleep = lambda s: None; pl.fetch_top = lambda: JPEG
 arm = FakeArm(); pl.find_nut, pl.api, pl.run_plan = arm.find_nut, arm.api, arm.run_plan
-sys.argv = ["pick_loop.py", "--runs", "3", "--target", "9", "6", "--alt", "6", "5", "--state", f"{tmp}/pick_state.json", "--gain", "0.5"]
+sys.argv = ["pick_loop.py", "--open-loop", "--runs", "3", "--target", "9", "6", "--alt", "6", "5", "--state", f"{tmp}/pick_state.json", "--gain", "0.5"]   # open loop: this stub table has no arm fit
 pl.main()
 PY
 ```

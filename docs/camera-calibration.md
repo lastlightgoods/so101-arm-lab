@@ -340,6 +340,14 @@ positions in the arm frame changed) and after re-gluing the markers. Tests: `tes
 a known pose on the real kinematics must come back within 2 mm / 0.5 degrees / 2 percent fx, the real captures must solve, the CLI
 and the check image), `tests/ui/test_stage_wristcam.py` (the frustum on the stage).
 
+### What the pose is good for (10 Nov 2026)
+
+With the follower's REACHED joints (not the command) this pose predicted the nut's pixel in the wrist frame within about 10 px at
+147 mm (17 px measured on the one frame kept, `tests/tools/fixtures/wrist_probe_20261110.jpg`), so arm fit + hand-eye + readback
+agree to a few millimetres. `tools/wrist_check.py` (and `pick_loop.py --wrist-check`) uses it exactly that way: project the commanded
+nut point, find the nut as a bright ring with a dark centre near that pixel, back-project onto the mat, report the offset. It is a check;
+the grasp itself corrects on the servo readback. See [pick-loop.md](pick-loop.md).
+
 ## Redo when
 
 - the camera or its mount moves: with a homography-only table the running dashboard re-solves it from the markers and writes it back (section 6), and re-solves the camera pose with the same markers (fixed FOV); rerun `table` when the dashboard was not running, when `calib_ok` stays false, or for an intrinsics calibration (intrinsics stay valid). `campose --lens-height` does NOT need re-running for a moved mount,
