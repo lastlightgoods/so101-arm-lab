@@ -22,7 +22,7 @@ How the outside world is kept out
 * ``http`` binds ``Srv`` on 127.0.0.1 port 0 in a daemon thread and shuts it down after the test. Nothing here talks to
   8765/8766/9333.
 """
-import threading, copy, importlib.util, json, os, queue, subprocess, sys, threading, time, urllib.error, urllib.request
+import copy, importlib.util, json, os, queue, subprocess, sys, threading, time, urllib.error, urllib.request
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
