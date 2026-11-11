@@ -104,6 +104,44 @@ def publish_state(bus, values: dict, normalized: bool) -> None:
     except Exception:  # nosec B110 - never let telemetry break the control loop
         pass
 
+# --- servo health telemetry (docs/telemetry.md): temperature, load, current, voltage, error flags, goal vs actual -> /dev/shm/so101_<role>_tele.json ---
+# Read-only: one sync READ of registers 40..70 for all six servos (~2.4 ms of wire time at 1 Mbaud), at most every LEROBOT_TELE_S (default 0.5 s),
+# issued from the thread that just finished a Present_Position read, i.e. between two control-loop bus operations, never concurrently with one.
+# LEROBOT_TELE_S=0 turns it off; LEROBOT_TELE_ROLES=follower,leader adds the leader. jetson/servo_telemetry.py does the decoding; it is looked up
+# in $SO101_HOME (default ~/so101) and the plugin works without it.
+TELE_S = float(os.environ.get("LEROBOT_TELE_S", "0.5"))
+TELE_ROLES = tuple(r for r in os.environ.get("LEROBOT_TELE_ROLES", "follower").split(",") if r)
+_tele_mod = []
+_last_tele = {}
+_tele_limits = set()
+def _telemetry():
+    if not _tele_mod:
+        try:
+            import sys
+            home = os.environ.get("SO101_HOME") or os.path.expanduser("~/so101")
+            if home not in sys.path: sys.path.append(home)
+            import servo_telemetry
+            _tele_mod.append(servo_telemetry)
+        except Exception: _tele_mod.append(None)
+    return _tele_mod[0]
+def publish_telemetry(bus) -> None:
+    try:
+        if TELE_S <= 0: return
+        role = _role(str(bus.port)); now = time.time()
+        if role not in TELE_ROLES or now - _last_tele.get(role, 0) < TELE_S: return
+        _last_tele[role] = now
+        st = _telemetry()
+        if st is None: return
+        sample = st.read_sample(bus, now)
+        if sample is None: return
+        if role not in _tele_limits: sample["limits"] = st.read_limits(bus); _tele_limits.add(role)
+        sample.update(role=role, src="lerobot", mode="deg")
+        path = os.path.join(STATE_DIR, f"so101_{role}_tele.json"); tmp = path + ".tmp"
+        with open(tmp, "w") as f: _json.dump(sample, f)
+        os.replace(tmp, path)
+    except Exception:  # nosec B110 - never let telemetry break the control loop
+        pass
+
 def _wrap(name: str) -> None:
     orig = getattr(FeetechMotorsBus, name)
     if getattr(orig, "_busheal", False):
@@ -114,6 +152,7 @@ def _wrap(name: str) -> None:
             out = orig(self, *args, **kwargs)
             if name == "sync_read" and (args[0] if args else kwargs.get("data_name")) == "Present_Position" and isinstance(out, dict):
                 publish_state(self, out, kwargs.get("normalize", True))
+                publish_telemetry(self)
             return out
         except RuntimeError as e:
             # A servo that tripped overload answers every packet with an error status. Clear it

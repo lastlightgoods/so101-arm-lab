@@ -130,6 +130,7 @@ def local_say(monkeypatch):
 def _reset_plugin_state(monkeypatch):
     monkeypatch.delenv("LEROBOT_BUSHEAL", raising=False)
     PLUGIN._last_pub.clear()
+    PLUGIN._last_tele.clear(); PLUGIN._tele_limits.clear(); PLUGIN._tele_mod[:] = [None]   # servo telemetry off unless a test (test_busheal_telemetry.py) switches it on
     if hasattr(PLUGIN, "PAUSE"):
         for k in list(PLUGIN.PAUSE):
             PLUGIN.PAUSE[k] = False if k == "on" else 0.0
