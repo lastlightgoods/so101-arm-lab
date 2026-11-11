@@ -57,6 +57,12 @@ of 8.3 ms; 77 is the closest and cut the banding to 2 to 3 levels. The wrist's o
 87 still banded (8 to 20 levels), 90 to 100 did not (about 4). Settings now: top exposure 77 gain 0 (mean 114), front 77
 gain 40 (mean 118), wrist exposure 100 brightness -70 (mean 120); banding 3.3 / 2.2 / 4.1 levels. The old file is kept
 on the Jetson as `calib/cam_settings.before_flicker_fix.json`.
+Correction the same evening: the wrist went back to exposure 35, brightness 0. At one flicker period its sensor
+saturates in this light (46 % of pixels at 255 at exposure 100, brightness 0); the -70 brightness offset only greyed the
+clipped areas, which looked like glare. The icSpring has no gain control, so here no exposure is both band-free and
+unclipped (35 -> 33 grey levels of banding, 50 -> 8 with 19 % clipped, 65 -> 24 with 31 % clipped; auto exposure with
+60 Hz anti-flicker banded worst, 45). The wrist keeps its bands until the room light is flicker-free (a DC-driven LED
+lamp fixes all three cameras) or its lens gets a neutral-density filter so a full-period exposure does not clip.
 Watch out: on the front C920 a gain write sometimes reads back a different number for a few seconds (set 0 read 109,
 set 30 read 229); `cam_lock.py check` settled on the written value within 5 s here.
 

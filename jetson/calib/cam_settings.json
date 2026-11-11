@@ -100,11 +100,11 @@
    "device_at_capture": "/dev/video2",
    "controls": {
     "auto_exposure": 1,
-    "exposure_time_absolute": 100,
+    "exposure_time_absolute": 35,
     "white_balance_automatic": 0,
     "white_balance_temperature": 4000,
     "power_line_frequency": 2,
-    "brightness": -70,
+    "brightness": 0,
     "contrast": 27,
     "saturation": 8,
     "sharpness": 4,
@@ -129,7 +129,8 @@
    "verified_mean": 119.6,
    "notes": [
     "10 Nov 2026: saturation 25->8 (module has a fixed green bias; WB temperature only trades R against B, hue only moves the cast; sat 8 brings the grey mat to G/R 1.06, G/B 1.08 from 1.21/1.29)",
-    "11 Nov 2026: exposure moved to one flicker period (room light flickers at 120 Hz = 8.3 ms); the old short exposure put rolling bright/dark bands in every frame (top 16, wrist 35 grey levels peak-to-peak, measured) that the mat map read as objects"
+    "11 Nov 2026: exposure moved to one flicker period (room light flickers at 120 Hz = 8.3 ms); the old short exposure put rolling bright/dark bands in every frame (top 16, wrist 35 grey levels peak-to-peak, measured) that the mat map read as objects",
+    "11 Nov 2026 (later): back to exposure 35 brightness 0. At one flicker period (exposure >= 90) the icSpring saturates the white mat and the jaws at the sensor (46 % of pixels at 255 with brightness 0; brightness -70 only greys the clipped areas, which TC saw as glare). It has no gain control, so in this light there is no exposure that is both band-free and unclipped: banding 33 grey levels accepted until the light is flicker-free or the lens gets an ND filter."
    ]
   }
  }
