@@ -5,7 +5,7 @@ import json, math, os, subprocess, sys
 import cv2, numpy as np, pytest
 from pickhelpers import ARM, FIXTURE_TABLE, PROBE_FRAME, PROBE_JOINTS, PROBE_NUT_IN, SEED, TOOLS, WRIST_POSE, ShortArm, drive, mat_to_base, solve_joints, tip_of
 
-LIFT = ["grasp", "close1", "close2", "lift"]; CARRY = ["hover_tgt", "place", "open", "lift2", "rest"]; FINAL = LIFT + CARRY
+LIFT = ["pregrasp", "grasp", "close1", "close2", "lift"]; CARRY = ["hover_tgt", "place", "open", "lift2", "rest"]; FINAL = LIFT + CARRY
 ALL = ["hover_nut", *FINAL]; GRIPPER_ONLY = {"close1", "close2", "open"}
 
 
@@ -28,7 +28,7 @@ def test_two_readback_corrections_converge_on_an_arm_that_reaches_7mm_short(pl, 
     assert 6.0 < math.hypot(*c1) < 8.0, f"the first correction is the 7 mm shortfall: {c1}"
     assert math.hypot(*c2) < 1.0, f"the second pass only trims the residual: {c2}"
     assert math.hypot(*st["final"]["residual_mm"]) < 1.0 and rec["final_residual_mm"] < 1.0
-    x, y, h = fk_mat(pl, cc, table, {k: arm.rows[-2][0]["reached"][k] for k in ARM})   # the FINAL grasp (first waypoint of the lift stage), read back
+    x, y, h = fk_mat(pl, cc, table, {k: arm.rows[-2][1]["reached"][k] for k in ARM})   # the FINAL grasp (second waypoint of the lift stage, after pregrasp), read back
     assert math.hypot(x - PROBE_NUT_IN[0], y - PROBE_NUT_IN[1]) * 25.4 < 1.0 and abs(h - 0.12 * 25.4) < 0.5
     # the correction points along the reach direction (base -> nut), the way the real shortfall did
     base_in = np.array(cc.arm_to_table(table, 38.8353, 0.0)) / 25.4; d = np.array(PROBE_NUT_IN) - base_in; d /= np.linalg.norm(d)
@@ -73,10 +73,10 @@ def test_open_loop_is_one_run_of_the_whole_plan_at_80(pl, cc, table, monkeypatch
 
 
 def test_jaws_open_to_35_by_default_and_follow_the_flag(pl, cc, table, monkeypatch, capsys, tmp_path):
-    assert pl.JAW_OPEN == 35 and [g for _, _, _, g, _, _ in pl.WP if g] == [35, 35, 20, 35, 35]
+    assert pl.JAW_OPEN == 35 and [g for _, _, _, g, _, _ in pl.WP if g] == [35, 35, 35, 20, 35, 35]
     arm = ShortArm(cc, table); out = drive(pl, monkeypatch, capsys, arm, ["--runs", "2", "--state", str(tmp_path / "s.json")])
     grips = {w["name"]: w["gripper"] for p in arm.plans for w in p["waypoints"]}
-    assert grips == {"hover_nut": 35, "grasp": 35, "close1": 20, "close2": 0, "lift": 0, "hover_tgt": 0, "place": 0, "open": 35, "lift2": 35, "rest": 0}
+    assert grips == {"hover_nut": 35, "pregrasp": 35, "grasp": 35, "close1": 20, "close2": 0, "lift": 0, "hover_tgt": 0, "place": 0, "open": 35, "lift2": 35, "rest": 0}
     assert [r["run"] for r in records(out)] == [1, 2] and all(r["picked"] for r in records(out)) and len(arm.calls) == 8, "two closed-loop picks, four stages each; the second starts from the learned biases"
     arm2 = ShortArm(cc, table); drive(pl, monkeypatch, capsys, arm2, ["--runs", "1", "--jaw-open", "30", "--state", str(tmp_path / "s2.json")])
     assert {w["gripper"] for p in arm2.plans for w in p["waypoints"] if w["name"] in ("hover_nut", "grasp", "open", "lift2")} == {30} and pl.rec.runs[-1].params_["jaw_open"] == 30
@@ -170,3 +170,26 @@ def test_fake_arm_is_honest(cc, table):
     tip = tip_of(cc, table, j); assert np.linalg.norm(tip - mat_to_base(cc, table, 11.44, 6.26, 1.5 * 25.4)) < 0.01 and j["wrist_roll"] == table["arm_fit"]["wrist_roll_deg"]
     got = tip_of(cc, table, arm.reached(j)); d = got - tip
     assert d[2] == pytest.approx(2.0, abs=0.01) and np.linalg.norm(d[:2]) == pytest.approx(7.0, abs=0.01) and np.dot(d[:2], tip[:2] - [38.8353, 0.0]) < 0
+
+
+def test_the_last_stage_moves_to_the_corrected_point_in_the_air_then_comes_straight_down(pl, cc, table, monkeypatch, capsys, tmp_path):
+    """TC, 10 Nov (first10c): the fixed jaw "lands a 1/4 in too far back, then slides up to the nut and hits it". The final stage used to start
+    with `grasp` at the corrected point, a slide along the mat by c2; it now rises to PREGRASP_H_IN over that point first."""
+    arm = ShortArm(cc, table, shortfall_mm=7.0); drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--state", str(tmp_path / "s.json")])
+    final = arm.plans[2]["waypoints"]; assert [w["name"] for w in final][:2] == ["pregrasp", "grasp"]
+    pre_h = [h for (_, _, h) in arm.ik_calls if abs(h - pl.PREGRASP_H_IN) < 1e-6]; assert pre_h, "pregrasp goes through /api/ik at its own height"
+    xa, ya, ha = pl.fk_mat(cc, table, final[0]["desired"]); xb, yb, hb = pl.fk_mat(cc, table, final[1]["desired"])
+    assert math.hypot(xa - xb, ya - yb) * 25.4 < 0.5 and ha - hb == pytest.approx((pl.PREGRASP_H_IN - pl.GRASP_H_IN) * 25.4, abs=0.5), "straight down onto the corrected point"
+    assert pl.PREGRASP_H_IN * 25.4 >= 10.0 - 0.2
+
+
+@pytest.mark.parametrize("low_mm,raise_mm", [(-5.0, 2.95), (-9.0, 5.0), (-1.0, 0.0)])
+def test_a_grasp_that_presses_into_the_mat_is_raised(pl, cc, table, monkeypatch, capsys, tmp_path, low_mm, raise_mm):
+    """10 Nov: at the longer reaches the open-jaw grasp read -3.4 to -0.8 mm (pressing on the mat), stalled short and then dragged. A reading
+    under 1 mm raises the grasp so the readback lands at 1 mm, at most 5 mm."""
+    arm = ShortArm(cc, table, shortfall_mm=7.0, high_mm=low_mm)
+    out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--state", str(tmp_path / "s.json")]); st = stages(out); rec, = records(out)
+    h = st["grasp_pose"]["h_mm"]; assert h == pytest.approx(0.12 * 25.4 + low_mm, abs=0.2)
+    assert st["grasp_pose"]["lowered_mm"] == pytest.approx(-raise_mm, abs=0.06) and rec["grasp_lowered_mm"] == pytest.approx(-raise_mm, abs=0.06)
+    hs = [pl.fk_mat(cc, table, w["desired"])[2] for w in arm.plans[2]["waypoints"] if w["name"] in ("grasp", "close1", "close2")]   # the final stage, as planned
+    assert len(hs) == 3 and all(x == pytest.approx(0.12 * 25.4 + raise_mm, abs=0.5) for x in hs), hs

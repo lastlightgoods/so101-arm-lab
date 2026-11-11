@@ -6,7 +6,7 @@ import json, math, os, random
 import pytest
 from pickhelpers import JAW_RING_UV, PROBE_NUT_IN, ShortArm, drive, frame_feed, jaw_frame, overhead_frame
 
-LIFT = ["grasp", "close1", "close2", "lift"]; CARRY = ["hover_tgt", "place", "open", "lift2", "rest"]; ABORT = ["hover_nut", "rest"]
+LIFT = ["pregrasp", "grasp", "close1", "close2", "lift"]; CARRY = ["hover_tgt", "place", "open", "lift2", "rest"]; ABORT = ["hover_nut", "rest"]
 HOVER, POSE = ["hover_nut"], ["hover_nut", "grasp"]
 NUT_OBJ = {"id": 1, "x_in": PROBE_NUT_IN[0], "y_in": PROBE_NUT_IN[1], "w_mm": 12.0, "h_mm": 10.0, "px": [320, 180], "color": [119, 124, 128]}
 BIG_OBJ = {"id": 2, "x_in": 3.0, "y_in": 9.0, "w_mm": 60.0, "h_mm": 40.0, "px": [100, 60], "color": [200, 200, 200]}
@@ -39,7 +39,7 @@ def test_not_in_the_jaws_once_retries_the_corrected_grasp_then_carries(pl, cc, t
     assert rec["picked"] is True and rec["in_jaws"] is True and rec["jaw_retry"] is True and rec["reason"] is None and not stops(out)
     r, = pl.rec.runs; frames = sorted(f for f in r.files if f.startswith("frames/in_jaws_")); assert len(frames) == 2 and frames[0].endswith("_r1.jpg") and frames[1].endswith("_r1_retry.jpg")
     assert r.metrics_["jaw_retry"] == 1.0 and r.metrics_["in_jaws"] == 1.0
-    assert set(json.load(open(tmp_path / "s.json"))["biases"]) == {"grasp", "lift", "hover_tgt", "place", "lift2", "rest"}, "sag is learned from the lift stage that was carried plus the carry; never from the jaw moves"
+    assert set(json.load(open(tmp_path / "s.json"))["biases"]) == {"pregrasp", "grasp", "lift", "hover_tgt", "place", "lift2", "rest"}, "sag is learned from the lift stage that was carried plus the carry; never from the jaw moves"
 
 
 def test_not_in_the_jaws_twice_opens_over_the_spot_rests_and_stops(pl, cc, table, monkeypatch, capsys, tmp_path):
@@ -76,9 +76,9 @@ def test_the_jaw_check_never_raises(pl, cc, table, monkeypatch, capsys, tmp_path
 def test_two_step_close_and_fast_close(pl, cc, table, monkeypatch, capsys, tmp_path):
     arm = ShortArm(cc, table); drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--state", str(tmp_path / "s.json")])
     lift = arm.plans[2]["waypoints"]; assert [w["name"] for w in lift] == LIFT
-    assert [w["gripper"] for w in lift] == [35, 20, 0, 0] and [w["settle"] for w in lift] == [0.5, 0.4, 0.6, 0.2] and [w["gripper_only"] for w in lift] == [False, True, True, False]
-    assert lift[1]["joints"] == lift[0]["joints"] == lift[2]["joints"], "the close steps hold the grasp pose; only the jaws move"
-    assert pl.CLOSE_MID == 20 and pl.waypoints()[2][:4] == ("close1", "nut", pl.GRASP_H_IN, 20) and pl.waypoints()[3][:4] == ("close2", "nut", pl.GRASP_H_IN, 0) and pl.waypoints()[3][5] == 0.6
+    assert [w["gripper"] for w in lift] == [35, 35, 20, 0, 0] and [w["settle"] for w in lift] == [0.3, 0.5, 0.4, 0.6, 0.2] and [w["gripper_only"] for w in lift] == [False, False, True, True, False]
+    assert lift[2]["joints"] == lift[1]["joints"] == lift[3]["joints"], "the close steps hold the grasp pose; only the jaws move"
+    assert pl.CLOSE_MID == 20 and pl.waypoints()[3][:4] == ("close1", "nut", pl.GRASP_H_IN, 20) and pl.waypoints()[4][:4] == ("close2", "nut", pl.GRASP_H_IN, 0) and pl.waypoints()[4][5] == 0.6
     biases = json.load(open(tmp_path / "s.json"))["biases"]; assert "close1" not in biases and "close2" not in biases and "grasp" in biases and "lift" in biases, "learned biases index by waypoint name and skip the jaw-only steps"
     # an old state file with a `close` bias is harmless, and the learned grasp bias is applied to the next plan by name
     st = {"biases": {"close": {"shoulder_pan": 3.0}, "grasp": {"shoulder_pan": 1.5}}, "place_offsets_in": {}, "history": []}; json.dump(st, open(tmp_path / "old.json", "w"))
@@ -86,11 +86,11 @@ def test_two_step_close_and_fast_close(pl, cc, table, monkeypatch, capsys, tmp_p
     g = [w for w in arm2.plans[2]["waypoints"] if w["name"] == "grasp"][0]; assert g["joints"]["shoulder_pan"] == pytest.approx(g["desired"]["shoulder_pan"] + 1.5)
     # --fast-close: one `close` waypoint straight to 0, in the closed loop and in the open loop
     arm3 = ShortArm(cc, table); out3 = drive(pl, monkeypatch, capsys, arm3, ["--runs", "1", "--fast-close", "--state", str(tmp_path / "s3.json")])
-    assert [n for n, _ in arm3.calls] == [HOVER, POSE, ["grasp", "close", "lift"], CARRY]
-    c = arm3.plans[2]["waypoints"][1]; assert (c["gripper"], c["settle"], c["seconds"], c["gripper_only"]) == (0, 0.4, 0.6, True) and records(out3)[0]["fast_close"] is True and pl.rec.runs[-1].params_["fast_close"] == 1
-    assert set(json.load(open(tmp_path / "s3.json"))["biases"]) == {"grasp", "lift", "hover_tgt", "place", "lift2", "rest"}
+    assert [n for n, _ in arm3.calls] == [HOVER, POSE, ["pregrasp", "grasp", "close", "lift"], CARRY]
+    c = arm3.plans[2]["waypoints"][2]; assert (c["gripper"], c["settle"], c["seconds"], c["gripper_only"]) == (0, 0.4, 0.6, True) and records(out3)[0]["fast_close"] is True and pl.rec.runs[-1].params_["fast_close"] == 1
+    assert set(json.load(open(tmp_path / "s3.json"))["biases"]) == {"pregrasp", "grasp", "lift", "hover_tgt", "place", "lift2", "rest"}
     arm4 = ShortArm(cc, table); drive(pl, monkeypatch, capsys, arm4, ["--runs", "1", "--open-loop", "--fast-close", "--state", str(tmp_path / "s4.json")])
-    assert [n for n, _ in arm4.calls] == [["hover_nut", "grasp", "close", "lift", *CARRY]]
+    assert [n for n, _ in arm4.calls] == [["hover_nut", "pregrasp", "grasp", "close", "lift", *CARRY]]
     arm5 = ShortArm(cc, table); drive(pl, monkeypatch, capsys, arm5, ["--runs", "1", "--open-loop", "--state", str(tmp_path / "s5.json")])
     assert [n for n, _ in arm5.calls] == [["hover_nut", *LIFT, *CARRY]], "open loop defaults to the two-step close too"
 

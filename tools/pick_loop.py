@@ -28,6 +28,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DASH = os.environ.get("SO101_DASH", "http://localhost:8765")
 REST = {"shoulder_pan": 0.0, "shoulder_lift": -100.0, "elbow_flex": 95.0, "wrist_flex": 72.0, "wrist_roll": 0.5}
 GRASP_H_IN = 0.12
+# why: the staged grasp used to re-aim at grasp height, so the readback correction (c2, 2-6.5 mm on 10 Nov) dragged the fixed jaw along the mat
+# into the nut: TC saw it "land a 1/4 in too far back, then slide up to the nut and hit it". The last stage now rises to this height over the
+# corrected point first and comes straight down.
+PREGRASP_H_IN = 0.4
 # why: jaws at 35 grasp the nut; at 45 the SAME twice-corrected pose failed twice (10 Nov 2026): the moving jaw's closing arc flicked the nut 5-13 mm before the fixed jaw met it
 JAW_OPEN = 35
 # why: the two-step close parks the moving jaw at 20 (just clear of a 10 mm nut) first, so the final squeeze starts from a standstill next to the nut instead of flicking it (open-loop runs landed 10-40 mm off partly because the nut slid in the single-moving-jaw gripper)
@@ -37,7 +41,7 @@ CLOSE_MID = 20
 # instead. 10 mm (the first value: the nut's ~4 mm radius plus clearance) was too much: TC watched the fixed jaw land "a 1/4 in too far back,
 # then slide up to the nut and hit it" (session first10c, 10 Nov 2026), so 10 - 6.35 = 3.65 -> 4 mm, the fixed jaw's face at the nut's edge.
 GRASP_AIM_MM = 4.0
-WP = [("hover_nut", "nut", 1.5, JAW_OPEN, 1.6, 0.4), ("grasp", "nut", GRASP_H_IN, JAW_OPEN, 0.9, 0.5),
+WP = [("hover_nut", "nut", 1.5, JAW_OPEN, 1.6, 0.4), ("pregrasp", "nut", PREGRASP_H_IN, JAW_OPEN, 0.6, 0.3), ("grasp", "nut", GRASP_H_IN, JAW_OPEN, 0.9, 0.5),
       ("close1", "nut", GRASP_H_IN, CLOSE_MID, 0.5, 0.4), ("close2", "nut", GRASP_H_IN, 0, 0.6, 0.6),
       ("lift", "nut", 1.5, 0, 0.8, 0.2), ("hover_tgt", "tgt", 1.5, 0, 1.2, 0.3), ("place", "tgt", 0.3, 0, 0.9, 0.5),
       ("open", "tgt", 0.3, JAW_OPEN, 0.5, 0.4), ("lift2", "tgt", 1.5, JAW_OPEN, 0.7, 0.2), ("rest", None, 0, 0, 1.8, 0.3)]
@@ -45,8 +49,8 @@ WP_FAST_CLOSE = ("close", "nut", GRASP_H_IN, 0, 0.6, 0.4)   # --fast-close: the 
 GRIPPER_ONLY = ("close", "close1", "close2", "open")          # why: pure jaw moves say nothing about arm sag; the bias learning skips them
 GRASP_HEIGHT_WPS = ("grasp", "close", "close1", "close2")      # why: the close waypoints sit at the grasp height too, lowered or not (a close at the unlowered height would lift the tip while squeezing)
 ARM = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"]
-STAGES = (("hover_nut",), ("hover_nut", "grasp"), ("grasp", "close1", "close2", "lift", "hover_tgt", "place", "open", "lift2", "rest"))
-LIFT_STAGE, CARRY_STAGE, ABORT_STAGE = ("grasp", "close1", "close2", "lift"), ("hover_tgt", "place", "open", "lift2", "rest"), ("hover_nut", "rest")
+STAGES = (("hover_nut",), ("hover_nut", "grasp"), ("pregrasp", "grasp", "close1", "close2", "lift", "hover_tgt", "place", "open", "lift2", "rest"))
+LIFT_STAGE, CARRY_STAGE, ABORT_STAGE = ("pregrasp", "grasp", "close1", "close2", "lift"), ("hover_tgt", "place", "open", "lift2", "rest"), ("hover_nut", "rest")
 SPEED = {"closed": 50.0, "open": 80.0}   # why: the staged runs start each stage from a standstill close to the nut; 50 deg/s settles cleaner for the readback
 JAW_WINDOW = (300, 300, 380, 360)   # wrist-frame pixels (x0, y0, x1, y1) between the jaw tips after close + lift (diag frames, 10 Nov 2026: the nut's ring sat at about (340, 325))
 SAFE_BOX = (6.0, 4.0, 13.0, 8.0)   # --reset drops the nut inside this (mat inches): reachable, clear of the markers and of the mat edges
@@ -308,7 +312,9 @@ def closed_loop_pick(cc, table, nut_in, place_in, biases, a, run, say, wpose=Non
     def grasp_pose(attempt):   # (b) corrected hover (jaws open), then down to grasp height; read back again, and measure the tip height
         _, r2 = stage(xy1, STAGES[1]); j2 = reached_joints(r2, "grasp"); x, y, h = fk_mat(cc, table, j2)
         c2 = (aim[0] - x, aim[1] - y); xy2 = [xy1[0] + c2[0], xy1[1] + c2[1]]
-        lower = min(h - 3.0, 6.0) if h > 6.0 else 0.0   # why: the jaws must reach the mat to get under the nut; the cap keeps the IK target within 3 mm below the mat plane the readback contradicts
+        lower = min(h - 3.0, 6.0) if h > 6.0 else (-min(1.0 - h, 5.0) if h < 1.0 else 0.0)   # why: the jaws must reach the mat to get under the nut; the cap keeps the IK target within 3 mm below the mat plane the readback contradicts
+        # ... and a tip that reads below 1 mm is pressing on the mat (10 Nov: -3.4 to -0.8 mm at the longer reaches), which stalls it short and
+        # drags it when it moves on: raise the grasp so the readback lands at 1 mm (at most 5 mm). Negative lowered_mm = raised.
         info.update({"corr2_mm": _mm(c2), "grasp_h_mm": round(h, 1), "grasp_lowered_mm": round(lower, 1)})
         say({"run": run, "stage": "grasp_pose", "attempt": attempt, "cmd_in": [round(v, 3) for v in xy1], "reached_in": [round(x, 3), round(y, 3)], "h_mm": round(h, 1), "corr2_mm": info["corr2_mm"], "lowered_mm": round(lower, 1)})
         return xy2, lower
