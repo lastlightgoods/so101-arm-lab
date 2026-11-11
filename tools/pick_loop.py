@@ -110,8 +110,8 @@ def _units_to_in(units): u = str(units or "mm").lower(); return 1.0 if u.startsw
 
 def marker_centres_in(table, layout=None):
     """Marker square centres in mat inches: from the layout file when given (its own units), else the table calibration's layout_markers (mm)."""
-    if layout and layout.get("markers"): k = _units_to_in(layout.get("units")); return [[float(x) * k, float(y) * k] for x, y in layout["markers"].values()]
-    return [[float(x) / 25.4, float(y) / 25.4] for x, y in (table.get("layout_markers") or {}).values()]
+    if layout and layout.get("markers"): k = _units_to_in(layout.get("units")); return [[round(float(x) * k, 6), round(float(y) * k, 6)] for x, y in layout["markers"].values()]  # why: rounded so 76.2 mm is 3.0 in, not 2.9999999999999996
+    return [[round(float(x) / 25.4, 6), round(float(y) / 25.4, 6)] for x, y in (table.get("layout_markers") or {}).values()]
 
 
 def marker_size_in(table, layout=None):
@@ -345,11 +345,11 @@ def sample_reset_target(nut_in, safe_box, avoid, markers, rng, min_avoid_mm=RESE
     marker centre and min_move_mm from the nut's current spot; rejection sampling with `rng.uniform`, SystemExit after `tries` misses."""
     x0, y0, x1, y1 = safe_box; lo, hi = (min(x0, x1), min(y0, y1)), (max(x0, x1), max(y0, y1))
     for _ in range(int(tries)):
-        p = (rng.uniform(lo[0], hi[0]), rng.uniform(lo[1], hi[1]))
+        p = (round(rng.uniform(lo[0], hi[0]), 3), round(rng.uniform(lo[1], hi[1]), 3))   # why: test the point we return; rounding after the check could slip a spot under a limit
         if math.hypot(p[0] - nut_in[0], p[1] - nut_in[1]) * 25.4 < min_move_mm: continue
         if any(math.hypot(p[0] - q[0], p[1] - q[1]) * 25.4 < min_avoid_mm for q in avoid): continue
         if any(math.hypot(p[0] - q[0], p[1] - q[1]) * 25.4 < min_marker_mm for q in markers): continue
-        return [round(p[0], 3), round(p[1], 3)]
+        return [p[0], p[1]]
     raise SystemExit(f"reset: no clear spot in the safe box {list(safe_box)} in {tries} tries (nut at ({nut_in[0]:.2f}, {nut_in[1]:.2f}) in, {len(avoid)} objects to keep {min_avoid_mm:.0f} mm from, "
                      f"{len(markers)} markers at {min_marker_mm:.0f} mm, move >= {min_move_mm:.0f} mm): clear the mat or widen --safe-box")
 

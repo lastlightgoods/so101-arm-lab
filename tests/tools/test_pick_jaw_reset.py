@@ -105,7 +105,7 @@ def test_reset_target_sampling_respects_box_avoid_markers_and_the_move(pl, table
         assert math.hypot(p[0] - nut[0], p[1] - nut[1]) * 25.4 >= 60.0, p
         assert all(math.hypot(p[0] - q[0], p[1] - q[1]) * 25.4 >= 40.0 for q in avoid), p
         assert all(math.hypot(p[0] - q[0], p[1] - q[1]) * 25.4 >= 50.0 for q in markers), p
-    xs, ys = {round(p[0]) for p in pts}, {round(p[1]) for p in pts}; assert len(xs) >= 6 and len(ys) >= 4, "the samples spread over the box"
+    xs, ys = {round(p[0]) for p in pts}, {round(p[1]) for p in pts}; assert xs == {10, 11, 12, 13} and len(ys) >= 4, "the samples spread over the free part of the box (the nut's 60 mm disc and the avoid discs leave x 10..13 only)"
     assert pts == [pl.sample_reset_target(nut, box, avoid, markers, random.Random(7)) for _ in range(500)][:1] + pts[1:], "seeded: the first draw repeats"
     assert pl.sample_reset_target(nut, (13.0, 8.0, 6.0, 4.0), avoid, markers, random.Random(1)) is not None, "a box given corner-last is the same box"
     with pytest.raises(SystemExit, match="no clear spot"): pl.sample_reset_target((9.2, 6.2), (9.0, 6.0, 9.5, 6.5), [], markers, random.Random(1))   # every point is within 60 mm of the nut
@@ -183,7 +183,7 @@ def test_find_nut_anywhere_falls_back_to_the_masked_whole_mat_search(pl, cc, tab
     unmasked = pl.find_nut_mat(cc, table, PROBE_NUT_IN, jpeg=on_marker, markers_in=[]); assert unmasked and math.hypot(unmasked[0][0] - 16.0, unmasked[0][1] - 10.0) * 25.4 < 3.0, "without the mask the same blob is found: the mask is what hides it"
     edge = overhead_frame(cc, table, [(16.0, 8.9)]); assert pl.find_nut_anywhere(cc, table, [], jpeg=edge) is None, "the margin (10 mm) round the square counts as marker too"
     beside = overhead_frame(cc, table, [(16.0, 8.4)]); assert pl.find_nut_anywhere(cc, table, [], jpeg=beside)[1] == "mat", "just outside the margin it is a nut again"
-    m = pl.mat_mask(cc, table, (table["image_size"][1], table["image_size"][0]), pl.marker_centres_in(table)); u, v = cc.table_to_pixel(table, 16 * 25.4, 10 * 25.4); assert m[int(v), int(u)] == 0 and m[int(v), int(u) - 60] == 255
+    m = pl.mat_mask(cc, table, (table["image_size"][1], table["image_size"][0]), pl.marker_centres_in(table)); u, v = cc.table_to_pixel(table, 16 * 25.4, 10 * 25.4); assert m[int(v), int(u)] == 0 and m[int(v), int(u) + 60] == 255, "pixel u falls as mat x grows: +60 px is 2 in inboard of the marker, on the mat (-60 is past the 18 in edge)"
     # an empty mat, off-mat blobs, and garbage frames
     assert pl.find_nut_anywhere(cc, table, [], near_in=PROBE_NUT_IN, jpeg=overhead_frame(cc, table, [])) is None
     assert pl.find_nut_anywhere(cc, table, [], jpeg=overhead_frame(cc, table, [(-1.0, 6.0), (9.0, 13.0)])) is None, "blobs outside the mat area are not searched"
