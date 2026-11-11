@@ -47,6 +47,19 @@ These are the reasons the tool is more than three `v4l2-ctl` lines:
 5. The top C920 re-enumerates on USB now and then (it was USB device 34 on a bus where the others are 8 and 9) and comes
    back with factory defaults, i.e. auto on. The udev rule and the guard both catch that.
 
+## Flicker bands: keep the exposure at one light-flicker period (11 Nov 2026)
+
+The room lights flicker at 120 Hz (8.3 ms). The first capture locked the C920s at exposure 38 (3.8 ms) and the wrist at 35,
+shorter than one flicker period, so bright and dark bands rolled through every frame: measured as the frame-to-frame
+spread of row means over 16 frames, top 16, front 5, wrist 35 grey levels peak-to-peak. The mat map read the bands as
+objects on an empty mat. The C920 only exposes in 1/2^n-second stops (77/78 = 1/128 s, 156, 312), none an exact multiple
+of 8.3 ms; 77 is the closest and cut the banding to 2 to 3 levels. The wrist's own exposure scale is not linear: 78 to
+87 still banded (8 to 20 levels), 90 to 100 did not (about 4). Settings now: top exposure 77 gain 0 (mean 114), front 77
+gain 40 (mean 118), wrist exposure 100 brightness -70 (mean 120); banding 3.3 / 2.2 / 4.1 levels. The old file is kept
+on the Jetson as `calib/cam_settings.before_flicker_fix.json`.
+Watch out: on the front C920 a gain write sometimes reads back a different number for a few seconds (set 0 read 109,
+set 30 read 229); `cam_lock.py check` settled on the written value within 5 s here.
+
 ## The icSpring wrist camera looks green
 
 Measured 10 Nov 2026 on a grey patch of the mat, centre of the frame: with the captured values (white balance 4000, saturation 25)
