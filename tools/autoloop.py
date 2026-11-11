@@ -4,6 +4,8 @@ outcome from the overhead camera, put the nut somewhere new, repeat, with tools/
 
   tools/autoloop.py --cycles 10 [--minutes 60] [--target 9 6 | --random-target] [--safe-box X0 Y0 X1 Y1] [--radius-mm 15] [--session NAME] [--dry-run]
 
+--record-demos (default OFF; --dry-run only until the camera tee exists, docs/scripted-demos.md) records each TRY as a LeRobot training episode via tools/demo_session.py.
+
 One cycle: guard.before -> TRY (closed-loop pick to the target, tools/pick_loop.py) -> JUDGE (/api/scene after a short settle) -> RESET
 (a closed-loop pick to a spot sampled with the box rules; never pick_loop.reset_nut, which writes the pick state file) -> guard.after. One JSON line per cycle,
 one MLflow run per cycle in `so101-autoloop`, a parent run and outputs/run/autoloop_<session>.json for the session. Any trip: one JSON line,
@@ -77,8 +79,9 @@ def load_biases(path):
 class Runner:
     """One session. `pl` is the pick_loop module, `guard` a Guard, `ctx` its Ctx (fetch_state / fetch_scene / now / sleep), `track` a LabTrack,
     `rng` a random.Random. Everything that moves the arm goes through pl.run_plan, wrapped so the guard sees every plan and every row."""
-    def __init__(self, pl, cc, table, guard, ctx, cfg, track, rng, out=print):
+    def __init__(self, pl, cc, table, guard, ctx, cfg, track, rng, out=print, demo=None):
         self.pl, self.cc, self.table, self.guard, self.ctx, self.cfg, self.track, self.rng, self.out = pl, cc, table, guard, ctx, cfg, track, rng, out
+        self.demo = demo   # a tools/demo_session.DemoSession, or None (the default: nothing below changes)
         self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0
         self.markers_mm = list((table.get("layout_markers") or {}).values())
         self.pick_args = argparse.Namespace(jaw_open=pl.JAW_OPEN, max_deg_s=pl.SPEED["closed"], wrist_check=False, grasp_aim_mm=pl.GRASP_AIM_MM)
@@ -156,6 +159,7 @@ class Runner:
             except (Exception, SystemExit) as e: raise TripError(self.guard.trip("run_plan", {"err": f"{type(e).__name__}: {e}"[:300]})) from e   # why: so101-stop kills pick_seq, so the ssh run returns no rows; that is the owner stopping the arm, not a failed try to repeat
             for r in rows:
                 if t := self.guard.check_waypoint(r): raise TripError(t)
+            if self.demo is not None: self.demo.on_plan(plan, rows, max_deg_s)
             return rows
         pl.run_plan = run
         try: yield
@@ -232,7 +236,7 @@ class Runner:
     def cycle(self, n):
         """One TRY / JUDGE / RESET; returns (record, Trip or None). A TripError from the guarded run_plan ends the cycle where it stands."""
         t0 = self.ctx.now(); self.n = n; rec = {"event": "cycle", "cycle": n, "found": True, "picked": False, "landed": False, "ok": False, "landed_err_mm": None, "retries": 0, "target_in": None}
-        trip = None
+        trip = None; opened = False; last_info = last_j = None; s0 = len(self.stages)
         try:
             with self.guarded():
                 sc = self.scene(); rec["target_in"] = tgt = self.target_for((sc or {}).get("objects") or []); last = self.cur_in
@@ -246,21 +250,29 @@ class Runner:
                         last = pr["at_in"]; nut = self.locate(last)
                         if not nut: rec["found"] = False; break
                     rec["nut_in"] = [round(v, 3) for v in nut[0]]; last = nut[0]
+                    if self.demo is not None and not opened: self.demo.open_try(n, {"nut_in": rec["nut_in"], "target_in": list(tgt)}); opened = True; s0 = len(self.stages)   # one episode per TRY: both attempts, not the pre-reset and not the reset
                     try: rows, info = self.pick(nut[0], tgt, n)
                     except SystemExit as e: rec["error"] = str(e)[:200]; break   # why: pick_loop raises SystemExit when ik fails; that is a failed try, not a dead runner
+                    last_info = info
                     j = self.judge(nut[0], tgt, info, f"c{n}_try{attempt + 1}"); rec.update(picked=j["picked"], landed=j["landed"], landed_err_mm=j["err_mm"], moved_mm=j["moved_mm"], judge_wait_s=j["wait_s"], judge_source=j.get("source"))
+                    last_j = j
                     if j["after_in"]: self.cur_in = last = j["after_in"]
                     if j["picked"] or attempt == self.cfg.max_retries: break
                     rec["retries"] += 1   # not picked: the nut has not moved, so one more try is cheap; a nut that was picked and dropped is not retried
                 rec["ok"] = rec["picked"] and rec["landed"]
+                if self.demo is not None and opened: self.demo.end_try(rec, self.demo.jaw_state(last_info, (last_j or {}).get("obj")), self.stages[s0:])   # the try is over: the judge's settle and the reset are not recorded
                 if rec["found"] and rec["landed_err_mm"] is not None and "error" not in rec:
                     r = self.reset_and_judge(self.cur_in, j["objects"], j.get("obj"), f"c{n}_reset"); rec["reset_to_in"] = r["spot_in"]
                     if r["error"]: rec["reset_error"] = r["error"]
                     rec.update(reset_ok=r.get("ok"), reset_err_mm=r.get("err_mm"), reset_how=r.get("how"), reset_found_in=r.get("at_in"))
-        except TripError as e: trip = e.trip
+        except TripError as e:
+            trip = e.trip
+            if self.demo is not None: self.demo.abort_if_recording(f"trip:{trip.reason}")   # a trip in the middle of the try: nothing partial is saved
         if self.locates: rec["locates"] = list(self.locates); self.locates.clear()
         rec["cycle_s"] = round(self.ctx.now() - t0, 2)
-        return rec, trip or self.guard.check_after_cycle(rec)
+        final = trip or self.guard.check_after_cycle(rec)
+        if self.demo is not None: self.demo.commit(rec, final)
+        return rec, final
 
     # -- the session
     def finish_cycle(self, rec, trip, parent_id):
@@ -271,6 +283,7 @@ class Runner:
             tr.metrics({"landed_err_mm": rec["landed_err_mm"], "picked": int(rec["picked"]), "landed": int(rec["landed"]), "cycle_s": rec["cycle_s"], "retries": rec["retries"], "trip": int(trip is not None),
                         "reset_err_mm": rec.get("reset_err_mm"), "reset_ok": None if ro is None else int(ro), "judge_wait_s": rec.get("judge_wait_s"), "pre_reset": int("pre_reset" in rec)})
             tr.json({"cycle": rec, "stages": self.stages}, "cycle.json"); self.stages.clear()
+            if self.demo is not None: self.demo.link_cycle(rec, tr)
             for p in self.frames: tr.artifact(p, "frames")
             self.frames.clear()
         self.say(rec)
@@ -298,15 +311,21 @@ class Runner:
         with self.track.run(f"autoloop-{cfg.session}", tags={"host": "mac", "session": cfg.session, "kind": "session"}) as parent:
             parent.params({"session": cfg.session, "cycles": cfg.cycles, "minutes": cfg.minutes, "mode": "random" if cfg.random_target else "fixed", "target": f"{cfg.target[0]:g},{cfg.target[1]:g}", "safe_box": ",".join(f"{v:g}" for v in cfg.safe_box),
                            "radius_mm": cfg.radius_mm, "max_retries": cfg.max_retries, "dry_run": int(cfg.dry_run)})
+            if self.demo is not None: self.demo.set_parent(getattr(parent, "id", None))
             try:
                 for n in range(1, cfg.cycles + 1):
                     if cfg.minutes and self.ctx.now() - t0 >= cfg.minutes * 60: end = "minutes"; break
                     trip = self.guard.check_before_cycle(self.ctx)
+                    if not trip and self.demo is not None and not self.demo.alive(): trip = self.guard.trip("recorder", {"err": "the demo recorder does not answer"})   # a recording session without a recorder is a wasted session
                     if trip: self.stop(trip, n); end = trip.reason; break
                     rec, trip = self.cycle(n); self.finish_cycle(rec, trip, getattr(parent, "id", None))
                     if trip: self.stop(trip, n); end = trip.reason; break
-            except KeyboardInterrupt: end = "interrupted"; self.say({"event": "interrupted"})
-            s = self.summary(end, t0); out = os.path.join(cfg.out_dir, f"autoloop_{cfg.session}.json"); os.makedirs(cfg.out_dir, exist_ok=True)
+            except KeyboardInterrupt:
+                end = "interrupted"; self.say({"event": "interrupted"})
+                if self.demo is not None: self.demo.abort("interrupted")
+            s = self.summary(end, t0)
+            if self.demo is not None: s["demos"] = self.demo.finish(s)
+            out = os.path.join(cfg.out_dir, f"autoloop_{cfg.session}.json"); os.makedirs(cfg.out_dir, exist_ok=True)
             with open(out, "w") as f: json.dump(s, f, indent=1)
             parent.metrics({"cycles": s["cycles"], "success_rate": s["success_rate"], "mean_err_mm": s["mean_err_mm"], "median_err_mm": s["median_err_mm"], "duration_s": s["duration_s"], "trips": sum(1 for x in self.stops if not x["clean"])})
             parent.json(s, "summary.json")
@@ -401,6 +420,19 @@ def make_cfg(a, out_dir):
                               judge_wait_s=a.judge_wait, save_frames=not a.dry_run, start_near=tuple(a.start_near) if a.start_near else None)
 
 
+def make_dry_demo(a, cfg, lt, pl_unused=None):
+    """--record-demos --dry-run: the whole recording path on fakes (virtual clock, ticks synthesised from each plan with pick_seq's own easing, synthetic cameras).
+    Returns a tools/demo_session.DemoSession writing real LeRobot datasets under --demo-root."""
+    dr = load(os.path.join(ROOT, "jetson", "demo_recorder.py"), "demo_recorder_for_autoloop"); lc = load(os.path.join(ROOT, "jetson", "lab_config.py"), "lab_config_for_autoloop")
+    ds = load(os.path.join(ROOT, "tools", "demo_session.py"), "demo_session_for_autoloop")
+    lab = lc.LabConfig.from_file(a.lab_config) if a.lab_config else lc.LabConfig()
+    if a.lighting_tag: lab.lighting_tag = a.lighting_tag
+    root = a.demo_root or os.path.join(cfg.out_dir, "demos", cfg.session); name = a.demo_repo.split("/")[-1]
+    buf = dr.TickBuffer(); cams = dr.FakeCameraSource(); ps = dr.load_pick_seq()
+    rec = dr.DemoRecorder(os.path.join(root, name), a.demo_repo, cams, buf, lab, rejects_root=os.path.join(root, name + "-rejects"), rejects_repo=a.demo_repo + "-rejects", calib_hashes=lc.calib_hashes(os.path.join(ROOT, "jetson", "calib")))
+    return ds.DemoSession(rec, cfg.session, dr, track=lt.LabTrack("so101-datasets-dry"), radius_mm=cfg.radius_mm, fake=ds.FakeRig(ps, buf, dr.synth_plan_ticks), repo_root=ROOT)
+
+
 def build_parser():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--cycles", type=int, default=10); ap.add_argument("--minutes", type=float, default=None, help="stop starting new cycles after this long")
@@ -414,27 +446,33 @@ def build_parser():
     ap.add_argument("--settle", type=float, default=1.0, help="seconds to wait before judging the landing or a reset")
     ap.add_argument("--start-near", type=float, nargs=2, default=None, metavar=("X", "Y"), help="where the first cycle looks for the nut (mat inches); without it the first search has no hint and the whole-mat fallback can take the parked arm's shadow for the nut")
     ap.add_argument("--judge-wait", type=float, default=4.0, help="after the settle, wait up to this long while the map still has objects pending confirmation"); ap.add_argument("--table", default=None, help="top_table.json (default jetson/calib/top_table.json)")
+    ap.add_argument("--record-demos", action="store_true", help="record each TRY as a LeRobot training episode: kept (landed, no trip, jaw held, healthy recording) or rejected into a separate dataset. OFF by default; --dry-run only until the camera tee exists")
+    ap.add_argument("--demo-root", default=None, help="folder for the demo datasets (default <out-dir>/demos/<session>)"); ap.add_argument("--demo-repo", default="lastlight/so101-nut-pick", help="repo id of the kept-episode dataset; the rejects go to <repo>-rejects")
+    ap.add_argument("--lab-config", default=None, help="JSON of jetson/lab_config.LabConfig fields (default: the stock-v1 labels)"); ap.add_argument("--lighting-tag", default=None, help="lighting label stored with every episode (vary it between sessions)")
     ap.add_argument("--dry-miss", type=float, default=0.1, help="--dry-run: chance that a pick misses the nut"); ap.add_argument("--out-dir", default=None)
     return ap
 
 
 def main(argv=None):
-    a = build_parser().parse_args(argv); gr = load_guardrails(); pl = load_pick_loop(); cc = pl.cam_calib(); out_dir = a.out_dir or os.path.join(ROOT, "outputs", "run")
+    a = build_parser().parse_args(argv)
+    if a.record_demos and not a.dry_run: raise SystemExit("--record-demos needs the Jetson recorder and the camera tee (phase 2, docs/scripted-demos.md); until then it runs only with --dry-run")
+    gr = load_guardrails(); pl = load_pick_loop(); cc = pl.cam_calib(); out_dir = a.out_dir or os.path.join(ROOT, "outputs", "run")
     tpath = a.table or os.path.join(ROOT, "jetson", "calib", "top_table.json")
     if a.dry_run and not os.path.exists(tpath): tpath = os.path.join(ROOT, "tests", "calib", "fixtures", "top_table_real.json")
     table = json.load(open(tpath))
     if not (table.get("arm_fit") and table.get("arm_base_mm")): raise SystemExit("autoloop needs the arm fit in top_table.json (tools/jog_capture.py --fit)")
     cfg = make_cfg(a, out_dir); rng = random.Random(a.seed)
     lim = gr.Limits(margin_mm=a.margin_mm, ceiling_in=a.ceiling_in, max_err_deg=a.max_err_deg, lost_after=a.lost_after, max_failures=a.max_consecutive_failures, **({"stop_file": a.stop_file} if a.stop_file else {}))
-    lt = load(os.path.join(ROOT, "jetson", "labtrack.py"), "labtrack_for_autoloop")
+    lt = load(os.path.join(ROOT, "jetson", "labtrack.py"), "labtrack_for_autoloop"); demo = None
     if a.dry_run:
         world = FakeWorld(cc, table, gr.fk_mat_mm, nut_in=(6.0, 8.0), rng=rng, miss_p=a.dry_miss); arm = DryArm(cc, table, world)
         pl.api, pl.run_plan, pl.find_nut, pl.fetch_top, pl.fetch_wrist = arm.api, arm.run_plan, world.find_nut, (lambda: b""), (lambda: None)
         ctx = gr.Ctx(world.api_state, world.api_scene, time.time, lambda s: None, lambda d: print(json.dumps(d), flush=True)); track = lt.LabTrack(EXPERIMENT + "-dry")
+        if a.record_demos: world.in_jaws = True; demo = make_dry_demo(a, cfg, lt)   # why: the fake wrist camera has no frame, so the jaw check would read "unknown"; the fake world says the nut is held
     else:
         get = lambda path, t: json.load(urllib.request.urlopen(pl.DASH + path, timeout=t))
         ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True), arm_jobs=jetson_arm_jobs); track = lt.LabTrack(EXPERIMENT)
-    guard = gr.Guard(cc, table, lim, ctx); s = Runner(pl, cc, table, guard, ctx, cfg, track, rng, out=lambda l: print(l, flush=True)).run()
+    guard = gr.Guard(cc, table, lim, ctx); s = Runner(pl, cc, table, guard, ctx, cfg, track, rng, out=lambda l: print(l, flush=True), demo=demo).run()
     return 0 if all(x["clean"] for x in s["stops"]) else 2
 
 
