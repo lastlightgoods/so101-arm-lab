@@ -7,6 +7,8 @@ and both camera poses (camera.pose, camera.front.pose) are re-solved from the ma
 import glob, json, os, re, shlex, subprocess, threading, time, http.server, socketserver, sys
 import psutil
 import queue
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # sibling modules (a no-op under `python server.py`; the tests import this file by path)
+import telemetry_store   # servo health history + flags (docs/telemetry.md); /api/tele serves it
 SAY_Q = queue.Queue(); _last_said = {"text": "", "t": 0.0}
 def say(text):
     """Queue a spoken line; see say_loop. Never speaks in parallel."""
@@ -25,6 +27,7 @@ JETSON = os.environ.get("SO101_JETSON", "jetson")
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2", JETSON]
 state = {"jetson": {"online": False, "last": 0}, "mac": {}, "training": {}, "datasets": {}, "policies": {}, "procs": [], "events": [], "arms": {}, "spotify": {"running": False}, "policy": {}}   # policy: the Jetson's DEPLOYED.json (so101-policy deploy), served at /api/policy
 lock = threading.RLock()
+TELE = telemetry_store.TeleStore()
 def log(*a): print(time.strftime("%H:%M:%S"), *a, flush=True)
 def event(msg):
     with lock:
@@ -235,6 +238,12 @@ def arm_loop():
                     if time.time() - d.get("t", 0) < 30:
                         event("🔊 " + d["say"]); say(d["say"])
                     continue
+                tele = d.pop("tele", None)   # servo health rides on the follower's line; it goes to its own store so /api/state stays small
+                if tele and d.get("role") == "follower":
+                    try:
+                        for ev in TELE.add(tele, d.get("src")):
+                            if ev["level"] >= 2: event(f"servo {ev['joint']}: {ev['text']}")   # only the red ones go to the log panel; the telemetry panel lists them all
+                    except Exception as e: log("telemetry", repr(e))
                 with lock: state.setdefault("arms", {})[d.get("role", "arm")] = {**d, "rx": time.time()}
                 if d.get("role") == "follower": roar_check(d.get("pos") or {})
             p.wait()
@@ -1157,6 +1166,10 @@ class H(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 log("state json error:", repr(e)); body = json.dumps({"error": repr(e)}).encode()
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
+        elif self.path.startswith("/api/tele"):
+            try: since = float(self.query().get("since", ["0"])[0])
+            except ValueError: since = 0.0
+            self.send_json(TELE.api(since))
         elif self.path.startswith("/api/hist"):
             with lock: body = json.dumps(HIST).encode()
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)

@@ -34,7 +34,7 @@ class Stub:
         return max(keys, key=len) if keys else None
 
     # -- lifecycle -----------------------------------------------------------
-    def start(self):
+    def start(self, port=0):
         stub = self
 
         class Handler(http.server.SimpleHTTPRequestHandler):
@@ -97,7 +97,7 @@ class Stub:
                 self.server_name = "localhost"
                 self.server_port = self.server_address[1]
 
-        self.httpd = Srv(("127.0.0.1", 0), Handler)
+        self.httpd = Srv(("127.0.0.1", port), Handler)   # port 0 = a free one (the tests); tools/telemetry_demo.py asks for a fixed one
         self.thread = threading.Thread(target=self.httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         self.thread.start()
         return self

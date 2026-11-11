@@ -257,8 +257,15 @@ def wrist_pose(position_mm=(1.3, 68.0, -11.2), optical_axis=(-0.095, -0.493, -0.
     return p
 
 
+def tele_none():
+    """/api/tele before the Jetson sends any servo telemetry: no rows, no flags."""
+    return {"keys": [], "joints": [], "rows": [], "limits": {}, "src": None, "age": None, "n": 0, "now": now(), "t": None, "flags": [], "events": [], "dt_ms": None,
+            "marks": {"temp_cut": 70, "temp_warn": 60, "temp_hot": 65, "volt_warn": 11.0, "volt_low": 10.0, "bus_a": 5.0}}
+
+
 def default_routes():
     return {
+        "/api/tele": tele_none(),
         "/api/state": state(),
         "/api/hist": hist(20),
         "/api/record": record(),

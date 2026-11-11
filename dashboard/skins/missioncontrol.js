@@ -3,6 +3,9 @@
 // paper, one lane per joint, with the live value as a seven-segment readout, a MET (mission elapsed time) counter
 // and a REC / HOLD / IDLE lamp fed by api.record(). Samples api.arms() every 100 ms into a 600-slot ring buffer;
 // the draw loop is requestAnimationFrame capped at 30 fps and allocates nothing per frame (strings only on change).
+// Each lane autoscales to the last 60 s of its own pen (never narrower than MINSPAN, never outside the joint's full range): on the fixed
+// +-120 deg scale a 2 deg sag is under a pixel and a resting arm draws six ruler-straight lines, which is why the chart looked dead.
+// With no joint reading for 2.5 s (the arm is busy, unplugged, or the stream is down) the paper says so instead of leaving it blank.
 (() => {
   if (!window.SKINS) return;
   const JN = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"];
@@ -11,6 +14,8 @@
   const LO = [-120, -120, -120, -120, -180, 0], HI = [120, 120, 120, 120, 180, 100];
   const PEN = ["#e8dcc0", "#e2a93d", "#dc4a35", "#9ec7d8", "#8dbf7a", "#c7a4dc"];
   const TLBL = ["0", "-10 s", "-20 s", "-30 s", "-40 s", "-50 s", "-60 s"];
+  const MINSPAN = [8, 8, 8, 8, 8, 12];   // narrowest lane range, degrees (gripper: percent)
+  const rlo = LO.slice(), rhi = HI.slice();   // the lanes' current range, eased toward the target
   const N = 600, SPAN = 60000, SAMPLE_MS = 100, FRAME_MS = 1000 / 30;
   const PAPER = "#17301f", GRID_MINOR = "rgba(141,191,122,.16)", GRID_MAJOR = "rgba(141,191,122,.42)", LANE = "rgba(232,220,192,.38)";
   const FRAME = "#141516", BEZEL = "#0a0a0b", METAL = "#35363a", INK = "#e8dcc0", DIM = "#a39b86", READOUT = "#f2d98f", GO = "#8dbf7a", RED = "#dc4a35", AMBER = "#e2a93d";
@@ -20,6 +25,7 @@
   let head = 0, count = 0;
   // live text, rebuilt only when it changes
   const cur = ["--", "--", "--", "--", "--", "--"];
+  let lastGood = 0, feedNote = "";   // wall time of the last sample with a reading; why there is none
   let metStr = "T+ 00:00:00", metSec = -1, epStr = "", lamp = 0;   // lamp: 0 idle, 1 rec, 2 hold
   // runtime
   let canvas = null, ctx = null, api = null, raf = 0, timer = 0, running = false, lastFrame = 0, t0 = 0, simEl = null;
@@ -40,10 +46,11 @@
     if (a && a.follower && a.follower.pos) pos = a.follower.pos;
     if (!pos) { try { st = api.state(); } catch (e) { st = null; } if (st && st.sim_arm && st.sim_arm.pos) pos = st.sim_arm.pos; }
     ts[head] = Date.now();
+    feedNote = a && a.follower ? (a.follower.src === "busy" ? "ARM BUSY · NO STATE FILE" : a.follower.src === "unplugged" ? "FOLLOWER UNPLUGGED" : a.follower.src === "error" ? "BUS ERROR" : "NO READING") : "NO STREAM FROM THE JETSON";
     for (let j = 0; j < 6; j++) {
       const v = pos ? pos[JN[j]] : null;
       const ok = typeof v === "number" && v === v;
-      vals[head * 6 + j] = ok ? v : NaN;
+      vals[head * 6 + j] = ok ? v : NaN; if (ok) lastGood = ts[head];
       const s = ok ? v.toFixed(1) + (j === 5 ? "%" : "°") : "--";
       if (s !== cur[j]) cur[j] = s;
     }
@@ -78,8 +85,19 @@
 
   function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
+  function autoscale(nowMs) {
+    const first = (head - count + N) % N;
+    for (let j = 0; j < 6; j++) {
+      let mn = Infinity, mx = -Infinity;
+      for (let i = 0; i < count; i++) { const idx = (first + i) % N; if (nowMs - ts[idx] > SPAN) continue; const v = vals[idx * 6 + j]; if (v === v) { if (v < mn) mn = v; if (v > mx) mx = v; } }
+      let tl = LO[j], th = HI[j];
+      if (mn <= mx) { const mid = (mn + mx) / 2, half = Math.max((mx - mn) * 0.6, MINSPAN[j] / 2); tl = Math.max(LO[j], mid - half); th = Math.min(HI[j], mid + half); if (th - tl < MINSPAN[j]) { if (tl === LO[j]) th = tl + MINSPAN[j]; else tl = th - MINSPAN[j]; } }
+      rlo[j] += (tl - rlo[j]) * 0.15; rhi[j] += (th - rhi[j]) * 0.15;
+    }
+  }
+
   function draw(now) {
-    const x = ctx, nowMs = Date.now(), pxMs = (R - L) / SPAN;
+    const x = ctx, nowMs = Date.now(), pxMs = (R - L) / SPAN; autoscale(nowMs);
     // recorder frame and paper
     x.fillStyle = FRAME; x.fillRect(0, 0, W, H);
     x.fillStyle = PAPER; x.fillRect(L, T, R - L, B - T);
@@ -110,7 +128,7 @@
     x.lineWidth = small ? 1.4 : 2; x.lineJoin = "round"; x.lineCap = "round";
     x.save(); x.beginPath(); x.rect(L, T, R - L, B - T); x.clip();
     for (let j = 0; j < 6; j++) {
-      const lo = LO[j], span = HI[j] - lo, top = T + j * laneH + pad, hgt = laneH - 2 * pad;
+      const lo = rlo[j], span = rhi[j] - lo, top = T + j * laneH + pad, hgt = laneH - 2 * pad;
       x.strokeStyle = PEN[j]; x.beginPath(); let up = true;
       for (let i = 0; i < count; i++) {
         const idx = (first + i) % N, v = vals[idx * 6 + j];
@@ -128,7 +146,7 @@
       const last = (head - 1 + N) % N;
       for (let j = 0; j < 6; j++) {
         const v = vals[last * 6 + j]; if (v !== v) continue;
-        const lo = LO[j], top = T + j * laneH + pad, hgt = laneH - 2 * pad; let f = (v - lo) / (HI[j] - lo); if (f < 0) f = 0; else if (f > 1) f = 1;
+        const lo = rlo[j], top = T + j * laneH + pad, hgt = laneH - 2 * pad; let f = (v - lo) / (rhi[j] - lo); if (f < 0) f = 0; else if (f > 1) f = 1;
         x.fillStyle = PEN[j]; x.beginPath(); x.arc(R, top + hgt * (1 - f), small ? 2.5 : 3.5, 0, 6.2832); x.fill();
       }
     }
@@ -138,9 +156,14 @@
       const cy = T + j * laneH + laneH / 2;
       x.fillStyle = PEN[j]; x.fillRect(8, cy - (small ? 7 : 9), 4, small ? 14 : 18);
       x.fillStyle = INK; x.font = fLabel; x.textAlign = "left"; x.fillText(JL[j], 18, small ? cy : cy - 8);
-      if (!small) { x.fillStyle = DIM; x.font = fSmall; x.fillText(JR[j], 18, cy + 9); }
+      if (!small) { x.fillStyle = DIM; x.font = fSmall; x.fillText(Math.round(rlo[j]) + " … " + Math.round(rhi[j]) + (j === 5 ? "%" : "°"), 18, cy + 9); }
       x.fillStyle = BEZEL; roundRect(R + 10, cy - laneH * 0.22, W - R - 20, laneH * 0.44, 3); x.fill();
       x.fillStyle = PEN[j]; x.font = fRead; x.textAlign = "right"; x.fillText(cur[j], W - 18, cy + 1);
+    }
+    // no reading for a while: say so (a flat or empty chart must not look like a working one)
+    if (nowMs - lastGood > 2500) {
+      x.fillStyle = "rgba(10,12,11,.72)"; x.fillRect(L, T + (B - T) / 2 - 22, R - L, 44);
+      x.fillStyle = AMBER; x.font = fLabel; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("NO JOINT FEED · " + feedNote, (L + R) / 2, T + (B - T) / 2);
     }
     // header band: title, episode text, lamp, MET
     x.fillStyle = BEZEL; x.fillRect(0, T - 1, W, 1); x.fillStyle = METAL; x.fillRect(0, T - 2, W, 1);
@@ -173,6 +196,7 @@
   const attract = {
     start(c, a) {
       canvas = c; api = a; ctx = c.getContext("2d"); simEl = document.getElementById("simview");
+      window.so101StripRange = j => [rlo[j], rhi[j]];   // the lanes' current vertical ranges (the UI test reads them)
       head = 0; count = 0; metSec = -1; epStr = ""; lamp = 0; W = 0; H = 0;
       t0 = performance.now(); lastFrame = 0; running = true;
       size(); sample();

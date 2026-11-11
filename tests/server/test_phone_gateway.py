@@ -122,6 +122,13 @@ def test_pad_forwards_api_gets_with_query_status_and_type(gateway, upstream):
     assert c.get("/x/api/state", cookie=True)[0] == 404
 
 
+def test_pad_forwards_the_servo_telemetry_feed_and_phone_mode_does_not(gateway, upstream):
+    """The telemetry panel on the iPad polls /api/tele?since=...; pad mode forwards it, the read-only phone page never needed it (docs/telemetry.md)."""
+    st, h, body = gateway("pad").get("/api/tele?since=12.5", cookie=True)
+    assert st == 200 and json.loads(body)["path"] == "/api/tele?since=12.5"
+    assert gateway("phone").get("/api/tele", cookie=True)[0] == 404
+
+
 def test_pad_forwards_posts_with_body_content_type_and_status(gateway, upstream):
     c = gateway("pad")
     p = json.dumps({"cmd": "pause"}).encode()

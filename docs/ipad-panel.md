@@ -75,6 +75,14 @@ feed to measure a point on the mat, as on the wall. There are no hover-only cont
 The same rules apply to any Chrome window narrower than 1366 px in landscape, which is how the layout is checked
 without an iPad (`http://127.0.0.1:8765` resized to 1180x820).
 
+## Servo telemetry on the pad
+
+The servo telemetry panel (temperature, load, current, bus voltage, commanded versus actual, error flags; docs/telemetry.md) sits inline
+under the arm row in the landscape tablet layout, one swipe from the arm. It polls `GET /api/tele?since=<t>` once a second (a few hundred bytes
+after the first load), which pad mode forwards like every other `/api` GET; phone mode does not carry it. The charts are canvas, redrawn at that
+rate, and the panel's joint buttons and 1/5/10-minute buttons are finger sized. The SERVOS button in the 3D view and the M key open the same panel
+as a full-window view.
+
 ## Rotate or revoke the token
 
 Delete `dashboard/.phone_token` and restart the gateway (`so101-dash pad` again): a new token is written (mode 600) and
