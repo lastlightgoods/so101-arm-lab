@@ -15,7 +15,7 @@ def summarise(sv, sv_cc, sv_table, ev, plan): return sv.analyse(ev, sv_cc, sv_ta
 def test_recovers_backlash_and_compliance_per_joint(play, sv, sv_cc, sv_table):
     rig, ev, code, plan, _ = play(rig_kw={"backlash_deg": {"shoulder_lift": 1.5, "elbow_flex": 0.3, "shoulder_pan": 0, "wrist_flex": 0, "wrist_roll": 0, "gripper": 0},
                                           "compliance": {"shoulder_lift": 0.009, "elbow_flex": 0.002}})
-    assert code == 0 and ev[-1]["event"] == "done"
+    assert code == 0 and [e["event"] for e in ev][-2:] == ["done", "rest"]
     s = summarise(sv, sv_cc, sv_table, ev, plan); j = s["joints"]
     assert j["shoulder_lift"]["backlash_deg_mean"] == pytest.approx(1.5, abs=0.05) and j["elbow_flex"]["backlash_deg_mean"] == pytest.approx(0.3, abs=0.05)
     assert j["shoulder_lift"]["compliance_deg_per_100load"] == pytest.approx(-0.9, abs=0.06)   # deg per 100 load units, negative = sags toward lower angle
@@ -95,7 +95,7 @@ def test_restore_unverified_exits_3(play, sp):
     plan, _ = play(p_test=dict(PT))[3], None
     clk = sp.VClock(); first = plan["poses"][0]["joints"]; sticky = Sticky(clock=clk, start={**first, "gripper": 0.0}); out = []
     code = sp.run_play(plan, sticky, out.append, clk.now, clk.sleep, 50.0)
-    assert code == 3 and out[-1]["event"] == "restore" and out[-1]["ok"] is False and out[-1]["readback"] != 16 and Sticky.dropped == 3   # 3 tries, then it says so
+    assert code == 3 and out[-2]["event"] == "restore" and out[-2]["ok"] is False and out[-2]["readback"] != 16 and Sticky.dropped == 3 and out[-1]["event"] == "rest"   # 3 tries, then it says so
 
 
 # ---------------------------------------------------------------- aborts
@@ -286,3 +286,28 @@ def test_probe_main_holds_arms_busy_refuses_lerobot_and_disconnects(sp, tmp_path
     monkeypatch.setattr(fake.clock, "sleep", fake.clock.sleep)
     with pytest.raises(SystemExit) as e: sp.main()
     assert e.value.code == 0 and seen["busy_at_connect"] is True and seen["disc"] is True and not busy.exists()
+
+
+# ---------------------------------------------------------------- rest after a normal end (11 Nov 2026: the arm sat over the mat for ~2 h and the next nut search took the gripper for the nut)
+def test_normal_end_restores_p_then_moves_to_rest(play, sp):
+    rig, ev, code, plan, _ = play(p_test=dict(PT))
+    names = [e["event"] for e in ev]; assert code == 0 and names[-3:] == ["done", "restore", "rest"], names[-4:]
+    assert {j: rig.cmd[j] for j in sp.ARM} == pytest.approx(sp.REST) and rig.cmd["gripper"] == pytest.approx(0.0, abs=0.01) and ev[-1]["to"] == sp.REST
+
+
+def test_rest_move_is_capped_at_50_deg_s(play, sp):
+    rig, ev, code, plan, spy = play(rig_wrap=lambda r, c: Spy(r, c))
+    t = spy.steps[-60:]; assert [e["event"] for e in ev][-1] == "rest"   # the rest move is >= 60 steps of 25 ms
+    assert max(abs(b[j] - a[j]) / (tb - ta) for (ta, a), (tb, b) in zip(t, t[1:]) for j in sp.ARM) <= 50.0
+
+
+def test_abort_does_not_move_to_rest(play, sp):
+    rig, ev, code, plan, _ = play(limits={"min_volts": 99.0})
+    assert code == 2 and ev[-1]["event"] == "abort" and not any(e["event"] in ("rest", "rest_failed") for e in ev)
+    assert {j: rig.cmd[j] for j in sp.ARM} != pytest.approx(sp.REST)
+
+
+def test_rest_constants_match_the_pick_loop(sp):
+    import re
+    src = open(os.path.join(ROOT, "tools", "pick_loop.py")).read(); m = re.search(r"^REST = (\{.*\})", src, re.M)
+    assert sp.REST == eval(m.group(1))

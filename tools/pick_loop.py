@@ -107,12 +107,15 @@ def fetch_scene_objects():
     except Exception: return []
 
 
-def find_nut(cc, table, near_in, radius_px=70, jpeg=None):
-    """Dark blob nearest to `near_in` (mat inches) in a fresh overhead frame (or the given JPEG bytes) -> (mat_in, pixel, area) or None."""
+def find_nut(cc, table, near_in, radius_px=70, jpeg=None, joints="live"):
+    """Dark blob nearest to `near_in` (mat inches) in a fresh overhead frame (or the given JPEG bytes) -> (mat_in, pixel, area) or None. `joints`: the
+    follower's joints for the arm cut-out, as in find_nut_mat ("live" reads /api/state; None skips it; a dict is used as is). why: 11 Nov 2026 13:45 the
+    near search took a dark slot on the gripper (arm parked over the mat centre) for the nut, 14 mm from the real one."""
     img = cv2.imdecode(np.frombuffer(fetch_top() if jpeg is None else jpeg, np.uint8), cv2.IMREAD_COLOR)
     g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY); cu, cv_ = cc.table_to_pixel(table, near_in[0] * 25.4, near_in[1] * 25.4)
     x0, y0 = max(0, int(cu) - radius_px), max(0, int(cv_) - radius_px); roi = g[y0:y0 + 2 * radius_px, x0:x0 + 2 * radius_px]
-    m = (roi < 60).astype(np.uint8); n, lab, st, cen = cv2.connectedComponentsWithStats(m)
+    keep = arm_cut(cc, table, np.full(g.shape, 255, np.uint8), follower_joints() if joints == "live" else joints)[y0:y0 + 2 * radius_px, x0:x0 + 2 * radius_px]   # why: an arm_cut failure leaves the mask whole (no cut), never breaks the search
+    m = ((roi < 60) & (keep > 0)).astype(np.uint8); n, lab, st, cen = cv2.connectedComponentsWithStats(m)
     cands = [(math.hypot(x0 + cen[i][0] - cu, y0 + cen[i][1] - cv_), int(st[i, cv2.CC_STAT_AREA]), x0 + cen[i][0], y0 + cen[i][1]) for i in range(1, n) if 8 <= st[i, cv2.CC_STAT_AREA] <= 300]
     if not cands: return None
     _, area, u, v = min(cands); X, Y = cc.pixel_to_table(table, u, v)

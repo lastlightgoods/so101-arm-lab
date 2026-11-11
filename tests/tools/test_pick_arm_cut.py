@@ -37,3 +37,22 @@ def test_live_joints_are_read_from_the_dashboard_state(pl, monkeypatch):
     m.api = lambda path: {"arms": {}}; assert m.follower_joints() is None
     def boom(path): raise OSError("dashboard down")
     m.api = boom; assert m.follower_joints() is None
+
+
+# 11 Nov 2026 13:45: the NEAR search (find_nut) took a dark slot on the gripper for the nut, 14 mm from the real one; it had no arm cut-out
+def test_the_near_search_skips_the_arm_when_it_knows_the_joints(pl, cc, table):
+    frame = overhead_frame(cc, table, [GHOST_IN, NUT_IN], r_px=4); near = (9.2, 4.6)   # between them, the ghost (under the arm) is the nearer
+    old = pl.find_nut(cc, table, near, radius_px=140, jpeg=frame, joints=None)
+    assert old and math.hypot(old[0][0] - GHOST_IN[0], old[0][1] - GHOST_IN[1]) * 25.4 < 3.0, "without the cut-out: the ghost"
+    new = pl.find_nut(cc, table, near, radius_px=140, jpeg=frame, joints=REST)
+    assert new and math.hypot(new[0][0] - NUT_IN[0], new[0][1] - NUT_IN[1]) * 25.4 < 3.0, "with it: the nut"
+
+
+def test_the_near_search_reads_the_live_joints_by_default_and_survives_a_missing_arm(pl, cc, table, monkeypatch):
+    frame = overhead_frame(cc, table, [GHOST_IN, NUT_IN], r_px=4); near = (9.2, 4.6)
+    monkeypatch.setattr(pl, "follower_joints", lambda: REST)
+    new = pl.find_nut(cc, table, near, radius_px=140, jpeg=frame); assert new and math.hypot(new[0][0] - NUT_IN[0], new[0][1] - NUT_IN[1]) * 25.4 < 3.0
+    monkeypatch.setattr(pl, "follower_joints", lambda: None)   # dashboard down: no cut, the search still answers
+    assert pl.find_nut(cc, table, near, radius_px=140, jpeg=frame) is not None
+    monkeypatch.setattr(cc, "arm_mask_px_from_joints", lambda *a, **k: 1 / 0)   # the arm mask itself fails: also no cut
+    assert pl.find_nut(cc, table, near, radius_px=140, jpeg=frame, joints=REST) is not None

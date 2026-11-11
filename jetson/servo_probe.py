@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """servo_probe.py - the Jetson side of tools/servo_play.py: measure the play (backlash and compliance) of the shoulder lift and the elbow, and
 optionally try the shoulder lift's P gain, in ONE bus session. Same shape as pick_seq.py: run over ssh, holds ~/so101/.arms_busy so the dashboard
-poller lets go of the port, refuses while a lerobot job holds the arm, torque stays on at the end (the arm freezes where it is).
+poller lets go of the port, refuses while a lerobot job holds the arm, torque stays on at the end. After a NORMAL end (done) the arm goes back to the REST pose (after P is restored); after an abort it holds where it is.
 
   python servo_probe.py --plan plan.json [--max-deg-s 50] [--force]
   python servo_probe.py --plan plan.json --fake        # the same code against FakeRig (no bus, no lerobot): the --dry-run of tools/servo_play.py
@@ -11,7 +11,7 @@ plan.json (written by tools/servo_play.py, which has already put every commanded
    "limits": {"min_volts", "max_temp_c", "max_load", "max_osc_deg"}, "p_test": null | {"joint": "shoulder_lift", "scales": [1, 1.5, 2], "pose": "far", "move_to": "near"}}
 
 One JSON line per event on stdout: settings, point (one settled reading of one joint at one target, approached from "below" or "above"), p_value,
-p_write_ignored, abort, restore, done. Exit 0 = done, 2 = aborted (restored), 3 = a P value could NOT be verified as restored (read the restore line).
+p_write_ignored, abort, restore, done, rest (the move back to REST after done; or rest_failed). Exit 0 = done, 2 = aborted (restored), 3 = a P value could NOT be verified as restored (read the restore line).
 
 What it writes to the servos: NOTHING, except P_Coefficient of the one joint named in p_test, and only with Lock == 1 (the state LeRobot leaves a torque-enabled
 arm in: feetech.py enable_torque writes Lock=1). It never writes Lock, Torque_Enable or any other register, so nothing goes through the unlocked EEPROM
@@ -29,6 +29,7 @@ EEPROM_BELOW = 40                     # lerobot/motors/feetech/tables.py: addres
 READ_REGS = ("Present_Load", "Present_Current", "Present_Voltage", "Present_Temperature")
 SETTING_REGS = ("P_Coefficient", "I_Coefficient", "D_Coefficient", "CW_Dead_Zone", "CCW_Dead_Zone", "Max_Torque_Limit", "Protection_Current", "Acceleration", "Lock", "Torque_Enable", "Max_Temperature_Limit")
 P_MAX = 64                            # hard cap on any P value written (LeRobot default 16; a byte register, but nothing near 254 is ever tried)
+REST = {"shoulder_pan": 0.0, "shoulder_lift": -100.0, "elbow_flex": 95.0, "wrist_flex": 72.0, "wrist_roll": 0.5}   # same as tools/pick_loop.py REST (this script is shipped alone, so the copy lives here)
 LIMITS = {"min_volts": 9.0, "max_temp_c": 60.0, "max_load": 800, "max_osc_deg": 0.5}
 # why 9.0 V: the 12 V STS3215 is specified for 6-12.6 V (docs/stronger-arm.md, Feetech page); 6 V is where it stops working, a 12 V supply that sags
 # to 9 V under a 4.2 A-class load is already in brown-out trouble for the Waveshare board and the other five servos. Override with --min-volts.
@@ -183,7 +184,7 @@ def run_play(plan, rig, emit, clock_now=time.time, sleep=time.sleep, max_deg_s=M
     """Backlash / compliance sweep, then the optional P test. Returns the exit code (0 done, 2 aborted, 3 P restore unverified). Always restores P."""
     lim = {**LIMITS, **(plan.get("limits") or {})}; joints = plan.get("test_joints") or ["shoulder_lift", "elbow_flex"]; ptest = plan.get("p_test")
     poses = {p["name"]: p for p in plan["poses"]}; reps = int(plan.get("reps", 3)); settle = float(plan.get("settle_s", 1.0)); t0 = clock_now()
-    p_joint = ptest["joint"] if ptest else None; p_orig = None; p_now = None; code = 0
+    p_joint = ptest["joint"] if ptest else None; p_orig = None; p_now = None; code = 0; normal = False
     cur = rig.pos(); cmd = {j: cur[j] for j in J}
     try:
         emit({"event": "start", "t": 0.0, "pos": {j: round(v, 2) for j, v in cur.items()}, "limits": lim, "max_deg_s": min(max_deg_s, MAX_DEG_S)})
@@ -204,7 +205,7 @@ def run_play(plan, rig, emit, clock_now=time.time, sleep=time.sleep, max_deg_s=M
         if ptest:
             cmd = p_test(rig, ptest, poses, cmd, lim, emit, sleep, clock_now, t0, max_deg_s, settle, p_orig)
             p_now = rig.reg("P_Coefficient", p_joint)
-        emit({"event": "done", "t": round(clock_now() - t0, 1)})
+        emit({"event": "done", "t": round(clock_now() - t0, 1)}); normal = True
     except Abort as a:
         emit({"event": "abort", "reason": a.reason, "detail": a.detail}); code = 2
     except KeyboardInterrupt:
@@ -215,7 +216,16 @@ def run_play(plan, rig, emit, clock_now=time.time, sleep=time.sleep, max_deg_s=M
             except Exception: p_now = None
             if p_now != p_orig: code = restore_p(rig, p_joint, p_orig, emit) or code
             else: emit({"event": "restore", "joint": p_joint, "original": p_orig, "readback": p_now, "ok": True, "wrote": False})
+        if normal: go_rest(rig, cmd, emit, sleep, max_deg_s)   # why: 11 Nov 2026 the arm held the far pose over the mat for ~2 h after a normal end and the next camera nut search took the gripper for the nut. Only after done, and after P is back (so it moves at the default gain); an abort never starts new motion
     return code
+
+
+def go_rest(rig, cmd, emit, sleep, max_deg_s):
+    """Move the arm to REST with the same capped half-cosine as every other move here (the gripper stays as it is). Never raises: a failure is an event, the arm just holds."""
+    try:
+        tgt = {**{j: float(REST[j]) for j in ARM}, "gripper": cmd["gripper"]}; emit({"event": "rest", "from": {j: round(cmd[j], 2) for j in ARM}, "to": REST})
+        ease_move(rig, cmd, tgt, max_deg_s, sleep, min_s=1.5)
+    except Exception as e: emit({"event": "rest_failed", "why": f"{type(e).__name__}: {e}"[:160]})
 
 
 def restore_p(rig, joint, orig, emit, tries=3):

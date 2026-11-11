@@ -16,6 +16,7 @@ this test; play inside the control loop shows up as the above/below difference a
 --p-test (shoulder lift only): P_Coefficient default, x1.5, x2 written with Lock=1 (never unlocked, never EEPROM-path), sag / oscillation / current / voltage dip measured,
 original restored in a finally block and read back; aborts below --min-volts or above --max-temp. Output: JSON lines on stdout, one MLflow run in `so101-servo-play`
 (`so101-servo-play-dry` for --dry-run), summary in outputs/run/servo_play_<session>.json.
+After a NORMAL end (event done; P restored first) the probe moves the arm back to the REST pose (event rest, same <= 50 deg/s cap) so it does not sit over the mat; after an abort it does not move, the arm holds where it is.
 """
 import argparse, importlib.util, json, os, subprocess, sys, time
 import numpy as np
