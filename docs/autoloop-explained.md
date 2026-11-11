@@ -89,12 +89,11 @@ Every pick logs its stages to MLflow. Reading them after the session changed wha
 - **The fixed jaw came down on the nut.** The SO-101 has one moving jaw and one fixed jaw, the thumb. The point I aimed was the fixed jaw's tip, where the jaws meet when they are closed, so the thumb landed on the nut. In some cycles it pushed the nut forward; in others it came down on top of it. Fixed after the session: the pick now aims the fixed jaw 10 mm behind the nut, along the direction the jaws open, so the nut sits inside the open gap ([`pick-loop.md`](pick-loop.md), "The grasp aim").
 - **Cycle 4's reset failed and nothing noticed.** The wrist camera found no nut between the jaws on both tries, so the reset put nothing down and the nut stayed on the target. The runner does not check a reset, so it assumed the nut was at the reset spot.
 - **Cycles 5 and 6 picked the nut but scored as misses.** The jaw check saw the nut held after every grasp. The nut started on or next to the target, so carrying it back moved it less than 20 mm, and the judge's rule that a picked nut moves more than 20 mm called that a miss.
-- **In cycles 8 to 10 the map lost the nut.** After cycle 8's place the overhead map reported no objects at all, although the jaw check had seen the nut held. In cycle 9 the map sent the arm to two spots where the wrist camera found nothing between the jaws. The nut had sat on the target through cycles 4 to 6, and the map's background absorbs anything that stays still for about 8 minutes, so the likely cause is the nut being learned into the background there. I have not confirmed that.
+- **In cycles 8 to 10 the map lost the nut.** After cycle 8's place the overhead map reported no objects at all, although the jaw check had seen the nut held. In cycle 9 the map sent the arm to two spots where the wrist camera found nothing between the jaws. I do not know why yet. The map only shows an object after 3 detections in a row, about 1.5 s, and the judge looks 1 s after the arm's last move; the map also hides anything under or touching the arm; and the nut may have dropped where the map cannot see it. The next session saves the overhead frame at every judgement so the cause is visible.
 
 ## About the video
 
-I started the recording partway into the session. The dashboard dropped the wrist stream after 35 s and the overhead stream after
-95 s; the front stream ran on. The clip is the first 95 s of the three recordings at 3x. The wrist camera shows the end of
+I started the recording partway into the session. My recording of the wrist stream stopped after 35 s and of the overhead stream after 95 s, while the front stream ran on. The dashboard's own camera feeds stayed live the whole session, so the recorder was the problem. The clip is the first 95 s of the three recordings at 3x. The wrist camera shows the end of
 cycle 6; the overhead and front cameras then cover most of cycle 7, a landed cycle. I estimated the cycle boundaries from the
 cycle durations in the log, so they can be a few seconds off. The nut is a small dot in the overhead view. The wrist loop
 ([MP4](../site/public/video/autoloop-wrist-loop.mp4)) is 5 s of the wrist recording at 3x.
@@ -107,7 +106,7 @@ cycle durations in the log, so they can be a few seconds off. The nut is a small
 
 ## What is next
 
-- Judge every reset with the overhead map, and start the next cycle from where the nut really is.
-- When the nut already sits on the target at the start of a cycle, reset it first instead of scoring a pick that cannot move it.
-- Keep the map from learning a still nut into the background during a session, and test a learned object detector on the same camera frames.
+Built since the session and covered by tests, not yet run on the arm: the new grasp aim; every reset judged with the overhead map, with the next cycle starting from where the nut really is; a nut already on the target reset away before the try; the judge waiting for the map to confirm what it sees; the overhead frame saved at every judgement; and every nut candidate the finder considered logged.
+
 - Run the ten cycles again with me at the STOP.
+- Collect overhead frames from those runs, label the nut, and test a small learned object detector beside the map as a second opinion on which object is the nut.
