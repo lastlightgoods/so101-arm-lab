@@ -55,6 +55,14 @@ def nearest_object(objs, near_in):
 
 
 # ---------------------------------------------------------------- the runner
+def load_biases(path):
+    """The pick loop's learned per-waypoint biases from its state file, or {} (missing or unreadable). Read only."""
+    try:
+        with open(path) as f: b = json.load(f).get("biases") or {}
+        return b if isinstance(b, dict) else {}
+    except (OSError, ValueError): return {}
+
+
 class Runner:
     """One session. `pl` is the pick_loop module, `guard` a Guard, `ctx` its Ctx (fetch_state / fetch_scene / now / sleep), `track` a LabTrack,
     `rng` a random.Random. Everything that moves the arm goes through pl.run_plan, wrapped so the guard sees every plan and every row."""
@@ -63,6 +71,7 @@ class Runner:
         self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None
         self.markers_mm = list((table.get("layout_markers") or {}).values())
         self.pick_args = argparse.Namespace(jaw_open=pl.JAW_OPEN, max_deg_s=pl.SPEED["closed"], wrist_check=False)
+        self.biases = load_biases(os.path.join(getattr(pl, "ROOT", "."), "jetson", "calib", "pick_state.json"))   # read only: the pick loop's learned sag biases; the runner never writes that file
 
     def say(self, d): self.out(json.dumps(d))
 
@@ -78,7 +87,9 @@ class Runner:
         pl, cc, tab = self.pl, self.cc, self.table; sc = self.scene(); objs = (sc or {}).get("objects") or []
         try:
             fn = getattr(pl, "find_nut_anywhere", None)
-            if fn: return fn(cc, tab, scene_objects=objs, last=last_in)
+            if fn:   # why: pick_loop's finder takes near_in and returns (xy_in, source); the runner works in find_nut's (xy_in, px, area)
+                got = fn(cc, tab, scene_objects=objs, near_in=last_in)
+                return (list(got[0]), None, None) if got else None
             near = last_in or list(self.cfg.target)
             return pl.find_nut(cc, tab, near) or pl.find_nut(cc, tab, list(self.cfg.target), radius_px=140) or self.from_scene(objs, near)
         except (Exception, SystemExit): return None
@@ -105,7 +116,7 @@ class Runner:
         finally: pl.run_plan = orig
 
     def pick(self, nut_in, place_in, n):
-        _, rows, info = self.pl.closed_loop_pick(self.cc, self.table, list(nut_in), list(place_in), {}, self.pick_args, n, self.stages.append)
+        _, rows, info = self.pl.closed_loop_pick(self.cc, self.table, list(nut_in), list(place_in), self.biases, self.pick_args, n, self.stages.append)
         self.in_motion = False; return rows, info
 
     def judge(self, nut_before_in, target_in, info):
@@ -120,16 +131,13 @@ class Runner:
 
     def reset(self, after_in, objs, nut_obj):
         """Put the nut on a new spot; returns {"spot_in", "error"}."""
-        pl = self.pl; others = [[o["x_in"], o["y_in"]] for o in objs if o is not nut_obj]
+        others = [[o["x_in"], o["y_in"]] for o in objs if o is not nut_obj]
         spot = sample_spot(self.rng, self.cfg.safe_box, others, self.markers_mm, after_in, *self.cfg.spot_mm)
         if spot is None: return {"spot_in": None, "error": "no free spot in the safe box"}
-        try:
-            fn = getattr(pl, "reset_nut", None)
-            if fn: fn({"biases": {}, "place_offsets_in": {}, "history": []}, self.cc, self.table, list(self.cfg.safe_box), others + [[m[0] / IN, m[1] / IN] for m in self.markers_mm], self.rng)
-            else:
-                nut = self.locate(after_in)
-                if not nut: return {"spot_in": spot, "error": "nut not found for the reset"}
-                self.pick(nut[0], spot, 0)
+        try:   # why: never pl.reset_nut here: it saves its history over the pick loop's own state file and samples its own spot, so spot_in would lie
+            nut = self.locate(after_in)
+            if not nut: return {"spot_in": spot, "error": "nut not found for the reset"}
+            self.pick(nut[0], spot, 0)
         except (Exception, SystemExit) as e: return {"spot_in": spot, "error": f"{type(e).__name__}: {e}"[:200]}
         return {"spot_in": spot, "error": None}
 
@@ -234,8 +242,12 @@ class FakeWorld:
     def on_plan(self, plan):
         """A plan with `place` is a pick: the nut moves to the FK of the place waypoint when the grasp was within 15 mm of it."""
         names = {w["name"]: w for w in plan["waypoints"]}
+        if "grasp" in names and {"close", "close1", "close2"} & names.keys():   # why: with the jaw check the pick is two plans (grasp..lift, then carry..rest)
+            self.grasp_at = self.fk(self.cc, self.table, names["grasp"]["desired"])[:2]
         if "place" not in names: return
-        gx, gy, _ = self.fk(self.cc, self.table, names["grasp"]["desired"]); px, py, _ = self.fk(self.cc, self.table, names["place"]["desired"])
+        g = getattr(self, "grasp_at", None); self.grasp_at = None
+        if g is None: return
+        gx, gy = g; px, py, _ = self.fk(self.cc, self.table, names["place"]["desired"])
         want = self.script[self.picks] if self.picks < len(self.script) else ("miss" if self.rng.random() < self.miss_p else "ok"); self.picks += 1
         if math.hypot(gx - self.nut[0], gy - self.nut[1]) > 15.0: want = "miss"
         if want == "ok": self.nut = [px + self.rng.gauss(0, self.noise / 2), py + self.rng.gauss(0, self.noise / 2)]

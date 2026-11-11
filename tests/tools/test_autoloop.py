@@ -52,7 +52,7 @@ def test_mlflow_gets_one_run_per_cycle_and_a_parent_with_the_summary(autorig, ca
 # ---------------------------------------------------------------- retries, failures, caps
 def test_a_missed_pick_is_retried_once_and_never_twice(autorig, capsys):
     r = autorig(script=["miss", "miss", "ok"]); s, out = r.run(capsys, cycles=1)   # try misses, the retry misses, the reset (3rd pick) goes
-    c, = events(out, "cycle"); assert c["retries"] == 1 and not c["picked"] and not c["ok"] and r.world.picks == 3 and len(r.arm.calls) == 9
+    c, = events(out, "cycle"); assert c["retries"] == 1 and not c["picked"] and not c["ok"] and r.world.picks == 3 and len(r.arm.calls) == 12   # 4 run_plans per pick: hover, grasp pose, grasp..lift (jaw check), carry..rest
     r0 = autorig(script=["miss", "ok"]); s0, o0 = r0.run(capsys, cycles=1, max_retries=0); c0, = events(o0, "cycle")
     assert c0["retries"] == 0 and r0.world.picks == 2, "--max-retries 0 turns the retry off"
     r2 = autorig(script=["miss", "ok", "ok"]); s2, o2 = r2.run(capsys, cycles=1); c2, = events(o2, "cycle")
@@ -178,20 +178,28 @@ def test_other_objects_are_avoided_by_the_reset(autorig, capsys):
     for c in events(out, "cycle"): assert all(math.hypot(c["reset_to_in"][0] * IN - e[0], c["reset_to_in"][1] * IN - e[1]) >= 40 for e in r.world.extra)
 
 
-def test_pick_loop_reset_nut_is_used_when_the_other_branch_has_it(autorig, capsys):
-    r = autorig(); got = []
-    r.pl.reset_nut = lambda state, cc, table, safe_box, avoid, rng: got.append((sorted(state), list(safe_box), len(avoid)))
-    s, out = r.run(capsys, cycles=2, max_retries=0); assert len(got) == 2 and got[0][1] == list(SAFE) and got[0][2] >= 4, "the markers are in `avoid`"
-    assert r.world.picks == 2, "only the tries picked; the reset went through pl.reset_nut"
-    r2 = autorig(); r2.pl.reset_nut = lambda *a: (_ for _ in ()).throw(RuntimeError("no spot")); s2, o2 = r2.run(capsys, cycles=1)
-    assert events(o2, "cycle")[0]["reset_error"].startswith("RuntimeError") and not events(o2, "trip")
+def test_the_reset_never_calls_pl_reset_nut_and_never_writes_the_pick_state(autorig, capsys, tmp_path):
+    """pick_loop.reset_nut saves its history over the pick loop's state file and samples its own spot: the runner must not use it."""
+    r = autorig(); called = []; r.pl.reset_nut = lambda *a, **k: called.append(a)
+    state = os.path.join(r.pl.ROOT, "jetson", "calib", "pick_state.json"); before = open(state).read() if os.path.exists(state) else None
+    s, out = r.run(capsys, cycles=2, max_retries=0)
+    assert not called and r.world.picks == 4, "two tries and two resets, all through closed_loop_pick"
+    assert (open(state).read() if os.path.exists(state) else None) == before, "the pick state file is untouched"
 
 
-def test_pick_loop_find_nut_anywhere_is_used_when_present_and_the_scene_is_the_fallback(autorig, capsys):
-    r = autorig(); seen = []; r.pl.find_nut_anywhere = lambda cc, table, scene_objects=None, last=None: seen.append((len(scene_objects), last)) or ([6.0, 8.0], None, None)
+def test_learned_biases_are_read_from_the_pick_state_and_passed_to_every_pick(autorig, capsys):
+    r = autorig(); seen = []; orig = r.pl.closed_loop_pick
+    r.pl.closed_loop_pick = lambda cc, table, nut, place, biases, *a, **k: seen.append(biases) or orig(cc, table, nut, place, biases, *a, **k)
+    s, out = r.run(capsys, cycles=1, max_retries=0)
+    assert seen and all(b == seen[0] for b in seen)
+
+
+def test_pick_loop_find_nut_anywhere_is_called_with_near_in_and_its_xy_source_pair_is_used(autorig, capsys):
+    r = autorig(); seen = []; r.pl.find_nut_anywhere = lambda cc, table, scene_objects=None, near_in=None, jpeg=None, markers_in=None: seen.append((len(scene_objects), near_in)) or ([6.0, 8.0], "scene")
     s, out = r.run(capsys, cycles=1, max_retries=0); assert seen and seen[0] == (1, None) and events(out, "cycle")[0]["nut_in"] == [6.0, 8.0]
-    r2 = autorig(); r2.pl.find_nut = lambda *a, **k: None   # the overhead search sees nothing; the dashboard's scene still has the nut
-    s2, o2 = r2.run(capsys, cycles=1, max_retries=0); assert events(o2, "cycle")[0]["found"] and events(o2, "cycle")[0]["ok"]
+    r2 = autorig(); r2.pl.find_nut = lambda *a, **k: None   # without find_nut_anywhere: the overhead search sees nothing; the dashboard's scene still has the nut
+    if hasattr(r2.pl, "find_nut_anywhere"): delattr(r2.pl, "find_nut_anywhere") if "find_nut_anywhere" in vars(r2.pl) else None
+    s2, o2 = r2.run(capsys, cycles=1, max_retries=0); assert events(o2, "cycle")[0]["found"]
 
 
 def test_a_failed_ik_is_a_failed_try_not_a_dead_runner(autorig, capsys):

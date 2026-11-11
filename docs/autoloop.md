@@ -20,10 +20,7 @@ One cycle, repeated until a cap or a trip ends the session:
    `picked` = it moved more than 20 mm from where the TRY found it, and, if the pick record or the scene object has `in_jaws`, that is true.
    `landed_err_mm` = its distance to the target; `landed` = picked and err <= `--radius-mm` (15). A cycle is a **success** when landed.
    A nut that was picked but dropped elsewhere is a failure and is not retried (it is no longer where the retry would look).
-4. **RESET**: `pick_loop.reset_nut(state, cc, table, safe_box, avoid, rng)` when pick_loop has it (`avoid` = other objects and the marker
-   centres, in mat inches), else a closed-loop pick of the nut to a spot sampled with the box rules: inside the safe box, >= 40 mm from
-   every other object, >= 50 mm from every marker centre, >= 60 mm from where the nut is now. A failed reset is recorded
-   (`reset_error`); the next cycle finds out through the nut-lost counter.
+4. **RESET**: find the nut (`pick_loop.find_nut_anywhere`: the scene map first, then the whole-mat image search) and run the same closed-loop pick to a spot sampled inside the safe box: at least 40 mm from other objects, 50 mm from marker centres and 60 mm from where the nut was. The runner deliberately does not call `pick_loop.reset_nut`: that function saves its history over the pick loop's own state file and samples its own spot. The pick loop's learned sag biases are read (never written) from `jetson/calib/pick_state.json`.
 5. **guard.after**: the consecutive counters (below).
 
 `--random-target` samples the target each cycle with the same rules instead of using `--target` (default 9 6). The safe box defaults to
