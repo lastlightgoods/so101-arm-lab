@@ -13,7 +13,7 @@ import argparse, contextlib, importlib.util, json, math, os, random, statistics,
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXPERIMENT = "so101-autoloop"
-SAFE_BOX_IN = (5.0, 3.0, 13.0, 9.0)   # default safe box in mat inches: where resets may put the nut (well inside the reach and the mat)
+SAFE_BOX_IN = (6.0, 4.0, 13.0, 8.0)   # default safe box in mat inches, the box the owner approved (plan doc 42, prep doc 44); same as pick_loop.SAFE_BOX
 IN = 25.4
 
 

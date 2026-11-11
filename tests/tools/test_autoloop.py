@@ -222,3 +222,11 @@ def test_main_dry_run_end_to_end(al, tmp_path, capsys, monkeypatch):
 def test_flags_target_and_random_target_exclude_each_other(al):
     with pytest.raises(SystemExit): al.build_parser().parse_args(["--target", "9", "6", "--random-target"])
     a = al.build_parser().parse_args([]); assert a.cycles == 10 and a.radius_mm == 15.0 and a.max_retries == 1 and a.max_consecutive_failures == 3 and a.target == [9.0, 6.0]
+
+
+def test_the_default_safe_box_is_the_approved_one_and_every_reset_stays_inside_it(al, pl, autorig, capsys):
+    """The owner approved x 6..13, y 4..8 in (handoff docs 42/44); the runner and the pick loop must agree on it."""
+    assert tuple(al.SAFE_BOX_IN) == (6.0, 4.0, 13.0, 8.0) == tuple(pl.SAFE_BOX)
+    r = autorig(); s, out = r.run(capsys, cycles=10, max_retries=0)
+    for c in events(out, "cycle"):
+        if c.get("reset_to_in"): x, y = c["reset_to_in"]; assert 6.0 <= x <= 13.0 and 4.0 <= y <= 8.0, c["reset_to_in"]

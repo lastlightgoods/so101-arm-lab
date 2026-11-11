@@ -24,7 +24,7 @@ One cycle, repeated until a cap or a trip ends the session:
 5. **guard.after**: the consecutive counters (below).
 
 `--random-target` samples the target each cycle with the same rules instead of using `--target` (default 9 6). The safe box defaults to
-`5 3 13 9` (mat inches). Both the target and the reset go through the workspace box guard as well.
+`6 4 13 8` (mat inches, the approved box). Both the target and the reset go through the workspace box guard as well.
 
 Each cycle prints one JSON line (`event: cycle`; `cycle, found, picked, landed, ok, landed_err_mm, moved_mm, retries, target_in, nut_in,
 reset_to_in, cycle_s, trip`). The stage detail of each pick (corrections, residuals, sag) goes to MLflow, not the console.
@@ -101,9 +101,9 @@ and nothing is contacted. `tests/tools/test_autoloop.py` and `test_guardrails.py
 1. The mat is empty except the nut. Arm parked at rest. Lights as for calibration; `so101-cams-check` passes.
 2. Take the nut off, press **SET BACKGROUND** on the dashboard with the mat empty, put the nut back at a spot inside the safe box. Check
    `/api/scene`: `calib_ok: true`, `n_markers_seen: 4`, exactly one object (the nut).
-3. Choose the safe box (mat inches) where you are happy for the nut to land and be picked from, e.g. `--safe-box 5 3 13 9`.
+3. Choose the safe box (mat inches) where you are happy for the nut to land and be picked from, e.g. `--safe-box 6 4 13 8` (the default).
 4. `so101-autoloop --dry-run --cycles 10` first: it must finish with `end: cycles`.
 5. The owner stands at the wall STOP, with the stop file command ready. Run
-   `so101-autoloop --cycles 10 --target 9 6 --safe-box 5 3 13 9 --session first10`.
+   `so101-autoloop --cycles 10 --target 9 6 --session first10`.
 6. **Pass** = at least 9 of the 10 cycles `landed` with `landed_err_mm` <= 15, **and zero trips** (`stops: []`, `end: cycles`). Anything
    else: read the cycle lines and the MLflow runs, fix, and start a new 10.

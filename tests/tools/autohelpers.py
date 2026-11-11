@@ -8,7 +8,7 @@ import json, os, random, sys
 import pytest
 from pickhelpers import Recorder, ShortArm, load, FIXTURE_TABLE, TOOLS  # noqa: F401
 
-SAFE = (5.0, 3.0, 13.0, 9.0)
+SAFE = (6.0, 4.0, 13.0, 8.0)   # the approved safe box (pick_loop.SAFE_BOX)
 
 
 @pytest.fixture(scope="session")
