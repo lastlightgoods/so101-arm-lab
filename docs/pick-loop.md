@@ -6,14 +6,16 @@ jaws close. This page is the rule, the numbers behind it, and what gets logged.
 
 ## The rule
 
-**Command, read back, correct twice, jaws at 35.**
+**Command, read back, correct twice, jaws at 35, fixed jaw beside the nut.**
 
 1. Hover over the commanded nut point. Read the reached joints back from `pick_seq.py`'s rows, run them through forward kinematics
    with the arm fit's joint offsets (`top_table.json: arm_fit.joint_offsets_deg`, `tip_offset_mm` when present) into mat inches.
-   Correction c1 = commanded - reached.
+   Correction c1 = aim point - reached. The aim point is the nut moved 10 mm back along the jaw-opening direction, so the fixed jaw
+   lands beside the nut and the nut sits inside the open gap (see "The grasp aim" below).
 2. Hover at the corrected point, descend to grasp height with the jaws open, read back again: correction c2 (the residual), and the
    tip height h above the mat. If h > 6 mm the grasp target is lowered by min(h - 3, 6) mm through `/api/ik`.
-3. Grasp at the twice-corrected point, close, lift, carry, place, open, lift, rest.
+3. Grasp at the twice-corrected point, close, lift, carry, place, open, lift, rest. The carry and place are unchanged: the moving jaw
+   pushes the nut back against the fixed jaw, where it was held before.
 
 Each stage is one `pick_seq.py` bus session over ssh, at 50 deg/s. The wrist camera is not in the loop: the readback is the sensor.
 
@@ -32,6 +34,25 @@ The first correction is the whole shortfall (7 mm or so); the second trims what 
 in `tests/tools/test_pick_closed_loop.py`, 0.1 mm on the real one). The shortfall is systematic enough that one correction would
 nearly do, but the second pass is also where h is measured at grasp height, which the hover cannot tell you.
 
+## The grasp aim (10 Nov 2026)
+
+The arm fit's tip is the point where the closed jaws meet, which is the fixed jaw's inner face. The moving jaw swings away from it
+when the jaws open. Aiming that tip at the nut's centre put the fixed jaw ("thumb") on the nut. TC watched it push the nut forward
+and, on a later cycle, land on top of it. In the first10b session every pick from the target spot failed, and that is where the jaws
+open straight forward.
+
+| what | measured |
+|---|---|
+| wrist frame at the grasp, jaws at 35, old aim | the nut's centre 23 px past the fixed jaw's tip, overlapping its edge |
+| jaw-opening direction on the mat | gripper_link's +x axis; within 2 deg of the URDF moving-jaw joint rotated to 35 (`tests/tools/test_pick_aim.py`) |
+| URDF moving-jaw tip at jaws 35, from the fixed tip | 58-61 mm on the mat |
+| hand-eye projection, probe pose | fixed tip at pixel (317, 317), moving tip at (587, 346); the real frame shows the jaws there |
+| scale at the grasp depth | 10 mm along the jaw direction = 48 px; the nut's ring is about 20 px (4 mm) in radius |
+
+`GRASP_AIM_MM = 10`: about half the nut plus 6 mm of clearance, more than first10b's 5.1 mm median landing error. The direction is
+computed from the hover readback each pick (`jaw_dir_mat`). `--grasp-aim-mm 0` restores the old aim. Every record and MLflow run
+carries `aim_mm`, `jaw_dir` and `aim_in`; the corrections and the final residual are measured against the aim point.
+
 ## Running it
 
 ```
@@ -43,6 +64,7 @@ nearly do, but the second pass is also where h is measured at grasp height, whic
 | flag | default | meaning |
 |---|---|---|
 | `--closed-loop` / `--open-loop` | closed | staged runs with readback corrections, or one run of the whole plan |
+| `--grasp-aim-mm MM` | 10 | put the nut this far inside the open gap; 0 aims the fixed jaw's tip at the nut (before 10 Nov) |
 | `--jaw-open N` | 35 | gripper opening at hover / grasp / open / lift2. Keep 35: 45 flicks the nut |
 | `--max-deg-s` | 50 closed, 80 open | `pick_seq.py` speed cap |
 | `--wrist-check` | off | at hover, fetch the wrist frame and report where the camera sees the nut vs the command (a check only) |

@@ -19,7 +19,7 @@ def fk_mat(pl, cc, table, joints): return pl.fk_mat(cc, table, joints)
 # ---------------------------------------------------------------- the staged corrections
 def test_two_readback_corrections_converge_on_an_arm_that_reaches_7mm_short(pl, cc, table, monkeypatch, capsys, tmp_path):
     arm = ShortArm(cc, table, shortfall_mm=7.0); state = tmp_path / "s.json"
-    out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--target", "9", "6", "--state", str(state)])
+    out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--target", "9", "6", "--grasp-aim-mm", "0", "--state", str(state)])   # the corrections alone: the aim is test_pick_aim.py's
     for o in out: print(json.dumps(o))   # the transcript, visible with pytest -s
     st = stages(out); rec, = records(out)
     assert [n for n, _ in arm.calls] == [["hover_nut"], ["hover_nut", "grasp"], LIFT, CARRY], "four staged pick_seq runs: the jaw check (no frame here: unknown, carry) splits the final stage after the lift"

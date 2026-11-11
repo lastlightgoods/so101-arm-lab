@@ -14,7 +14,7 @@ back again, c2, and the tip height h decides whether the grasp target is lowered
 camera looks for the nut between the jaw tips (jaw check); not there -> ONE more corrected grasp (b + c); still not there -> open over
 the spot and rest, `picked=false, reason="not_in_jaws"`; (e) carry, place, open, lift, rest. `--open-loop` is the single-run plan of before.
 
-  tools/pick_loop.py --runs 4 [--target 9 6] [--open-loop] [--jaw-open 35] [--wrist-check] [--no-jaw-check] [--fast-close]
+  tools/pick_loop.py --runs 4 [--target 9 6] [--open-loop] [--jaw-open 35] [--grasp-aim-mm 10] [--wrist-check] [--no-jaw-check] [--fast-close]
                      [--jaw-window 300 300 380 360] [--lost-after 3] [--state jetson/calib/pick_state.json]
   tools/pick_loop.py --reset [--safe-box 6 4 13 8] [--seed N]      # put the nut at a random clear spot inside the safe box
 State (biases, place offset, history) persists in --state so later sessions start where this one ended.
@@ -32,6 +32,12 @@ GRASP_H_IN = 0.12
 JAW_OPEN = 35
 # why: the two-step close parks the moving jaw at 20 (just clear of a 10 mm nut) first, so the final squeeze starts from a standstill next to the nut instead of flicking it (open-loop runs landed 10-40 mm off partly because the nut slid in the single-moving-jaw gripper)
 CLOSE_MID = 20
+# why: the arm fit's tip is where the CLOSED jaws meet (the fixed jaw's inner face), so a grasp aimed at the nut's centre brought the fixed jaw
+# down on the nut's near half and pushed it forward into the gap (10 Nov 2026, seen by TC; the wrist frame at the grasp shows the nut's centre
+# 23 px past the fixed tip). The grasp puts the nut this far into the open gap instead. At the grasp depth 10 mm is 48 px in the wrist frame and
+# the nut's ring is about 20 px (4 mm) in radius, so about 6 mm clears the fixed jaw, more than first10b's 5.1 mm median landing error.
+# The moving jaw then pushes the nut back against the fixed jaw, where it was held before.
+GRASP_AIM_MM = 10.0
 WP = [("hover_nut", "nut", 1.5, JAW_OPEN, 1.6, 0.4), ("grasp", "nut", GRASP_H_IN, JAW_OPEN, 0.9, 0.5),
       ("close1", "nut", GRASP_H_IN, CLOSE_MID, 0.5, 0.4), ("close2", "nut", GRASP_H_IN, 0, 0.6, 0.6),
       ("lift", "nut", 1.5, 0, 0.8, 0.2), ("hover_tgt", "tgt", 1.5, 0, 1.2, 0.3), ("place", "tgt", 0.3, 0, 0.9, 0.5),
@@ -209,6 +215,22 @@ def fk_mat(cc, table, joints):
     x, y = cc.arm_to_table(table, float(tip[0]), float(tip[1])); return x / 25.4, y / 25.4, float(tip[2]) - float(fit.get("table_z_mm", 0.0) or 0.0)
 
 
+def jaw_dir_mat(cc, table, joints):
+    """Unit (mat x, mat y) from the fixed jaw toward the open moving jaw for read-back joints: gripper_link's +x axis on the mat (the URDF
+    moving jaw pivots 28 mm on the +x side of the fixed tip and opens along +x; tests/tools/test_pick_aim.py checks it against the URDF
+    jaw joint and the real wrist frame). None when that axis is near vertical (no direction on the mat)."""
+    fit = table["arm_fit"]; G = cc.fk_frames({k: float(joints[k]) for k in ARM}, fit.get("joint_offsets_deg") or {})["gripper_link"]
+    ax = G[:3, 0]; p0 = np.array(cc.arm_to_table(table, 0.0, 0.0)); p1 = np.array(cc.arm_to_table(table, float(ax[0]) * 1000.0, float(ax[1]) * 1000.0))
+    d = p1 - p0; n = float(np.linalg.norm(d))   # mm of a 1 m axis: its horizontal share
+    return None if n < 300.0 else (float(d[0] / n), float(d[1] / n))
+
+
+def aim_point(nut_in, jaw_dir, aim_mm):
+    """Where the fixed jaw's tip goes so the nut sits `aim_mm` inside the open gap: the nut moved back along the jaw direction (mat inches)."""
+    if not jaw_dir or not aim_mm: return [float(nut_in[0]), float(nut_in[1])]
+    return [nut_in[0] - aim_mm / 25.4 * jaw_dir[0], nut_in[1] - aim_mm / 25.4 * jaw_dir[1]]
+
+
 def reached_joints(rows, name):
     r = [r for r in rows if r["wp"] == name][-1]; return {k: float(r["reached"][k]) for k in ARM}
 
@@ -250,16 +272,19 @@ def closed_loop_pick(cc, table, nut_in, place_in, biases, a, run, say, wpose=Non
         p = build_plan(list(xy), list(place_in), biases, names=names, jaw_open=a.jaw_open, grasp_h_in=grasp_h_in, fast_close=fast); return p, run_plan(p, a.max_deg_s)
     # (a) hover over the commanded point; the readback says where the tip really went
     _, r1 = stage(nut_in, STAGES[0]); j1 = reached_joints(r1, "hover_nut"); x, y, h = fk_mat(cc, table, j1)
-    c1 = (nut_in[0] - x, nut_in[1] - y); info = {"corr1_mm": _mm(c1), "wrist_check": None, "in_jaws": None, "jaw_ring": None, "jaw_retry": False, "jaw_frames": [], "reason": None}
-    say({"run": run, "stage": "hover", "cmd_in": [round(v, 3) for v in nut_in], "reached_in": [round(x, 3), round(y, 3)], "h_mm": round(h, 1), "corr1_mm": info["corr1_mm"]})
+    aim_mm = float(getattr(a, "grasp_aim_mm", GRASP_AIM_MM) or 0.0); u = jaw_dir_mat(cc, table, j1) if aim_mm else None
+    aim = aim_point(nut_in, u, aim_mm)   # the fixed jaw's tip goes here; every correction below steers the readback onto it
+    c1 = (aim[0] - x, aim[1] - y); info = {"corr1_mm": _mm(c1), "wrist_check": None, "in_jaws": None, "jaw_ring": None, "jaw_retry": False, "jaw_frames": [], "reason": None,
+                                          "aim_mm": aim_mm if u else 0.0, "jaw_dir": [round(u[0], 3), round(u[1], 3)] if u else None, "aim_in": [round(v, 3) for v in aim]}
+    say({"run": run, "stage": "hover", "cmd_in": [round(v, 3) for v in nut_in], "reached_in": [round(x, 3), round(y, 3)], "h_mm": round(h, 1), "corr1_mm": info["corr1_mm"], "aim_in": info["aim_in"], "aim_mm": info["aim_mm"], "jaw_dir": info["jaw_dir"]})
     if a.wrist_check:   # a look, not a correction: does the camera see the nut where the command says it is?
         info["wrist_check"] = wrist_mod().wrist_check(cc, table, wpose, nut_in, j1, fetch_wrist() or b"", check_path) if wpose else None
         say({"run": run, "stage": "wrist_check", **(info["wrist_check"] or {"ring": None, "annotated": check_path if wpose else None})})
-    xy1 = [nut_in[0] + c1[0], nut_in[1] + c1[1]]
+    xy1 = [nut_in[0] + c1[0], nut_in[1] + c1[1]]   # the hover was commanded at the nut; c1 moves it onto the aim point
 
     def grasp_pose(attempt):   # (b) corrected hover (jaws open), then down to grasp height; read back again, and measure the tip height
         _, r2 = stage(xy1, STAGES[1]); j2 = reached_joints(r2, "grasp"); x, y, h = fk_mat(cc, table, j2)
-        c2 = (nut_in[0] - x, nut_in[1] - y); xy2 = [xy1[0] + c2[0], xy1[1] + c2[1]]
+        c2 = (aim[0] - x, aim[1] - y); xy2 = [xy1[0] + c2[0], xy1[1] + c2[1]]
         lower = min(h - 3.0, 6.0) if h > 6.0 else 0.0   # why: the jaws must reach the mat to get under the nut; the cap keeps the IK target within 3 mm below the mat plane the readback contradicts
         info.update({"corr2_mm": _mm(c2), "grasp_h_mm": round(h, 1), "grasp_lowered_mm": round(lower, 1)})
         say({"run": run, "stage": "grasp_pose", "attempt": attempt, "cmd_in": [round(v, 3) for v in xy1], "reached_in": [round(x, 3), round(y, 3)], "h_mm": round(h, 1), "corr2_mm": info["corr2_mm"], "lowered_mm": round(lower, 1)})
@@ -267,7 +292,7 @@ def closed_loop_pick(cc, table, nut_in, place_in, biases, a, run, say, wpose=Non
 
     def grasp(xy2, lower, names, attempt):   # (c) the pick at the twice-corrected point
         plan, rows = stage(xy2, names, grasp_h_in=(GRASP_H_IN - lower / 25.4) if lower else None)
-        j3 = reached_joints(rows, "grasp"); x, y, h = fk_mat(cc, table, j3); res = (nut_in[0] - x, nut_in[1] - y)
+        j3 = reached_joints(rows, "grasp"); x, y, h = fk_mat(cc, table, j3); res = (aim[0] - x, aim[1] - y)
         info["final_residual_mm"] = round(math.hypot(*res) * 25.4, 2); info["grasp_cmd_in"] = [round(v, 3) for v in xy2]
         say({"run": run, "stage": "final", "attempt": attempt, "cmd_in": info["grasp_cmd_in"], "reached_in": [round(x, 3), round(y, 3)], "h_mm": round(h, 1), "residual_mm": _mm(res), "sag_deg": {r["wp"]: r["max_err_deg"] for r in rows}})
         return plan, rows
@@ -297,7 +322,8 @@ def pick_once(cc, table, state, a, run, nut_in, tgt, place_in, off, say, session
     with track.run(f"{'reset' if mode == 'reset' else 'pick'}-{session}-r{run}", tags={"host": "mac", "run": run, "nut_in": f"{nut_in[0]:.2f},{nut_in[1]:.2f}", "target_in": key, "session": session, "mode": mode}) as tr:   # why: one MLflow run per pick; a no-op when there is no server
         tr.params({"target_in": f"{a.target[0]:.2f},{a.target[1]:.2f}", "alt_in": f"{a.alt[0]:.2f},{a.alt[1]:.2f}", "place_in": f"{place_in[0]:.3f},{place_in[1]:.3f}", "gain": a.gain, "outcome_gain": a.outcome_gain,
                    "max_deg_s": a.max_deg_s, "runs": a.runs, "state": os.path.relpath(a.state, ROOT) if a.state.startswith(ROOT) else a.state, "dash": DASH, "mode": mode, "jaw_open": a.jaw_open, "wrist_check": int(a.wrist_check),
-                   "jaw_check": int(a.jaw_check), "fast_close": int(a.fast_close), "jaw_window": ",".join(str(int(v)) for v in a.jaw_window)})
+                   "jaw_check": int(a.jaw_check), "fast_close": int(a.fast_close), "jaw_window": ",".join(str(int(v)) for v in a.jaw_window),
+                   "grasp_aim_mm": float(getattr(a, "grasp_aim_mm", GRASP_AIM_MM)) if control == "closed" else None})
         t0 = time.time(); check_path = os.path.join(ROOT, "outputs", "run", f"wrist_check_{session}_r{run}.jpg"); jaw_path = os.path.join(ROOT, "outputs", "run", f"in_jaws_{session}_r{run}.jpg")
         if a.closed_loop: plan, rows, info = closed_loop_pick(cc, table, nut_in, place_in, state["biases"], a, run, say, wpose, check_path, jaw_path); tr.json(plan, "plan.json")
         else: plan = build_plan(nut_in, place_in, state["biases"], jaw_open=a.jaw_open, fast_close=a.fast_close); tr.json(plan, "plan.json"); rows = run_plan(plan, a.max_deg_s); info = {}
@@ -321,13 +347,14 @@ def pick_once(cc, table, state, a, run, nut_in, tgt, place_in, off, say, session
         rec = {"run": run, "target_in": tgt, "nut_in": [round(v, 2) for v in nut_in], "picked": picked, "landed_in": [round(v, 2) for v in landed[0]] if landed else None, "err_mm": round(err_mm, 1) if err_mm is not None else None,
                "seconds": round(dt, 1), "sag_deg": {r["wp"]: r["max_err_deg"] for r in rows}, "place_offset_in": [round(v, 3) for v in off], "mode": mode, "control": control, "jaw_open": a.jaw_open,
                "corr1_mm": info.get("corr1_mm"), "corr2_mm": info.get("corr2_mm"), "grasp_h_mm": info.get("grasp_h_mm"), "grasp_lowered_mm": info.get("grasp_lowered_mm"), "final_residual_mm": info.get("final_residual_mm"),
+               "aim_mm": info.get("aim_mm"), "jaw_dir": info.get("jaw_dir"), "aim_in": info.get("aim_in"),
                "wrist_offset_mm": wc["offset_mm"] if wc else None, "in_jaws": info.get("in_jaws"), "jaw_ring": info.get("jaw_ring"), "jaw_retry": bool(info.get("jaw_retry")), "reason": info.get("reason"),
                "fast_close": bool(a.fast_close), **(extra or {}), "t": time.strftime("%H:%M:%S")}
         state["history"].append(rec); json.dump(state, open(a.state, "w"), indent=1); print(json.dumps(rec), flush=True)
         c1, c2 = info.get("corr1_mm"), info.get("corr2_mm"); ij = info.get("in_jaws")
         tr.metrics({"landing_err_mm": err_mm, "before_mm": before_mm, "seconds": dt, "picked": int(picked), "found_at_landing": int(landed is not None), **{f"sag_{r['wp']}": r["max_err_deg"] for r in rows if "max_err_deg" in r},
                     "corr1_mm": math.hypot(*c1) if c1 else None, "corr1_x_mm": c1[0] if c1 else None, "corr1_y_mm": c1[1] if c1 else None, "corr2_mm": math.hypot(*c2) if c2 else None, "corr2_x_mm": c2[0] if c2 else None, "corr2_y_mm": c2[1] if c2 else None,
-                    "grasp_h_mm": info.get("grasp_h_mm"), "grasp_lowered_mm": info.get("grasp_lowered_mm"), "final_residual_mm": info.get("final_residual_mm"), "wrist_offset_mm": wc["offset_norm_mm"] if wc else None, "jaw_open": a.jaw_open,
+                    "grasp_h_mm": info.get("grasp_h_mm"), "grasp_lowered_mm": info.get("grasp_lowered_mm"), "final_residual_mm": info.get("final_residual_mm"), "wrist_offset_mm": wc["offset_norm_mm"] if wc else None, "jaw_open": a.jaw_open, "aim_mm": info.get("aim_mm"),
                     "in_jaws": None if ij is None else int(ij), "jaw_retry": int(bool(info.get("jaw_retry"))), "not_in_jaws": int(not_in_jaws)})
         tr.file("landing.jpg", landing_jpg, "frames"); tr.json(rows, "waypoints.json"); tr.artifact(a.state, "state")
         if a.wrist_check: tr.artifact(check_path, "frames")
@@ -398,6 +425,7 @@ def parser():
     ap.add_argument("--alt", type=float, nargs=2, default=[6.0, 5.0], help="second target; runs alternate alt, target, alt, target ... so every pick and place is unambiguous; the LAST run always goes to --target")
     ap.add_argument("--closed-loop", dest="closed_loop", action="store_true", default=True, help="hover, read back, correct; grasp pose, read back, correct; pick (default)")
     ap.add_argument("--open-loop", dest="closed_loop", action="store_false", help="one pick_seq run of the whole plan, no readback correction")
+    ap.add_argument("--grasp-aim-mm", type=float, default=GRASP_AIM_MM, help=f"closed loop: put the nut this far inside the open jaw gap, so the fixed jaw lands beside it, not on it (default {GRASP_AIM_MM:g}; 0 aims the fixed jaw's tip at the nut as before 10 Nov 2026)")
     ap.add_argument("--jaw-open", type=int, default=JAW_OPEN, help=f"gripper opening for hover/grasp/open/lift2 (default {JAW_OPEN}; 45 flicks the nut away, see docs/pick-loop.md)")
     ap.add_argument("--wrist-check", action="store_true", help="closed loop: at hover, look for the nut in the wrist frame near its predicted pixel and report the offset (check only; annotated JPEG in outputs/run/)")
     ap.add_argument("--no-jaw-check", dest="jaw_check", action="store_false", default=True, help="skip the wrist-camera nut-in-jaws check after the lift (and its one retry); the final stage runs in one session as before")
