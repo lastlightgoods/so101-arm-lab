@@ -31,7 +31,7 @@ def demo_rig(autorig, dmods, tmp_path):
     dr, lc, ds = dmods; ps = dr.load_pick_seq(); made = []
     def make(script=(), track=None, cams=None, **kw):
         r = autorig(script=script, **kw); r.world.in_jaws = True; buf = dr.TickBuffer()
-        rec = dr.DemoRecorder(str(tmp_path / "data" / "nut"), "lab/nut", cams or dr.FakeCameraSource(SMALL), buf, lc.LabConfig(lighting_tag="lamp-a"), spool_dir=str(tmp_path / "spool"), calib_hashes={"top_table.json": {"sha12": "0123456789ab", "mtime": 1}})
+        rec = dr.DemoRecorder(str(tmp_path / "data" / "nut"), "lab/nut", cams or dr.FakeCameraSource(SMALL), buf, lc.LabConfig(lighting_tag="lamp-a"), spool_dir=str(tmp_path / "spool"), calib_hashes={"top_table.json": {"sha12": "0123456789ab", "mtime": 1}}, vcodec="h264")
         os.makedirs(tmp_path / "spool", exist_ok=True); demo = ds.DemoSession(rec, "t", dr, track=track, radius_mm=15.0, fake=ds.FakeRig(ps, buf, dr.synth_plan_ticks)); made.append(demo); r.buf = buf; return r, demo
     yield make
     for d in made:

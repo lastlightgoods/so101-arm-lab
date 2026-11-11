@@ -206,3 +206,11 @@ def test_lab_config_labels_hashes_and_validation(lc, tmp_path):
     assert pinned.check_hashes({}) == ["top_table.json: pinned " + live["top_table.json"]["sha12"] + ", live None"] and lc.LabConfig().check_hashes({}) == []
     f = tmp_path / "cfg.json"; f.write_text(json.dumps(pinned.to_dict())); assert lc.LabConfig.from_file(str(f)) == pinned, "label round trip"
     assert "pinned_hashes" not in pinned.sidecar_labels(live) and pinned.sidecar_labels(live)["calibration"]["top_table.json"]["sha12"]
+
+
+def test_the_recorder_encodes_with_its_configured_codec_and_defaults_to_svtav1(rig, dr):
+    import inspect, json
+    assert inspect.signature(dr.DemoRecorder).parameters["vcodec"].default == "libsvtav1" == dr.DEFAULT_VCODEC
+    rec, buf, cams = rig(); assert rec.vcodec == "h264" and rec._encoder().vcodec == "h264"   # the rig fixture passes h264 (SVT-AV1 crashes Python at teardown on macOS)
+    record_episode(rec, buf); rec.close(); info = load_back(rec.root).meta.info   # why read back: meta/info.json records the codec the video was really encoded with
+    assert {f["info"]["video.codec"] for f in info.features.values() if f["dtype"] == "video"} == {"h264"}

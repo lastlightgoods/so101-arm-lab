@@ -448,7 +448,7 @@ def make_dry_demo(a, cfg, lt, pl_unused=None):
     if a.lighting_tag: lab.lighting_tag = a.lighting_tag
     root = a.demo_root or os.path.join(cfg.out_dir, "demos", cfg.session); name = a.demo_repo.split("/")[-1]
     buf = dr.TickBuffer(); cams = dr.FakeCameraSource(); ps = dr.load_pick_seq()
-    rec = dr.DemoRecorder(os.path.join(root, name), a.demo_repo, cams, buf, lab, rejects_root=os.path.join(root, name + "-rejects"), rejects_repo=a.demo_repo + "-rejects", calib_hashes=lc.calib_hashes(os.path.join(ROOT, "jetson", "calib")))
+    rec = dr.DemoRecorder(os.path.join(root, name), a.demo_repo, cams, buf, lab, rejects_root=os.path.join(root, name + "-rejects"), rejects_repo=a.demo_repo + "-rejects", calib_hashes=lc.calib_hashes(os.path.join(ROOT, "jetson", "calib")), vcodec=a.demo_vcodec or "h264")   # why: the dry run is fakes on any host and SVT-AV1 aborts at teardown on macOS (2026-11-11); software h264 unless asked
     return ds.DemoSession(rec, cfg.session, dr, track=lt.LabTrack("so101-datasets-dry"), radius_mm=cfg.radius_mm, fake=ds.FakeRig(ps, buf, dr.synth_plan_ticks), repo_root=ROOT)
 
 
@@ -466,6 +466,7 @@ def build_parser():
     ap.add_argument("--start-near", type=float, nargs=2, default=None, metavar=("X", "Y"), help="where the first cycle looks for the nut (mat inches); without it the first search has no hint and the whole-mat fallback can take the parked arm's shadow for the nut")
     ap.add_argument("--judge-wait", type=float, default=4.0, help="after the settle, wait up to this long while the map still has objects pending confirmation"); ap.add_argument("--table", default=None, help="top_table.json (default jetson/calib/top_table.json)")
     ap.add_argument("--record-demos", action="store_true", help="record each TRY as a LeRobot training episode: kept (landed, no trip, jaw held, healthy recording) or rejected into a separate dataset. OFF by default; --dry-run only until the camera tee exists")
+    ap.add_argument("--demo-vcodec", default=None, help="video codec for the demo datasets (dry run default h264; the Jetson recorder defaults to libsvtav1)")
     ap.add_argument("--demo-root", default=None, help="folder for the demo datasets (default <out-dir>/demos/<session>)"); ap.add_argument("--demo-repo", default="lastlight/so101-nut-pick", help="repo id of the kept-episode dataset; the rejects go to <repo>-rejects")
     ap.add_argument("--lab-config", default=None, help="JSON of jetson/lab_config.LabConfig fields (default: the stock-v1 labels)"); ap.add_argument("--lighting-tag", default=None, help="lighting label stored with every episode (vary it between sessions)")
     ap.add_argument("--dry-miss", type=float, default=0.1, help="--dry-run: chance that a pick misses the nut"); ap.add_argument("--out-dir", default=None)

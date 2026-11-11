@@ -86,7 +86,7 @@ def rig(dr, lc, tmp_path):
     made = []
     def make(cams=None, cfg=None, root=None, **kw):
         buf = dr.TickBuffer(); cams = cams or dr.FakeCameraSource(SMALL); cfg = cfg or lc.LabConfig(lighting_tag="test-lamp")
-        rec = dr.DemoRecorder(str(root or tmp_path / "data" / "demo"), "lab/demo", cams, buf, cfg, calib_hashes={"top_table.json": {"sha12": "abc123def456", "mtime": 1}}, spool_dir=str(tmp_path / "spool"), **kw)
+        rec = dr.DemoRecorder(str(root or tmp_path / "data" / "demo"), "lab/demo", cams, buf, cfg, calib_hashes={"top_table.json": {"sha12": "abc123def456", "mtime": 1}}, spool_dir=str(tmp_path / "spool"), **{"vcodec": "h264", **kw})
         os.makedirs(tmp_path / "spool", exist_ok=True); made.append(rec); return rec, buf, cams
     yield make
     for r in made:

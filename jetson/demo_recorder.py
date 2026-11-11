@@ -25,6 +25,7 @@ import bisect, dataclasses, hashlib, importlib.util, json, math, os, shutil, sig
 import numpy as np
 
 FPS = 30
+DEFAULT_VCODEC = "libsvtav1"   # lerobot-record's default; the real recorder on the Jetson (Linux) keeps it
 TASK = "Pick up the nut and place it on the target"   # one fixed string; configuration never goes into the task (plan 4.2)
 ROBOT_TYPE = "so_follower"
 MOTORS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
@@ -195,7 +196,8 @@ class DemoRecorder:
     """Owns a main dataset (kept episodes) and a rejects dataset (everything the keep rule refuses), both LeRobotDataset v3.0, fps 30.
     Lifecycle per try: open(meta, t) -> pump(t) as time passes (30 Hz in the resident process; per tick time in the fakes) -> end(t) -> commit(keep, verdict) or abort(reason)."""
     def __init__(self, root, repo_id, cams, ticks, cfg, rejects_root=None, rejects_repo=None, fps=FPS, max_tick_age_s=MAX_TICK_AGE_S, calib_hashes=None, spool_dir=None,
-                 banding_max=BANDING_MAX):
+                 banding_max=BANDING_MAX, vcodec=DEFAULT_VCODEC):
+        self.vcodec = vcodec   # why: LeRobot's default SVT-AV1 aborts at teardown on macOS (libdispatch semaphore dispose, 2026-11-11); the Jetson keeps it, Mac tests and dry runs pass "h264"
         self.root, self.repo_id, self.cams, self.ticks, self.cfg, self.fps = root, repo_id, cams, ticks, cfg, fps
         self.rejects_root = rejects_root or root.rstrip("/") + "-rejects"; self.rejects_repo = rejects_repo or repo_id + "-rejects"
         self.max_tick_age, self.calib_hashes, self.banding_max = max_tick_age_s, calib_hashes or {}, banding_max
@@ -204,18 +206,22 @@ class DemoRecorder:
         self.reconciled = {}
 
     # -- datasets
+    def _encoder(self):
+        from lerobot.configs.video import RGBEncoderConfig
+        return RGBEncoderConfig(vcodec=self.vcodec)
+
     def dataset(self, kind):
         """The LeRobotDataset for "main" or "rejects" (created on first use, resumed when the folder already holds one)."""
         if kind in self._ds: return self._ds[kind]
         from lerobot.datasets.lerobot_dataset import LeRobotDataset
         root, repo = (self.root, self.repo_id) if kind == "main" else (self.rejects_root, self.rejects_repo)
         if os.path.exists(os.path.join(root, "meta", "info.json")):
-            ds = LeRobotDataset.resume(repo, root=root); user = lambda feats: {k: tuple(v["shape"]) for k, v in feats.items() if k not in ("timestamp", "frame_index", "episode_index", "index", "task_index")}
+            ds = LeRobotDataset.resume(repo, root=root, rgb_encoder=self._encoder()); user = lambda feats: {k: tuple(v["shape"]) for k, v in feats.items() if k not in ("timestamp", "frame_index", "episode_index", "index", "task_index")}
             have, want = user(ds.meta.features), user(self.features)
             if have != want: raise ValueError(f"{root}: existing dataset features {have} differ from this recorder's {want}")
             if ds.fps != self.fps: raise ValueError(f"{root}: existing dataset is {ds.fps} fps, recorder is {self.fps}")
         else:
-            ds = LeRobotDataset.create(repo, self.fps, self.features, root=root, robot_type=ROBOT_TYPE, use_videos=True)
+            ds = LeRobotDataset.create(repo, self.fps, self.features, root=root, robot_type=ROBOT_TYPE, use_videos=True, rgb_encoder=self._encoder())
         self.reconciled[kind] = reconcile_sidecar(root, ds.meta.total_episodes); self._ds[kind] = ds; return ds
 
     def alive(self): return True   # phase 2: the resident process answers on its control socket

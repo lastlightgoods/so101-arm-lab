@@ -13,7 +13,7 @@ source). Nothing here has run on the arm, the Jetson or a real camera, and nothi
 | Labels | `jetson/lab_config.py` | `LabConfig`: config id, gripper type, arm version, robot id, servo set, camera mount, lighting tag, jaw max, optional pinned calibration hashes. `env_vector()` is the `observation.environment_state` feature; `calib_hashes()` hashes the calibration files. |
 | Episode writer | `jetson/demo_recorder.py` | `DemoRecorder`: samples at 30 Hz from a camera source and the tick stream, writes LeRobot v3.0 datasets with LeRobot's own API (`create` / `resume`, `add_frame`, `save_episode`, `finalize`), keeps a main dataset and a separate rejects dataset, writes the sidecar. |
 | Keep rule and glue | `tools/demo_session.py` | `keep_decision()` (pure), `DemoSession` (open / end / commit around each try, MLflow links, dataset-version run), `FakeRig` (the simulated arm and tick sink). |
-| Runner integration | `tools/autoloop.py` | `--record-demos` (OFF by default), `--demo-root`, `--demo-repo`, `--lab-config`, `--lighting-tag`. |
+| Runner integration | `tools/autoloop.py` | `--record-demos` (OFF by default), `--demo-root`, `--demo-repo`, `--demo-vcodec` (dry run default h264, because LeRobot's default SVT-AV1 aborts at teardown on macOS; `DemoRecorder` itself defaults to `libsvtav1`), `--lab-config`, `--lighting-tag`. |
 
 ## The dry run
 
