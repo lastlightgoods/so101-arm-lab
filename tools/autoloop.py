@@ -79,12 +79,18 @@ class Runner:
     `rng` a random.Random. Everything that moves the arm goes through pl.run_plan, wrapped so the guard sees every plan and every row."""
     def __init__(self, pl, cc, table, guard, ctx, cfg, track, rng, out=print):
         self.pl, self.cc, self.table, self.guard, self.ctx, self.cfg, self.track, self.rng, self.out = pl, cc, table, guard, ctx, cfg, track, rng, out
-        self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0
+        self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0; self.tele_rows = []; self.session_tele = []
         self.markers_mm = list((table.get("layout_markers") or {}).values())
         self.pick_args = argparse.Namespace(jaw_open=pl.JAW_OPEN, max_deg_s=pl.SPEED["closed"], wrist_check=False, grasp_aim_mm=pl.GRASP_AIM_MM)
         self.biases = load_biases(os.path.join(getattr(pl, "ROOT", "."), "jetson", "calib", "pick_state.json"))   # read only: the pick loop's learned sag biases; the runner never writes that file
 
     def say(self, d): self.out(json.dumps(d))
+
+    def tele_merge(self, summaries):
+        """One summary from several waypoint/cycle summaries; None when there are none or pick_loop has no servo_tele (a stub in a test)."""
+        f = getattr(self.pl, "servo_tele", None)
+        try: return f().merge(summaries) if f and summaries else None
+        except Exception: return None   # why: health numbers are a bonus; never stop a session over them
 
     def stage(self, d):
         """A pick's stage line: kept for the cycle's MLflow run AND printed to the session log (first10b's log had only the cycle lines, so
@@ -154,6 +160,7 @@ class Runner:
             self.in_motion = True
             try: rows = orig(plan, max_deg_s)
             except (Exception, SystemExit) as e: raise TripError(self.guard.trip("run_plan", {"err": f"{type(e).__name__}: {e}"[:300]})) from e   # why: so101-stop kills pick_seq, so the ssh run returns no rows; that is the owner stopping the arm, not a failed try to repeat
+            self.tele_rows.extend(r["tele"] for r in rows if r.get("tele"))   # servo health per waypoint, for this cycle's MLflow run
             for r in rows:
                 if t := self.guard.check_waypoint(r): raise TripError(t)
             return rows
@@ -268,6 +275,8 @@ class Runner:
         with self.track.run(f"autoloop-{self.cfg.session}-c{rec['cycle']}", tags={"host": "mac", "session": self.cfg.session, "cycle": rec["cycle"], "trip": rec["trip"] or "none", **({"mlflow.parentRunId": parent_id} if parent_id else {})}) as tr:
             tr.params({"session": self.cfg.session, "cycle": rec["cycle"], "target": f"{tgt[0]:.2f},{tgt[1]:.2f}" if tgt else None, "mode": "random" if self.cfg.random_target else "fixed", "radius_mm": self.cfg.radius_mm, "dry_run": int(self.cfg.dry_run)})
             ro = rec.get("reset_ok")
+            tele = self.tele_merge(self.tele_rows); self.session_tele.extend(self.tele_rows); self.tele_rows = []   # servo heat / load / current / sag / voltage for this cycle (docs/telemetry.md)
+            if tele: tr.metrics(self.pl.servo_tele().metrics(tele)); tr.json(tele, "servo_telemetry.json")
             tr.metrics({"landed_err_mm": rec["landed_err_mm"], "picked": int(rec["picked"]), "landed": int(rec["landed"]), "cycle_s": rec["cycle_s"], "retries": rec["retries"], "trip": int(trip is not None),
                         "reset_err_mm": rec.get("reset_err_mm"), "reset_ok": None if ro is None else int(ro), "judge_wait_s": rec.get("judge_wait_s"), "pre_reset": int("pre_reset" in rec)})
             tr.json({"cycle": rec, "stages": self.stages}, "cycle.json"); self.stages.clear()
@@ -308,6 +317,8 @@ class Runner:
             except KeyboardInterrupt: end = "interrupted"; self.say({"event": "interrupted"})
             s = self.summary(end, t0); out = os.path.join(cfg.out_dir, f"autoloop_{cfg.session}.json"); os.makedirs(cfg.out_dir, exist_ok=True)
             with open(out, "w") as f: json.dump(s, f, indent=1)
+            st_all = self.tele_merge(self.session_tele)
+            if st_all: parent.metrics(self.pl.servo_tele().metrics(st_all))
             parent.metrics({"cycles": s["cycles"], "success_rate": s["success_rate"], "mean_err_mm": s["mean_err_mm"], "median_err_mm": s["median_err_mm"], "duration_s": s["duration_s"], "trips": sum(1 for x in self.stops if not x["clean"])})
             parent.json(s, "summary.json")
         self.say({"event": "summary", **s}); return s
@@ -359,6 +370,13 @@ class DryArm:
         self.cc, self.table, self.world, self.short = cc, table, world, shortfall_mm
         self.ARM = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"); self.seed = {"shoulder_pan": 15.0, "shoulder_lift": 17.0, "elbow_flex": 2.0, "wrist_flex": 80.0, "wrist_roll": 0.46}
 
+    def fake_tele(self, goal, seconds):
+        """What pick_seq would attach to a waypoint row: the pretend servo bus (tools/fake_servo_bus.py) driven to `goal`, summarised. None if it cannot load."""
+        try:
+            if getattr(self, "_servo", None) is None: self._servo = load(os.path.join(ROOT, "tools", "fake_servo_bus.py"), "fake_servo_bus_for_autoloop"); self._bus = self._servo.FakeServoBus(seed=1); self._bus.script = False
+            return self._servo.waypoint_tele(self._bus, goal, seconds)
+        except Exception: return None
+
     def tip(self, q):
         fit = self.table["arm_fit"]; off = fit.get("joint_offsets_deg") or {}
         return self.cc.fk_tip({k: float(q[k]) + float(off.get(k, 0.0)) for k in self.ARM}, tip_offset_mm=fit.get("tip_offset_mm"))[0]
@@ -389,7 +407,8 @@ class DryArm:
             if w["gripper_only"] or w["name"] == "rest": got = j
             else:
                 t = self.tip(j); d = t[:2] - np.array([38.8353, 0.0]); d = d / np.linalg.norm(d); want = t.copy(); want[:2] -= self.short * d; got = self.solve(j, want)
-            rows.append({"wp": w["name"], "seconds": 1.0, "t": i, "target": {**j, "gripper": w["gripper"]}, "reached": {**{k: round(v, 3) for k, v in got.items()}, "gripper": w["gripper"]}, "max_err_deg": round(max(abs(j[k] - got[k]) for k in self.ARM), 2)})
+            rows.append({"wp": w["name"], "seconds": 1.0, "t": i, "target": {**j, "gripper": w["gripper"]}, "reached": {**{k: round(v, 3) for k, v in got.items()}, "gripper": w["gripper"]}, "max_err_deg": round(max(abs(j[k] - got[k]) for k in self.ARM), 2),
+                         **({"tele": t} if (t := self.fake_tele({**j, "gripper": w["gripper"]}, 1.0)) else {})})
         self.world.on_plan(plan); return rows
 
 

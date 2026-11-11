@@ -45,6 +45,8 @@ Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend,
   and a udev rule keep the lock; recording refuses to start unless the cameras are locked.
 - [`docs/camera-health.md`](docs/camera-health.md): frame-rate, duplicate-frame and drift checks for
   the three cameras, usable in a pre-recording checklist.
+- [`docs/telemetry.md`](docs/telemetry.md): servo health (temperature, load, current, voltage, error bits, commanded vs actual) from the
+  STS3215/STS3250 registers: the live panel, the per-pick MLflow numbers, polling cost and bus sharing, and the read-only hardware check.
 - [`docs/mat-scene.md`](docs/mat-scene.md): the live map of the mat. Background model, kinematic arm
   mask from the follower's joints, marker-based drift refit, persistence filter, and the APIs the
   dashboard draws from.

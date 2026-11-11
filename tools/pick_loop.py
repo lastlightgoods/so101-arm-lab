@@ -77,6 +77,19 @@ def wrist_mod(): return _load("wrist_check")
 def labtrack(): return _load("labtrack").LabTrack("so101-picks")
 
 
+_SERVO = []
+def servo_tele():
+    """jetson/servo_telemetry.py (the decoder and the Summary the Jetson side fills); loaded once."""
+    if not _SERVO: _SERVO.append(_load("servo_telemetry"))
+    return _SERVO[0]
+
+
+def tele_of(rows):
+    """One summary of the servo telemetry pick_seq attached to these waypoint rows (None when the Jetson sent none): peak temperature, load, current, sag, lowest voltage."""
+    try: return servo_tele().merge([r.get("tele") for r in rows]) if any(r.get("tele") for r in rows) else None
+    except Exception: return None   # why: health numbers are a bonus; a malformed row must never cost the pick
+
+
 def fetch_top():
     """One fresh overhead JPEG from the dashboard (bytes)."""
     return urllib.request.urlopen(DASH + f"/cam/top.jpg?t={time.time():f}", timeout=5).read()
@@ -384,7 +397,9 @@ def pick_once(cc, table, state, a, run, nut_in, tgt, place_in, off, say, session
         tr.metrics({"landing_err_mm": err_mm, "before_mm": before_mm, "seconds": dt, "picked": int(picked), "found_at_landing": int(landed is not None), **{f"sag_{r['wp']}": r["max_err_deg"] for r in rows if "max_err_deg" in r},
                     "corr1_mm": math.hypot(*c1) if c1 else None, "corr1_x_mm": c1[0] if c1 else None, "corr1_y_mm": c1[1] if c1 else None, "corr2_mm": math.hypot(*c2) if c2 else None, "corr2_x_mm": c2[0] if c2 else None, "corr2_y_mm": c2[1] if c2 else None,
                     "grasp_h_mm": info.get("grasp_h_mm"), "grasp_lowered_mm": info.get("grasp_lowered_mm"), "final_residual_mm": info.get("final_residual_mm"), "wrist_offset_mm": wc["offset_norm_mm"] if wc else None, "jaw_open": a.jaw_open, "aim_mm": info.get("aim_mm"),
-                    "in_jaws": None if ij is None else int(ij), "jaw_retry": int(bool(info.get("jaw_retry"))), "not_in_jaws": int(not_in_jaws)})
+                    "in_jaws": None if ij is None else int(ij), "jaw_retry": int(bool(info.get("jaw_retry"))), "not_in_jaws": int(not_in_jaws),
+                    **(servo_tele().metrics(tele) if (tele := tele_of(rows)) else {})})   # why: sag, heat, current and voltage per pick, so sessions compare (docs/telemetry.md)
+        if tele: tr.json(tele, "servo_telemetry.json")
         tr.file("landing.jpg", landing_jpg, "frames"); tr.json(rows, "waypoints.json"); tr.artifact(a.state, "state")
         if a.wrist_check: tr.artifact(check_path, "frames")
         for p in info.get("jaw_frames") or []: tr.artifact(p, "frames")
