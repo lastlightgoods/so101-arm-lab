@@ -115,3 +115,22 @@ def test_panel_screenshot(page, stub):
     if shot:
         page.screenshot(shot)
     page.check()
+
+
+def test_ipad_landscape_layout_shows_the_panel_inline(page, stub):
+    """The tablet layout (landscape, under 1366 px wide) is what an iPad gets: the panel is part of the scrolling page under the arm row, not an overlay.
+    An iframe 1180 x 820 gets that layout's media queries without resizing the browser. SO101_TELE_PAD_SHOT=/path.png saves what the iPad would show."""
+    store, _, _ = teledata.build(history_s=300, hot="lift")
+    stub.routes["/api/tele"] = lambda path: teledata.payload(store)
+    page.eval("""(()=>{const f=document.createElement('iframe');f.id='pad';f.src='/';f.style.cssText='position:fixed;left:0;top:0;width:1180px;height:820px;z-index:99;border:0;background:#000';document.body.appendChild(f);return true})()""")
+    page.wait_until("(()=>{const d=document.querySelector('#pad').contentDocument;return !!d&&!!d.querySelector('#telep')&&d.querySelector('#telep').getClientRects().length>0&&d.defaultView.so101Tele.rows.length>100})()", timeout=15)
+    inline = page.eval("(()=>{const d=document.querySelector('#pad').contentDocument,p=d.querySelector('#telep'),cs=d.defaultView.getComputedStyle(p),r=p.getBoundingClientRect();return {pos:cs.position,w:Math.round(r.width),h:Math.round(r.height),tablet:d.defaultView.matchMedia('(orientation: landscape) and (max-width: 1366px)').matches}})()")
+    assert inline["tablet"] and inline["pos"] != "fixed", inline
+    assert 1100 <= inline["w"] <= 1180, f"the panel is {inline['w']} px wide in a 1180 px page"
+    page.eval("(()=>{const d=document.querySelector('#pad').contentDocument;d.defaultView.teleTick().then(()=>{d.defaultView.teleText();d.defaultView.teleDraw()});return true})()")
+    page.eval("(()=>{const d=document.querySelector('#pad').contentDocument;d.querySelector('#telep').scrollIntoView();return true})()")
+    assert page.eval("(()=>{const d=document.querySelector('#pad').contentDocument;return [...d.querySelectorAll('#telep canvas.tchart')].every(c=>c.getClientRects().length>0&&c.clientWidth>200)})()")
+    shot = os.environ.get("SO101_TELE_PAD_SHOT")
+    if shot:
+        page.screenshot(shot)
+    page.check()
