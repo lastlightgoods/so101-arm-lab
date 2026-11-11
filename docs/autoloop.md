@@ -1,0 +1,112 @@
+# The session runner: an arm that practises on its own
+
+`tools/autoloop.py` (Mac shell: `so101-autoloop`) runs the closed-loop pick of [`pick-loop.md`](pick-loop.md) over and over without
+anyone resetting the mat, and `tools/guardrails.py` decides, before every step, whether it is still safe to go on. It never talks to the
+arm itself: every motion goes through `pick_loop.run_plan` (one `pick_seq.py` run over ssh), so the arm's own limits still apply.
+
+```
+so101-autoloop --cycles 10 [--minutes 60] [--target X Y | --random-target] [--safe-box X0 Y0 X1 Y1] [--radius-mm 15] [--session NAME] [--dry-run]
+```
+
+## The loop
+
+One cycle, repeated until a cap or a trip ends the session:
+
+1. **guard.before**: stop file, then `GET /api/state` (the panel must be alive), then the perception watchdogs.
+2. **TRY**: locate the nut (`pick_loop.find_nut_anywhere` when it exists; else the overhead search near the last spot and the target; else
+   the `/api/scene` object nearest the last spot), then `closed_loop_pick` to the target: hover, read back, correct; grasp pose, read back,
+   correct; pick, carry, place, rest. If the nut was **not picked**, one retry (`--max-retries`, default 1, never more).
+3. **JUDGE**, after `--settle` seconds (1.0) from `/api/scene`: the nut is the scene object nearest the target.
+   `picked` = it moved more than 20 mm from where the TRY found it, and, if the pick record or the scene object has `in_jaws`, that is true.
+   `landed_err_mm` = its distance to the target; `landed` = picked and err <= `--radius-mm` (15). A cycle is a **success** when landed.
+   A nut that was picked but dropped elsewhere is a failure and is not retried (it is no longer where the retry would look).
+4. **RESET**: `pick_loop.reset_nut(state, cc, table, safe_box, avoid, rng)` when pick_loop has it (`avoid` = other objects and the marker
+   centres, in mat inches), else a closed-loop pick of the nut to a spot sampled with the box rules: inside the safe box, >= 40 mm from
+   every other object, >= 50 mm from every marker centre, >= 60 mm from where the nut is now. A failed reset is recorded
+   (`reset_error`); the next cycle finds out through the nut-lost counter.
+5. **guard.after**: the consecutive counters (below).
+
+`--random-target` samples the target each cycle with the same rules instead of using `--target` (default 9 6). The safe box defaults to
+`5 3 13 9` (mat inches). Both the target and the reset go through the workspace box guard as well.
+
+Each cycle prints one JSON line (`event: cycle`; `cycle, found, picked, landed, ok, landed_err_mm, moved_mm, retries, target_in, nut_in,
+reset_to_in, cycle_s, trip`). The stage detail of each pick (corrections, residuals, sag) goes to MLflow, not the console.
+
+## Guardrails (tools/guardrails.py)
+
+A check returns a `Trip(reason, detail)` or nothing. Any trip ends the session after one JSON line (`event: trip`, `reason`, `detail`,
+`cycle`, `rest`). Thresholds are the defaults; the flag in brackets changes one.
+
+| Reason | Fires when | Where checked |
+| --- | --- | --- |
+| `workspace` | any waypoint tip of a plan (FK of the planned joints through `cam_calib.fk_tip`, the arm fit's joint offsets and tip offset, then `arm_to_table`) is outside the mat shrunk by 20 mm (`--margin-mm`), above 4 in over the mat (`--ceiling-in`), or more than 10 mm below the mat plane. Edges are inside. `rest` is not checked (it is folded behind the mat on purpose). | before **every** `run_plan`: a violating plan is never run |
+| `motion` | a `pick_seq` row has `max_err_deg` > 8 (`--max-err-deg`); equal is fine | right after each `run_plan` |
+| `markers` | `n_markers_seen` < 3 continuously for 10 s (polled every second) | before each cycle |
+| `holding` | the scene's `holding` flag (calibration held with too few markers) true for more than 10 s | before each cycle |
+| `calib` | `/api/scene` `calib_ok` is false (null = unknown, no trip) | before each cycle |
+| `perception` | `/api/scene` is not ok (top camera not live, no detection) or does not answer | before each cycle |
+| `nut_lost` | the nut was not found for 3 cycles in a row (`--lost-after`) | after each cycle |
+| `consecutive_failures` | 3 cycles in a row did not land the nut (`--max-consecutive-failures`) | after each cycle |
+| `panel` | `GET /api/state` does not answer within 3 s, is an error, or reports the Jetson offline | before each cycle |
+| `run_plan` | the ssh `pick_seq` run failed or returned no rows (what `so101-stop` causes) | inside a pick; no rest is sent |
+| `overload`, `fps` | see "Not exposed yet" | before each cycle |
+| `stop_file` | the stop file exists (a **clean** stop: `event: stop`, not a fault) | before each cycle and before every `run_plan` |
+
+Caps are not trips: `--cycles N` and `--minutes T` end the session normally (`end: cycles` / `minutes`); the minutes cap is checked
+before a new cycle starts, so a cycle in progress finishes. `nut_lost` is checked before `consecutive_failures`.
+
+**Rest.** After a trip the arm goes to the rest pose only if it may be mid-motion **and** a fresh `/api/state` poll answers with the Jetson
+up and a live follower stream. A dead panel, a `run_plan` failure (an owner's STOP) and a stop between cycles (the plan already ended at
+rest) send no motion command.
+
+## Not exposed yet
+
+The dashboard publishes `arms.follower.pos`, `procs`, `jetson.online` and the scene fields, but no motor overload/error flag and no camera
+frame rate. So:
+
+* **overload**: `Guard` looks for an `overload` key in `arms.follower` or at the top of `/api/state` and trips on a truthy value; today there
+  is none, and the session logs `overload not checked` once. The `motion` watchdog (commanded vs reached) is the only stand-in.
+* **fps < 25**: `Guard` reads `fps` (a number, or a dict of camera -> fps) from `/api/state` and trips below 25; today there is none, and the
+  session logs `fps not checked` once. `calib_ok` / `n_markers_seen` going bad is the practical symptom of a stalled overhead camera.
+* "holding" in the dashboard is derived from the marker count, so `holding` and `markers` see the same condition; `markers` (10 s, `>=`)
+  fires first.
+
+## Stopping it
+
+* **`so101-stop`** (on the Jetson) kills `pick_seq`; the runner sees the dead run, trips `run_plan` and sends nothing more. From the Mac:
+  `ssh jetson 'source ~/so101/env.sh; so101-stop'`.
+* **The stop file**: `touch ~/so101/outputs/run/autoloop.stop` (or `--stop-file PATH`). Checked between cycles and before every `run_plan`,
+  so the session ends within one waypoint stage; if the arm is mid-pick it is sent to rest first. Delete the file before the next session.
+* **The wall STOP** (the panel's emergency button) cuts the arm; the runner finds out at its next `/api/state` poll or when `pick_seq`
+  fails, and ends with `panel` or `run_plan`.
+* Ctrl-C ends the session (`end: interrupted`) and still writes the summary; it sends no rest command.
+
+## What a session leaves behind
+
+* stdout: the cycle lines, at most one trip/stop line, and the `summary` line.
+* `outputs/run/autoloop_<session>.json` (`--out-dir`): `session, cycles, landed, picked, success_rate, mean_err_mm, median_err_mm, retries,
+  stops` (each with `reason`, `detail`, `clean`, `cycle`), `end` (`cycles`, `minutes`, `interrupted` or the trip reason), `duration_s,
+  radius_mm, dry_run`. Errors are over cycles where the nut was found at the end.
+* MLflow (`jetson/labtrack.py`, experiment **`so101-autoloop`**): one run per cycle (params `session, cycle, target, mode`
+  (`fixed`/`random`), `radius_mm, dry_run`; metrics `landed_err_mm, picked, landed, cycle_s, retries, trip`; artifact `cycle.json` with the
+  record and the pick stages) and a parent run `autoloop-<session>` (the cycle runs carry its id in `mlflow.parentRunId`) with the summary
+  as metrics and `summary.json`. Dry runs log to `so101-autoloop-dry`. No tracking server: the loop runs unchanged.
+
+## Dry run
+
+`--dry-run` replaces the dashboard with `FakeWorld` (state, scene, a nut that picks move) and the arm with `DryArm` (the real kinematics,
+every waypoint reached 6 mm short, `--dry-miss` 0.1 chance of a miss). The whole loop, guardrails, retries and files run; nothing moves
+and nothing is contacted. `tests/tools/test_autoloop.py` and `test_guardrails.py` run it in CI against the `ShortArm` of
+`tests/tools/pickhelpers.py` and a fake clock.
+
+## First milestone: "10 in a row, attended"
+
+1. The mat is empty except the nut. Arm parked at rest. Lights as for calibration; `so101-cams-check` passes.
+2. Take the nut off, press **SET BACKGROUND** on the dashboard with the mat empty, put the nut back at a spot inside the safe box. Check
+   `/api/scene`: `calib_ok: true`, `n_markers_seen: 4`, exactly one object (the nut).
+3. Choose the safe box (mat inches) where you are happy for the nut to land and be picked from, e.g. `--safe-box 5 3 13 9`.
+4. `so101-autoloop --dry-run --cycles 10` first: it must finish with `end: cycles`.
+5. The owner stands at the wall STOP, with the stop file command ready. Run
+   `so101-autoloop --cycles 10 --target 9 6 --safe-box 5 3 13 9 --session first10`.
+6. **Pass** = at least 9 of the 10 cycles `landed` with `landed_err_mm` <= 15, **and zero trips** (`stops: []`, `end: cycles`). Anything
+   else: read the cycle lines and the MLflow runs, fix, and start a new 10.

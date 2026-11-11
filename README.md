@@ -35,6 +35,9 @@ Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend,
   reaches 5-8 mm short; the servo readback through the arm fit is good to a millimetre, so: command, read back,
   correct twice, jaws at 35. With the 10 Nov 2026 numbers, the wrist-camera check (`tools/wrist_check.py`) and
   what each pick logs to MLflow.
+- [`docs/autoloop.md`](docs/autoloop.md): the unattended session runner (`tools/autoloop.py`, `so101-autoloop`): pick to a target,
+  judge from the overhead camera, reset the nut to a new spot, repeat, under the guardrails of `tools/guardrails.py` (workspace box,
+  motion, perception and panel watchdogs, caps, stop file), plus the "10 in a row, attended" milestone procedure.
 - [`docs/camera-settings.md`](docs/camera-settings.md): locking exposure, white balance and focus, and
   the measured behaviour of the Logitech C920 revision 046d:08e5 that makes a naive lock white out
   (gain forced to 255 after auto to manual, exposure re-derived at every stream start). A guard service
