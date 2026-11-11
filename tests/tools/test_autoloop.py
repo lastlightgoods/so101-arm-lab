@@ -25,7 +25,8 @@ def test_ten_cycle_dry_run_success_rate_comes_from_the_injected_failures(autorig
     bad = [c for c in cyc if c["cycle"] in (3, 7)]; assert all(c["landed_err_mm"] > 15 and c["retries"] == 0 for c in bad)
     good = [c for c in cyc if c["ok"]]; assert all(c["landed_err_mm"] <= 15 and c["trip"] is None and c["found"] for c in good)
     errs = [c["landed_err_mm"] for c in cyc]; assert s["mean_err_mm"] == pytest.approx(statistics.mean(errs), abs=0.06) and s["median_err_mm"] == pytest.approx(statistics.median(errs), abs=0.06)
-    assert s["duration_s"] == pytest.approx(10 * 1.0, abs=0.1) and out[-1]["event"] == "summary" and out[-1]["success_rate"] == 0.8
+    assert s["duration_s"] == pytest.approx(10 * 2 * 1.0, abs=0.1) and out[-1]["event"] == "summary" and out[-1]["success_rate"] == 0.8, "two settles a cycle: the landing and the reset are both judged"
+    assert s["resets"] == 10 and s["resets_ok"] == 10 and s["reset_median_err_mm"] <= 15 and s["pre_resets"] == 0
     # the summary file is the same dict
     saved = json.load(open(os.path.join(r.tmp, "out", "autoloop_t.json"))); assert saved == s
     # every reset spot obeys the box rules and moves the nut >= 60 mm
@@ -79,9 +80,9 @@ def test_the_cycle_cap(autorig, capsys):
 
 
 def test_the_minutes_cap_stops_starting_cycles(autorig, capsys):
-    r = autorig(); s, out = r.run(capsys, cycles=50, minutes=2.5, settle_s=60.0)   # a cycle takes 60 s of fake time (the settle): 3 cycles = 180 s >= 150 s
-    assert s["cycles"] == 3 and s["end"] == "minutes" and s["stops"] == [] and s["duration_s"] == pytest.approx(180.0, abs=1.0) and not events(out, "trip")
-    r1 = autorig(); s1, _ = r1.run(capsys, cycles=50, minutes=2.0, settle_s=60.0); assert s1["cycles"] == 2, "2 min = 120 s: the check is >= at the start of a cycle"
+    r = autorig(); s, out = r.run(capsys, cycles=50, minutes=5.0, settle_s=60.0)   # a cycle takes 120 s of fake time (two settles: landing and reset): 3 cycles = 360 s >= 300 s
+    assert s["cycles"] == 3 and s["end"] == "minutes" and s["stops"] == [] and s["duration_s"] == pytest.approx(360.0, abs=1.0) and not events(out, "trip")
+    r1 = autorig(); s1, _ = r1.run(capsys, cycles=50, minutes=4.0, settle_s=60.0); assert s1["cycles"] == 2, "4 min = 240 s: the check is >= at the start of a cycle"
 
 
 # ---------------------------------------------------------------- every trip: one line, session over
@@ -147,9 +148,63 @@ def test_in_jaws_false_means_not_picked_even_if_the_nut_moved(autorig, capsys):
     r2 = autorig(); r2.world.in_jaws = True; s2, o2 = r2.run(capsys, cycles=1, max_retries=0); assert events(o2, "cycle")[0]["ok"]
 
 
-def test_a_nut_that_moved_less_than_20mm_is_not_picked(autorig, capsys):
+def test_a_nut_that_moved_less_than_20mm_is_not_picked(autorig, capsys, monkeypatch):
+    r = autorig(nut_in=(10.5, 6.0)); run = r.world.on_plan   # 38 mm from the target: tried, and the pick leaves it put
+    monkeypatch.setattr(r.world, "on_plan", lambda plan: None if "place" in {w["name"] for w in plan["waypoints"]} and not r.world.picks else run(plan))
+    s, out = r.run(capsys, cycles=1, max_retries=0); c, = events(out, "cycle")
+    assert c["moved_mm"] < 20 and not c["picked"] and not c["ok"] and "pre_reset" not in c
+
+
+def test_a_nut_already_on_the_target_is_reset_away_before_the_try(autorig, capsys):
+    """first10b cycles 5-6: the nut started on the target, so placing it there again moved it < 20 mm and good picks scored as misses."""
     r = autorig(nut_in=(9.5, 6.0)); s, out = r.run(capsys, cycles=1, max_retries=0); c, = events(out, "cycle")   # starts 12.7 mm from the target
-    assert c["moved_mm"] < 20 and not c["picked"] and not c["ok"]
+    pr = c["pre_reset"]; assert pr["ok"] and pr["how"] == "at_spot" and pr["err_mm"] <= 15
+    assert c["nut_in"] == pytest.approx(pr["at_in"], abs=1e-3) and c["picked"] and c["landed"] and c["ok"] and c["moved_mm"] > 20
+    assert s["pre_resets"] == 1 and r.world.picks == 3, "pre-reset, try, reset"
+
+
+def test_a_nut_on_the_target_that_the_reset_cannot_move_fails_the_cycle_without_a_try(autorig, capsys):
+    r = autorig(nut_in=(9.5, 6.0), script=["miss"]); s, out = r.run(capsys, cycles=1, max_retries=0); c, = events(out, "cycle")
+    assert c["pre_reset"]["how"] == "not_moved" and not c["pre_reset"]["ok"] and c["error"].startswith("nut on the target") and not c["ok"]
+    assert r.world.picks == 1 and "reset_ok" not in c, "no try and no post-cycle reset after a failed pre-reset"
+
+
+def test_every_reset_is_judged_and_the_next_cycle_starts_where_the_nut_really_is(autorig, capsys):
+    r = autorig(); s, out = r.run(capsys, cycles=2, max_retries=0); c1, c2 = events(out, "cycle")
+    assert c1["reset_ok"] and c1["reset_how"] == "at_spot" and c1["reset_err_mm"] <= 15
+    assert c2["locates"][0]["near_in"] == pytest.approx(c1["reset_found_in"], abs=1e-3), "cycle 2 looks near where the map saw the nut, not near the planned spot"
+    assert c1["reset_found_in"] != c1["reset_to_in"] and c2["nut_in"] == pytest.approx(c1["reset_found_in"], abs=1e-3)
+
+
+def test_a_missed_reset_is_recorded_and_the_next_cycle_looks_where_the_nut_stayed(autorig, capsys):
+    """first10b cycle 4: the reset's jaw check saw nothing held, the nut stayed on the target, and the runner believed the planned spot."""
+    r = autorig(script=["ok", "miss"]); s, out = r.run(capsys, cycles=2, max_retries=0); c1, c2 = events(out, "cycle")
+    assert c1["ok"] and c1["reset_ok"] is False and c1["reset_how"] == "not_moved" and c1["reset_err_mm"] >= 60 - 15
+    assert math.hypot(c1["reset_found_in"][0] - 9.0, c1["reset_found_in"][1] - 6.0) * 25.4 < 15, "the map found it still on the target"
+    assert c2["pre_reset"]["ok"] and c2["ok"], "cycle 2 sees it on the target, resets it away first, then lands it"
+    assert s["resets"] == 2 and s["resets_ok"] == 1
+
+
+def test_judging_waits_while_the_map_has_objects_pending(autorig, capsys):
+    r = autorig(); r.run(capsys, cycles=1); run = r.runner; seq = [{"ok": True, "pending": 1, "objects": []}] * 3 + [{"ok": True, "pending": 0, "objects": [{"x_in": 9.0, "y_in": 6.0}]}]
+    it = iter(seq); run.scene = lambda: next(it); t0 = r.clock.now()
+    sc, waited = run.settled_scene(); assert waited == 1.5 and sc["objects"] and r.clock.now() - t0 == pytest.approx(run.cfg.settle_s + 1.5)
+    it2 = iter([{"ok": True, "pending": 2, "objects": []}] * 50); run.scene = lambda: next(it2)
+    _, waited2 = run.settled_scene(); assert waited2 == 4.0, "capped at judge_wait_s"
+
+
+def test_frames_are_saved_and_attached_when_on_and_every_locate_logs_its_candidates(autorig, capsys):
+    r = autorig(); s, out = r.run(capsys, cycles=1, max_retries=0, save_frames=True); c, = events(out, "cycle")
+    d = os.path.join(r.tmp, "out", "autoloop_t_frames"); assert sorted(os.listdir(d)) == ["c1_reset.jpg", "c1_try1.jpg"]
+    run, = [x for x in r.track.runs if x.name.endswith("-c1")]; assert {"frames/c1_try1.jpg", "frames/c1_reset.jpg"} <= set(run.files)
+    loc, reset_loc = c["locates"]; assert loc["n_candidates"] == 1 and loc["chosen_in"] == pytest.approx(c["nut_in"], abs=1e-3) and loc["source"] == "scene"
+    assert loc["candidates"][0]["w_mm"] == 12.0 and reset_loc["near_in"] is not None, "the try's locate, then the reset's"
+
+
+def test_stage_lines_reach_the_session_log(autorig, capsys):
+    r = autorig(); s, out = r.run(capsys, cycles=1, max_retries=0); st = events(out, "stage")
+    assert {x["stage"] for x in st} >= {"hover", "grasp_pose", "final", "jaw_check"} and all(x["cycle"] == 1 for x in st)
+    assert sum(1 for x in st if x["stage"] == "hover") == 2, "the try and the reset"
 
 
 def test_the_landing_radius_is_a_flag(autorig, capsys):
@@ -214,7 +269,7 @@ def test_main_dry_run_end_to_end(al, tmp_path, capsys, monkeypatch):
     rc = al.main(["--dry-run", "--cycles", "4", "--seed", "2", "--session", "cli", "--out-dir", str(out_dir), "--dry-miss", "0", "--settle", "0", "--stop-file", str(tmp_path / "none.stop")])
     lines = [json.loads(x) for x in capsys.readouterr().out.strip().splitlines()]; summ = [x for x in lines if x.get("event") == "summary"][0]
     assert rc == 0 and summ["cycles"] == 4 and summ["success_rate"] == 1.0 and summ["dry_run"] is True and json.load(open(out_dir / "autoloop_cli.json"))["session"] == "cli"
-    assert [x["note"].split(" not")[0] for x in lines if "note" in x] == ["overload", "fps"]
+    assert [x["note"].split(" not")[0] for x in lines if "note" in x and x.get("event") != "stage"] == ["overload", "fps"]
     rc2 = al.main(["--dry-run", "--cycles", "10", "--seed", "2", "--session", "cli2", "--out-dir", str(out_dir), "--dry-miss", "1", "--settle", "0", "--max-retries", "0", "--stop-file", str(tmp_path / "none.stop")])
     assert rc2 == 2 and any(x.get("event") == "trip" and x["reason"] == "consecutive_failures" for x in map(json.loads, capsys.readouterr().out.strip().splitlines()))
 

@@ -16,18 +16,30 @@ One cycle, repeated until a cap or a trip ends the session:
 2. **TRY**: locate the nut (`pick_loop.find_nut_anywhere` when it exists; else the overhead search near the last spot and the target; else
    the `/api/scene` object nearest the last spot), then `closed_loop_pick` to the target: hover, read back, correct; grasp pose, read back,
    correct; pick, carry, place, rest. If the nut was **not picked**, one retry (`--max-retries`, default 1, never more).
-3. **JUDGE**, after `--settle` seconds (1.0) from `/api/scene`: the nut is the scene object nearest the target.
+   **A nut already within 20 mm of the target is reset away first** (a pre-reset, judged like any reset): placing it on the target again
+   could not move it 20 mm, so first10b scored good picks as misses in cycles 5 and 6. If the pre-reset leaves it there, the cycle fails
+   with `error: nut on the target ...` and no try.
+3. **JUDGE**, after `--settle` seconds (1.0) from `/api/scene`, then polling every 0.5 s while the map reports objects `pending`
+   (it shows an object only after 3 detects in a row, about 1.5 s), up to `--judge-wait` (4 s): the nut is the scene object nearest the target.
    `picked` = it moved more than 20 mm from where the TRY found it, and, if the pick record or the scene object has `in_jaws`, that is true.
    `landed_err_mm` = its distance to the target; `landed` = picked and err <= `--radius-mm` (15). A cycle is a **success** when landed.
    A nut that was picked but dropped elsewhere is a failure and is not retried (it is no longer where the retry would look).
-4. **RESET**: find the nut (`pick_loop.find_nut_anywhere`: the scene map first, then the whole-mat image search) and run the same closed-loop pick to a spot sampled inside the safe box: at least 40 mm from other objects, 50 mm from marker centres and 60 mm from where the nut was. The runner deliberately does not call `pick_loop.reset_nut`: that function saves its history over the pick loop's own state file and samples its own spot. The pick loop's learned sag biases are read (never written) from `jetson/calib/pick_state.json`.
+4. **RESET** (then judged): find the nut (`pick_loop.find_nut_anywhere`: the scene map first, then the whole-mat image search) and run the same closed-loop pick to a spot sampled inside the safe box: at least 40 mm from other objects, 50 mm from marker centres and 60 mm from where the nut was. The runner deliberately does not call `pick_loop.reset_nut`: that function saves its history over the pick loop's own state file and samples its own spot. The pick loop's learned sag biases are read (never written) from `jetson/calib/pick_state.json`.
+   The reset is then **judged** the same way as the landing: the nut-like object nearest the spot within `--radius-mm` is `at_spot` (ok);
+   else one still within 20 mm of where the nut was is `not_moved`; else the one nearest the spot is `elsewhere`; none is `not_seen`.
+   The next cycle looks for the nut where the map saw it, not where the reset meant to put it (first10b cycle 4: the reset's jaw check saw
+   nothing held, the nut stayed on the target, and the runner believed the planned spot).
 5. **guard.after**: the consecutive counters (below).
 
 `--random-target` samples the target each cycle with the same rules instead of using `--target` (default 9 6). The safe box defaults to
 `6 4 13 8` (mat inches, the approved box). Both the target and the reset go through the workspace box guard as well.
 
 Each cycle prints one JSON line (`event: cycle`; `cycle, found, picked, landed, ok, landed_err_mm, moved_mm, retries, target_in, nut_in,
-reset_to_in, cycle_s, trip`). The stage detail of each pick (corrections, residuals, sag) goes to MLflow, not the console.
+reset_to_in, reset_ok, reset_err_mm, reset_how, reset_found_in, judge_wait_s, pre_reset, locates, cycle_s, trip`). `locates` lists every
+nut search of the cycle: where it looked, how many objects and nut-like candidates the map had, up to 8 candidates, and the one chosen.
+Every pick stage (hover, grasp_pose, final, jaw_check, with corrections, residuals, sag and the aim) is printed too, as `event: stage`
+lines, and kept in MLflow. On the real arm the overhead frame at each judgement is saved to
+`outputs/run/autoloop_<session>_frames/c<N>_try<k>.jpg`, `c<N>_reset.jpg` and `c<N>_prereset.jpg`, and attached to the cycle's MLflow run.
 
 ## Guardrails (tools/guardrails.py)
 
@@ -80,13 +92,13 @@ frame rate. So:
 
 ## What a session leaves behind
 
-* stdout: the cycle lines, at most one trip/stop line, and the `summary` line.
+* stdout: the stage and cycle lines, at most one trip/stop line, and the `summary` line.
 * `outputs/run/autoloop_<session>.json` (`--out-dir`): `session, cycles, landed, picked, success_rate, mean_err_mm, median_err_mm, retries,
   stops` (each with `reason`, `detail`, `clean`, `cycle`), `end` (`cycles`, `minutes`, `interrupted` or the trip reason), `duration_s,
-  radius_mm, dry_run`. Errors are over cycles where the nut was found at the end.
+  radius_mm, dry_run, resets, resets_ok, reset_median_err_mm, pre_resets`. Errors are over cycles where the nut was found at the end.
 * MLflow (`jetson/labtrack.py`, experiment **`so101-autoloop`**): one run per cycle (params `session, cycle, target, mode`
-  (`fixed`/`random`), `radius_mm, dry_run`; metrics `landed_err_mm, picked, landed, cycle_s, retries, trip`; artifact `cycle.json` with the
-  record and the pick stages) and a parent run `autoloop-<session>` (the cycle runs carry its id in `mlflow.parentRunId`) with the summary
+  (`fixed`/`random`), `radius_mm, dry_run`; metrics `landed_err_mm, picked, landed, cycle_s, retries, trip, reset_err_mm, reset_ok, judge_wait_s,
+  pre_reset`; artifacts `cycle.json` with the record and the pick stages, and `frames/`) and a parent run `autoloop-<session>` (the cycle runs carry its id in `mlflow.parentRunId`) with the summary
   as metrics and `summary.json`. Dry runs log to `so101-autoloop-dry`. No tracking server: the loop runs unchanged.
 
 ## Dry run

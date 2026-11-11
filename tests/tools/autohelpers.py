@@ -43,7 +43,7 @@ class Rig:
 
     def cfg(self, **kw):
         d = dict(cycles=10, minutes=None, target=(9.0, 6.0), random_target=False, safe_box=SAFE, radius_mm=15.0, session="t", dry_run=True, max_retries=1, settle_s=1.0, moved_mm=20.0,
-                 spot_mm=(40.0, 50.0, 60.0), out_dir=str(self.tmp / "out")); d.update(kw)
+                 spot_mm=(40.0, 50.0, 60.0), out_dir=str(self.tmp / "out"), judge_wait_s=4.0, save_frames=False); d.update(kw)
         import argparse; return argparse.Namespace(**d)
 
     def run(self, capsys, **kw):

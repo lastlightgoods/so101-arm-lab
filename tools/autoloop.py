@@ -79,12 +79,44 @@ class Runner:
     `rng` a random.Random. Everything that moves the arm goes through pl.run_plan, wrapped so the guard sees every plan and every row."""
     def __init__(self, pl, cc, table, guard, ctx, cfg, track, rng, out=print):
         self.pl, self.cc, self.table, self.guard, self.ctx, self.cfg, self.track, self.rng, self.out = pl, cc, table, guard, ctx, cfg, track, rng, out
-        self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None
+        self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0
         self.markers_mm = list((table.get("layout_markers") or {}).values())
         self.pick_args = argparse.Namespace(jaw_open=pl.JAW_OPEN, max_deg_s=pl.SPEED["closed"], wrist_check=False, grasp_aim_mm=pl.GRASP_AIM_MM)
         self.biases = load_biases(os.path.join(getattr(pl, "ROOT", "."), "jetson", "calib", "pick_state.json"))   # read only: the pick loop's learned sag biases; the runner never writes that file
 
     def say(self, d): self.out(json.dumps(d))
+
+    def stage(self, d):
+        """A pick's stage line: kept for the cycle's MLflow run AND printed to the session log (first10b's log had only the cycle lines, so
+        the jaw checks that explained cycles 5-10 were only in MLflow)."""
+        self.stages.append(d); self.say({"event": "stage", "cycle": self.n, **d})
+
+    def opt(self, name, default): return getattr(self.cfg, name, default)
+
+    def nutlike(self, objs):
+        """Scene objects shaped like the nut: pick_loop's own candidate rule when it has one, else anything up to 40 mm."""
+        fn = getattr(self.pl, "nut_candidates", None)
+        return fn(objs) if fn else [o for o in objs if max(o.get("w_mm", 0), o.get("h_mm", 0)) <= 40]
+
+    def settled_scene(self):
+        """The scene after the settle, once the map has confirmed what it sees: the dashboard shows an object only after 3 detects in a row
+        (~1.5 s) and reports the rest as `pending`, so poll every 0.5 s while anything is pending, up to cfg.judge_wait_s.
+        Returns (scene or None, seconds waited beyond the settle)."""
+        self.ctx.sleep(self.cfg.settle_s); sc = self.scene(); waited = 0.0; cap = float(self.opt("judge_wait_s", 4.0))
+        while sc is not None and int(sc.get("pending") or 0) > 0 and waited < cap:
+            self.ctx.sleep(0.5); waited += 0.5; sc = self.scene()
+        return sc, waited
+
+    def snapshot(self, name):
+        """One overhead frame kept as evidence, <out_dir>/autoloop_<session>_frames/<name>.jpg (also an MLflow artifact of the cycle);
+        None when frames are off (dry runs) or the camera does not answer."""
+        if not self.opt("save_frames", False): return None
+        try:
+            jpeg = self.pl.fetch_top(); d = os.path.join(self.cfg.out_dir, f"autoloop_{self.cfg.session}_frames"); os.makedirs(d, exist_ok=True)
+            path = os.path.join(d, f"{name}.jpg")
+            with open(path, "wb") as f: f.write(jpeg)
+            self.frames.append(path); return path
+        except Exception: return None
 
     # -- the world, through the dashboard
     def scene(self):
@@ -99,7 +131,10 @@ class Runner:
         try:
             fn = getattr(pl, "find_nut_anywhere", None)
             if fn:   # why: pick_loop's finder takes near_in and returns (xy_in, source); the runner works in find_nut's (xy_in, px, area)
-                got = fn(cc, tab, scene_objects=objs, near_in=last_in)
+                cands = self.nutlike(objs); got = fn(cc, tab, scene_objects=objs, near_in=last_in)
+                self.locates.append({"near_in": [round(v, 3) for v in last_in] if last_in else None, "n_objects": len(objs), "n_candidates": len(cands),
+                                     "candidates": [{"x_in": o.get("x_in"), "y_in": o.get("y_in"), "w_mm": o.get("w_mm"), "h_mm": o.get("h_mm")} for o in cands[:8]],
+                                     "chosen_in": [round(v, 3) for v in got[0]] if got else None, "source": got[1] if got else None})   # why: which object was "the nut" is the open question of first10b's resets
                 return (list(got[0]), None, None) if got else None
             near = last_in or list(self.cfg.target)
             return pl.find_nut(cc, tab, near) or pl.find_nut(cc, tab, list(self.cfg.target), radius_px=140) or self.from_scene(objs, near)
@@ -127,18 +162,40 @@ class Runner:
         finally: pl.run_plan = orig
 
     def pick(self, nut_in, place_in, n):
-        _, rows, info = self.pl.closed_loop_pick(self.cc, self.table, list(nut_in), list(place_in), self.biases, self.pick_args, n, self.stages.append)
+        _, rows, info = self.pl.closed_loop_pick(self.cc, self.table, list(nut_in), list(place_in), self.biases, self.pick_args, n, self.stage)
         self.in_motion = False; return rows, info
 
-    def judge(self, nut_before_in, target_in, info):
-        """After a short settle: where the nut is now (the scene object nearest the target) and what that means."""
-        self.ctx.sleep(self.cfg.settle_s); sc = self.scene(); objs = (sc or {}).get("objects") or []
+    def judge(self, nut_before_in, target_in, info, name=None):
+        """After the settle and the map's confirmation: where the nut is now (the scene object nearest the target) and what that means."""
+        sc, waited = self.settled_scene(); objs = (sc or {}).get("objects") or []; frame = self.snapshot(name) if name else None
         o, _ = nearest_object(objs, target_in)
-        if o is None: return {"after_in": None, "moved_mm": None, "picked": False, "err_mm": None, "landed": False, "objects": objs}
+        if o is None: return {"after_in": None, "moved_mm": None, "picked": False, "err_mm": None, "landed": False, "objects": objs, "wait_s": waited, "frame": frame}
         after = [o["x_in"], o["y_in"]]; moved = dist_mm(after, nut_before_in); err = dist_mm(after, target_in)
         jaws = [v for v in (info.get("in_jaws"), o.get("in_jaws")) if v is not None]
         picked = moved > self.cfg.moved_mm and all(jaws)
-        return {"after_in": after, "moved_mm": round(moved, 1), "picked": picked, "err_mm": round(err, 1), "landed": picked and err <= self.cfg.radius_mm, "objects": objs, "obj": o}
+        return {"after_in": after, "moved_mm": round(moved, 1), "picked": picked, "err_mm": round(err, 1), "landed": picked and err <= self.cfg.radius_mm, "objects": objs, "obj": o,
+                "wait_s": waited, "frame": frame}
+
+    def judge_reset(self, spot_in, before_in, name=None):
+        """Where a reset really left the nut (first10b: an unjudged reset left the nut on the target and the runner never knew). The nut-like
+        object nearest the spot, within radius_mm: "at_spot" (ok). Else one still within moved_mm of where the nut was: "not_moved". Else the
+        one nearest the spot: "elsewhere". None seen: "not_seen". Returns {"at_in", "err_mm", "ok", "how", "wait_s", "frame"}."""
+        sc, waited = self.settled_scene(); small = self.nutlike((sc or {}).get("objects") or []); frame = self.snapshot(name) if name else None
+        res = {"at_in": None, "err_mm": None, "ok": False, "how": "not_seen", "wait_s": waited, "frame": frame}
+        o, d = nearest_object(small, spot_in)
+        if o is None: return res
+        res.update(at_in=[o["x_in"], o["y_in"]], err_mm=round(d, 1))
+        if d <= self.cfg.radius_mm: res.update(ok=True, how="at_spot"); return res
+        ob, db = nearest_object(small, before_in) if before_in is not None else (None, None)
+        if ob is not None and db <= self.cfg.moved_mm: res.update(at_in=[ob["x_in"], ob["y_in"]], how="not_moved"); return res
+        res["how"] = "elsewhere"; return res
+
+    def reset_and_judge(self, nut_in, objs, nut_obj, name):
+        """reset() then judge_reset(): {"spot_in", "error", "at_in", "err_mm", "ok", "how", ...}; cur_in follows the nut to where it really is."""
+        r = self.reset(nut_in, objs, nut_obj)
+        if r["error"] or not r["spot_in"]: return {**r, "ok": False, "how": "error" if r["error"] else "no_spot"}
+        jr = self.judge_reset(r["spot_in"], nut_in, name); self.cur_in = jr["at_in"] or r["spot_in"]
+        return {**r, **jr}
 
     def reset(self, after_in, objs, nut_obj):
         """Put the nut on a new spot; returns {"spot_in", "error"}."""
@@ -159,7 +216,7 @@ class Runner:
 
     def cycle(self, n):
         """One TRY / JUDGE / RESET; returns (record, Trip or None). A TripError from the guarded run_plan ends the cycle where it stands."""
-        t0 = self.ctx.now(); rec = {"event": "cycle", "cycle": n, "found": True, "picked": False, "landed": False, "ok": False, "landed_err_mm": None, "retries": 0, "target_in": None}
+        t0 = self.ctx.now(); self.n = n; rec = {"event": "cycle", "cycle": n, "found": True, "picked": False, "landed": False, "ok": False, "landed_err_mm": None, "retries": 0, "target_in": None}
         trip = None
         try:
             with self.guarded():
@@ -167,19 +224,26 @@ class Runner:
                 for attempt in range(self.cfg.max_retries + 1):
                     nut = self.locate(last)
                     if not nut: rec["found"] = False; break
+                    if attempt == 0 and dist_mm(nut[0], tgt) < self.cfg.moved_mm:   # why: first10b cycles 5-6: a nut already on the target cannot move 20 mm when placed there, so good picks scored as misses
+                        objs = (self.scene() or {}).get("objects") or []; nut_obj, _ = nearest_object(objs, nut[0])
+                        pr = self.reset_and_judge(nut[0], objs, nut_obj, f"c{n}_prereset"); rec["pre_reset"] = {k: pr.get(k) for k in ("spot_in", "at_in", "err_mm", "ok", "how", "error")}
+                        if pr.get("at_in") is None or dist_mm(pr["at_in"], tgt) < self.cfg.moved_mm: rec["error"] = "nut on the target and the reset did not move it away"; break
+                        last = pr["at_in"]; nut = self.locate(last)
+                        if not nut: rec["found"] = False; break
                     rec["nut_in"] = [round(v, 3) for v in nut[0]]; last = nut[0]
                     try: rows, info = self.pick(nut[0], tgt, n)
                     except SystemExit as e: rec["error"] = str(e)[:200]; break   # why: pick_loop raises SystemExit when ik fails; that is a failed try, not a dead runner
-                    j = self.judge(nut[0], tgt, info); rec.update(picked=j["picked"], landed=j["landed"], landed_err_mm=j["err_mm"], moved_mm=j["moved_mm"])
+                    j = self.judge(nut[0], tgt, info, f"c{n}_try{attempt + 1}"); rec.update(picked=j["picked"], landed=j["landed"], landed_err_mm=j["err_mm"], moved_mm=j["moved_mm"], judge_wait_s=j["wait_s"])
                     if j["after_in"]: self.cur_in = last = j["after_in"]
                     if j["picked"] or attempt == self.cfg.max_retries: break
                     rec["retries"] += 1   # not picked: the nut has not moved, so one more try is cheap; a nut that was picked and dropped is not retried
                 rec["ok"] = rec["picked"] and rec["landed"]
                 if rec["found"] and rec["landed_err_mm"] is not None and "error" not in rec:
-                    r = self.reset(self.cur_in, j["objects"], j.get("obj")); rec["reset_to_in"] = r["spot_in"]
+                    r = self.reset_and_judge(self.cur_in, j["objects"], j.get("obj"), f"c{n}_reset"); rec["reset_to_in"] = r["spot_in"]
                     if r["error"]: rec["reset_error"] = r["error"]
-                    elif r["spot_in"]: self.cur_in = r["spot_in"]
+                    rec.update(reset_ok=r.get("ok"), reset_err_mm=r.get("err_mm"), reset_how=r.get("how"), reset_found_in=r.get("at_in"))
         except TripError as e: trip = e.trip
+        if self.locates: rec["locates"] = list(self.locates); self.locates.clear()
         rec["cycle_s"] = round(self.ctx.now() - t0, 2)
         return rec, trip or self.guard.check_after_cycle(rec)
 
@@ -188,8 +252,12 @@ class Runner:
         rec["trip"] = trip.reason if trip else None; self.cycles.append(rec); tgt = rec["target_in"]
         with self.track.run(f"autoloop-{self.cfg.session}-c{rec['cycle']}", tags={"host": "mac", "session": self.cfg.session, "cycle": rec["cycle"], "trip": rec["trip"] or "none", **({"mlflow.parentRunId": parent_id} if parent_id else {})}) as tr:
             tr.params({"session": self.cfg.session, "cycle": rec["cycle"], "target": f"{tgt[0]:.2f},{tgt[1]:.2f}" if tgt else None, "mode": "random" if self.cfg.random_target else "fixed", "radius_mm": self.cfg.radius_mm, "dry_run": int(self.cfg.dry_run)})
-            tr.metrics({"landed_err_mm": rec["landed_err_mm"], "picked": int(rec["picked"]), "landed": int(rec["landed"]), "cycle_s": rec["cycle_s"], "retries": rec["retries"], "trip": int(trip is not None)})
+            ro = rec.get("reset_ok")
+            tr.metrics({"landed_err_mm": rec["landed_err_mm"], "picked": int(rec["picked"]), "landed": int(rec["landed"]), "cycle_s": rec["cycle_s"], "retries": rec["retries"], "trip": int(trip is not None),
+                        "reset_err_mm": rec.get("reset_err_mm"), "reset_ok": None if ro is None else int(ro), "judge_wait_s": rec.get("judge_wait_s"), "pre_reset": int("pre_reset" in rec)})
             tr.json({"cycle": rec, "stages": self.stages}, "cycle.json"); self.stages.clear()
+            for p in self.frames: tr.artifact(p, "frames")
+            self.frames.clear()
         self.say(rec)
 
     def stop(self, trip, n):
@@ -202,9 +270,12 @@ class Runner:
 
     def summary(self, end, t0):
         errs = [c["landed_err_mm"] for c in self.cycles if c["landed_err_mm"] is not None]; n = len(self.cycles); ok = sum(1 for c in self.cycles if c["ok"])
+        rs = [c for c in self.cycles if c.get("reset_ok") is not None]; rerr = [c["reset_err_mm"] for c in rs if c.get("reset_err_mm") is not None]
         return {"session": self.cfg.session, "cycles": n, "landed": ok, "picked": sum(1 for c in self.cycles if c["picked"]), "success_rate": round(ok / n, 3) if n else None,
                 "mean_err_mm": round(statistics.mean(errs), 1) if errs else None, "median_err_mm": round(statistics.median(errs), 1) if errs else None, "retries": sum(c["retries"] for c in self.cycles),
-                "stops": self.stops, "end": end, "duration_s": round(self.ctx.now() - t0, 1), "radius_mm": self.cfg.radius_mm, "dry_run": self.cfg.dry_run}
+                "stops": self.stops, "end": end, "duration_s": round(self.ctx.now() - t0, 1), "radius_mm": self.cfg.radius_mm, "dry_run": self.cfg.dry_run,
+                "resets": len(rs), "resets_ok": sum(1 for c in rs if c["reset_ok"]), "reset_median_err_mm": round(statistics.median(rerr), 1) if rerr else None,
+                "pre_resets": sum(1 for c in self.cycles if "pre_reset" in c)}
 
     def run(self):
         cfg, t0, end = self.cfg, self.ctx.now(), "cycles"
@@ -310,7 +381,8 @@ class DryArm:
 def make_cfg(a, out_dir):
     box = tuple(a.safe_box) if a.safe_box else SAFE_BOX_IN
     return argparse.Namespace(cycles=a.cycles, minutes=a.minutes, target=tuple(a.target), random_target=a.random_target, safe_box=box, radius_mm=a.radius_mm, session=a.session or time.strftime("%Y%m%d-%H%M%S"),
-                              dry_run=a.dry_run, max_retries=a.max_retries, settle_s=a.settle, moved_mm=20.0, spot_mm=(40.0, 50.0, 60.0), out_dir=out_dir)
+                              dry_run=a.dry_run, max_retries=a.max_retries, settle_s=a.settle, moved_mm=20.0, spot_mm=(40.0, 50.0, 60.0), out_dir=out_dir,
+                              judge_wait_s=a.judge_wait, save_frames=not a.dry_run)
 
 
 def build_parser():
@@ -323,7 +395,8 @@ def build_parser():
     ap.add_argument("--max-consecutive-failures", type=int, default=3); ap.add_argument("--max-retries", type=int, default=1); ap.add_argument("--lost-after", type=int, default=3)
     ap.add_argument("--stop-file", default=None, help="while this file exists the session stops cleanly (default ~/so101/outputs/run/autoloop.stop)")
     ap.add_argument("--max-err-deg", type=float, default=8.0); ap.add_argument("--margin-mm", type=float, default=20.0); ap.add_argument("--ceiling-in", type=float, default=4.0)
-    ap.add_argument("--settle", type=float, default=1.0, help="seconds to wait before judging the landing"); ap.add_argument("--table", default=None, help="top_table.json (default jetson/calib/top_table.json)")
+    ap.add_argument("--settle", type=float, default=1.0, help="seconds to wait before judging the landing or a reset")
+    ap.add_argument("--judge-wait", type=float, default=4.0, help="after the settle, wait up to this long while the map still has objects pending confirmation"); ap.add_argument("--table", default=None, help="top_table.json (default jetson/calib/top_table.json)")
     ap.add_argument("--dry-miss", type=float, default=0.1, help="--dry-run: chance that a pick misses the nut"); ap.add_argument("--out-dir", default=None)
     return ap
 
