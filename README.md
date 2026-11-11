@@ -27,6 +27,7 @@ Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend,
 
 ## The guides
 
+- [`docs/autoloop-explained.md`](docs/autoloop-explained.md): what the arm does on its own, how, and the first ten-cycle session
 - [`docs/camera-calibration.md`](docs/camera-calibration.md): checkerboard intrinsics, four 2 in ArUco
   markers on a Fiskars 18x12 in cutting mat, the arm base pose by jogging to grid points, the LeRobot
   joint zero offsets, and why wrist roll must be held constant. Also the self-healing re-solve when the
@@ -61,6 +62,18 @@ Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend,
   (`so101-hotspot`, NetworkManager AP + shared mode over an Ethernet uplink, a 10-minute revert
   watchdog, a cable-follows dispatcher and a one-port firewall). Written against fake tools; not yet
   run on the hardware.
+
+## The arm practising alone
+
+[![Camera recordings from the overhead C920, the front C920 and the wrist camera at 3x speed: the arm picks a hex nut and places it on a target on the mat. Poster frame of the video.](site/public/video/autoloop-poster.jpg)](https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/notes/practising-alone)
+
+*Camera recordings from the overhead C920, the front C920 and the wrist camera, 3x speed, about 95 s of one session
+([MP4, 2.4 MB](site/public/video/autoloop-cycle7.mp4); GitHub does not play repo videos inline).*
+
+The session runner picks a hex nut, places it on a target, resets the mat and tries again with nobody touching it. The first
+attended ten-cycle session (10 Nov 2026) landed 5 of 10 within 15 mm and stopped on a guardrail trip after cycle 10. What it
+does step by step, the guardrails and the numbers are in [`docs/autoloop-explained.md`](docs/autoloop-explained.md) and on the
+[site page](https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/notes/practising-alone).
 
 ## Hardware
 

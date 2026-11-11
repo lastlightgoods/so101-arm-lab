@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Practising alone &middot; SO-101 Arm Lab</title>
+<meta name="description" content="How the SO-101 arm picks a hex nut, places it on a target, resets the mat and tries again with nobody touching it: the cycle, the guardrails, a camera recording, and the numbers from the first attended ten-cycle session.">
+<link rel="canonical" href="https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/notes/practising-alone">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SO-101 Arm Lab">
+<meta property="og:title" content="Practising alone">
+<meta property="og:description" content="The arm tries a pick, judges it, resets the mat and tries again. The first ten-cycle session landed 5 of 10.">
+<meta property="og:url" content="https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/notes/practising-alone">
+<meta property="og:image" content="https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/video/autoloop-poster.jpg">
+<meta property="og:image:alt" content="Frame from the camera recordings: overhead, front and wrist views of the arm over the cutting mat.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#1a191f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fdfbf6" media="(prefers-color-scheme: light)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1.5' y='1.5' width='29' height='29' rx='3' fill='%231a191f' stroke='%23aeb4bb' stroke-width='1.5'/%3E%3Ccircle cx='9.5' cy='9.5' r='3' fill='%23fdfbf6'/%3E%3Ccircle cx='22.5' cy='9.5' r='3' fill='%23fdfbf6'/%3E%3Ccircle cx='9.5' cy='22.5' r='3' fill='%23fdfbf6'/%3E%3Ccircle cx='22.5' cy='22.5' r='3' fill='%23b98526'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/style.css">
+<script>
+  try { var t = localStorage.getItem('so101-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="SO-101 Arm Lab, home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="1.5" y="1.5" width="29" height="29" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9.5" cy="9.5" r="3.5" fill="currentColor"/><circle cx="22.5" cy="9.5" r="3.5" fill="currentColor"/><circle cx="9.5" cy="22.5" r="3.5" fill="currentColor"/><circle cx="22.5" cy="22.5" r="3.5" fill="#b98526"/></svg>
+      SO-101 Arm Lab
+    </a>
+    <nav aria-label="Sections">
+      <a href="/#notes">Notes</a>
+      <a href="/#gallery">Gallery</a>
+      <a href="/#status">Status</a>
+    </nav>
+    <button class="theme-btn" type="button" id="theme" aria-pressed="false">theme</button>
+  </div>
+</header>
+
+<main id="main">
+  <article class="article">
+    <div class="wrap">
+      <a class="back" href="/">&larr; back to the lab</a>
+      <header class="prose" style="margin-top:2rem">
+        <p class="eyebrow">Note &middot; The pick loop</p>
+        <h1>Practising alone: the arm tries, judges, resets and tries again</h1>
+        <p class="meta">First attended ten-cycle session, 10 Nov 2026 &middot; ~6 minutes</p>
+      </header>
+
+      <div class="prose">
+        <p>I want the arm to practise by itself. A person resetting the nut between every attempt is the slow part of learning from a real arm, so the first milestone is a session where nobody touches the mat. This is what the arm does, how, and what the first attended session measured.</p>
+
+        <figure style="margin:2rem 0">
+          <div class="frame"><video controls preload="metadata" playsinline width="1280" height="720" poster="/video/autoloop-poster.jpg" style="width:100%;height:auto;display:block"><source src="/video/autoloop-cycle7.mp4" type="video/mp4"><source src="/video/autoloop-cycle7.webm" type="video/webm"><a href="/video/autoloop-cycle7.mp4">Camera recording, MP4, 2.4 MB</a></video></div>
+          <figcaption>Camera recordings from the overhead C920, the front C920 and the wrist camera, 3x speed, about 95 s of session first10b: the end of cycle 6, then cycle 7, which landed 4.4 mm from the target. The wrist recording covers the first 35 s of the clip only. The nut is a small dot in the overhead view.</figcaption>
+        </figure>
+
+        <h2>The goal</h2>
+        <p>The milestone is called "10 in a row, attended". The task is to pick a hex nut and place it on a target at mat (9, 6) in. The bar is at least 9 of 10 cycles landing within 15 mm of the target, with zero guardrail trips. I stand at the wall STOP control the whole time.</p>
+
+        <h2>One cycle, step by step</h2>
+        <ol>
+          <li><strong>Guard.</strong> Before anything moves, the runner checks the stop file, that the dashboard answers, that the overhead camera sees at least 3 of its 4 markers, and that no LeRobot job is holding the arm.</li>
+          <li><strong>Find the nut.</strong> The overhead camera's mat map gives the nut's position in mat inches. If the map misses it, a search over the whole mat image takes over.</li>
+          <li><strong>Closed-loop pick.</strong> The nut position goes through inverse kinematics. The arm is commanded to a hover point, the joints it actually reached are read back, and forward kinematics turns them into a position on the mat. The difference is the correction, and it is applied twice: once at the hover, once at grasp height with the jaws open. If the tip is still more than 6 mm above the mat, the grasp is lowered. The jaws open to 35 and close in two steps so the moving jaw meets the nut slowly. On 10 Nov an open-loop hover came up 5 to 8 mm short, and after two corrections the grasp pose was within 0.1 mm of the command.</li>
+          <li><strong>Jaw check.</strong> After the lift, one wrist-camera frame is searched for the nut's bright ring with a dark hole, inside a window between the jaw tips. Not found: open, go back, grasp once more. Not found again: record a failed pick.</li>
+          <li><strong>Place and judge.</strong> The arm carries the nut to the target and places it. After 1 s the overhead map gives where the nut is. A cycle landed if the nut moved more than 20 mm and ended within 15 mm of the target.</li>
+          <li><strong>Reset.</strong> The same closed-loop pick takes the nut from the target and drops it at a random spot in a safe box, x 6 to 13 in and y 4 to 8 in, at least 40 mm from other objects, 50 mm from marker centres and 60 mm from where it was. The next cycle starts from somewhere new.</li>
+        </ol>
+        <p>Every cycle is logged to MLflow in the experiment <code>so101-autoloop</code>, with the landing error, the retries and the stage detail of each pick.</p>
+
+        <h2>Guardrails</h2>
+        <p>The runner never talks to the arm directly. Every motion goes through one script that applies the arm's own limits, and a guard module decides before each step whether to go on. Any trip ends the session.</p>
+        <ul>
+          <li><strong>Workspace:</strong> a planned waypoint outside the mat (shrunk by 20 mm), above 4 in, or more than 10 mm below the mat plane. That plan is never run.</li>
+          <li><strong>Motion watchdog:</strong> commanded and reached joints differ by more than 8 degrees.</li>
+          <li><strong>Perception:</strong> fewer than 3 markers seen for 10 s, calibration not ok, or no scene from the overhead camera.</li>
+          <li><strong>Panel liveness:</strong> the dashboard does not answer within 3 s, or reports the Jetson offline.</li>
+          <li><strong>Arm busy:</strong> a LeRobot job (teleop, record, rollout) already holds the arm.</li>
+          <li><strong>Stop file</strong> and <strong>caps:</strong> a clean stop, a cycle or minute limit, or 3 failed cycles in a row.</li>
+        </ul>
+        <p>The wall STOP cuts the arm independently of all of this.</p>
+
+        <h2>What happened on 10 Nov 2026</h2>
+        <p>Session <code>first10b</code>: 10 cycles, target (9, 6) in, 15 mm radius, 1067 s in total.</p>
+        <table class="runs">
+          <caption class="eyebrow" style="text-align:left;margin:1.25rem 0 0.5rem">Per cycle, from the session log</caption>
+          <thead><tr><th scope="col">cycle</th><th scope="col">landed</th><th scope="col">error mm</th><th scope="col">retries</th><th scope="col">cycle s</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>yes</td><td>5.1</td><td>0</td><td>84.53</td></tr>
+            <tr><td>2</td><td>yes</td><td>5.7</td><td>0</td><td>84.71</td></tr>
+            <tr><td>3</td><td>yes</td><td>3.4</td><td>0</td><td>84.69</td></tr>
+            <tr><td>4</td><td>yes</td><td>7.9</td><td>0</td><td>101.71</td></tr>
+            <tr><td>5</td><td>no</td><td>4.2 (moved 1.7 mm)</td><td>1</td><td>127.51</td></tr>
+            <tr><td>6</td><td>no</td><td>20.6</td><td>1</td><td>127.86</td></tr>
+            <tr><td>7</td><td>yes</td><td>4.4</td><td>0</td><td>84.43</td></tr>
+            <tr><td>8</td><td>no</td><td>none recorded</td><td>1</td><td>85.09</td></tr>
+            <tr><td>9</td><td>no</td><td>none recorded</td><td>1</td><td>117.43</td></tr>
+            <tr><td>10</td><td>no</td><td>62.8</td><td>1</td><td>163.83</td></tr>
+          </tbody>
+        </table>
+        <p>5 of 10 landed (success rate 0.5), mean error 14.3 mm, median 5.4 mm, 5 retries. The landed cycles were all within 8 mm of the target. The runner stopped after cycle 10 with a <code>consecutive_failures</code> trip (cycles 8 to 10 failed). That is below the bar of 9 of 10 with zero trips, so the milestone is not met. An earlier session, <code>first10</code>, ran 4 cycles, landed 3 (mean error 9.2 mm) and stopped on a <code>run_plan</code> trip in cycle 4 because a LeRobot teleop job had started and was holding the arm. The arm-busy check exists because of that.</p>
+
+        <h2>Two things I know are wrong</h2>
+        <ul>
+          <li><strong>The fixed jaw nudges the nut before the grasp.</strong> The SO-101 has one moving jaw and one fixed jaw, the thumb. The aim point I command is the tip of the fixed jaw, not the centre of the open jaw gap, so the fixed jaw comes down on the nut and moves it before the jaws close. A fix is in progress.</li>
+          <li><strong>Resets are not judged.</strong> The runner checks where the nut landed, not where the reset left it. In cycle 4 the reset left the nut on the target. Cycle 5 then started with the nut 4.2 mm from the target, and the "pick" moved it 1.7 mm, which the judge scored as not picked.</li>
+        </ul>
+
+        <h2>About the recording</h2>
+        <p>I started it partway into the session. The dashboard dropped the wrist stream after 35 s and the overhead stream after 95 s, and the front stream ran on. The clip is the first 95 s of the three recordings at 3x. I estimated the cycle boundaries from the cycle durations in the log, so they can be a few seconds off.</p>
+
+        <h2>What is next</h2>
+        <p>Fix the aim point so the nut ends up between the jaws and not under the fixed one, judge the reset the same way as the landing, and run the ten cycles again.</p>
+
+        <h2>Where the code is</h2>
+        <p><code>tools/autoloop.py</code>, <code>tools/guardrails.py</code>, <code>tools/pick_loop.py</code> and <code>docs/autoloop-explained.md</code> in the so101-arm-lab repository at <a href="https://github.com/lastlightgoods/so101-arm-lab">github.com/lastlightgoods/so101-arm-lab</a>.</p>
+
+        <p style="margin-top:3rem"><a class="back" href="/#status">&larr; back to the status</a></p>
+      </div>
+    </div>
+  </article>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <div>
+      <div class="mark">A Lastlight Goods project</div>
+      <div>Bend, Oregon</div>
+    </div>
+    <ul>
+      <li><a href="https://github.com/lastlightgoods/so101-arm-lab">github.com/lastlightgoods/so101-arm-lab</a> <span class="k">(repo)</span></li>
+      <li><a href="/">SO-101 Arm Lab</a></li>
+    </ul>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var btn = document.getElementById('theme');
+    if (!btn) return;
+    var root = document.documentElement;
+    function current() {
+      var t = root.getAttribute('data-theme');
+      if (t) return t;
+      return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    }
+    function paint() {
+      var c = current();
+      btn.textContent = c === 'dark' ? 'light' : 'dark';
+      btn.setAttribute('aria-label', 'Switch to ' + (c === 'dark' ? 'light' : 'dark') + ' theme');
+      btn.setAttribute('aria-pressed', root.hasAttribute('data-theme') ? 'true' : 'false');
+    }
+    btn.addEventListener('click', function () {
+      var next = current() === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('so101-theme', next); } catch (e) {}
+      paint();
+    });
+    paint();
+  })();
+</script>
+</body>
+</html>
