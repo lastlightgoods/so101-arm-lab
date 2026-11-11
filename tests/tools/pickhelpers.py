@@ -129,7 +129,7 @@ def pl(tmp_path, monkeypatch, cc, wc):
     m = load(os.path.join(TOOLS, "pick_loop.py"), "pick_loop_closed")
     calib = tmp_path / "jetson" / "calib"; calib.mkdir(parents=True); shutil.copy(FIXTURE_TABLE, calib / "top_table.json"); shutil.copy(WRIST_POSE, calib / "wrist_campose.json")
     rec = Recorder(); monkeypatch.setattr(m, "ROOT", str(tmp_path)); monkeypatch.setattr(m, "cam_calib", lambda: cc); monkeypatch.setattr(m, "wrist_mod", lambda: wc); monkeypatch.setattr(m, "labtrack", lambda: rec)
-    monkeypatch.setattr(m, "rec", rec, raising=False); monkeypatch.setattr(m.time, "sleep", lambda s: None); monkeypatch.setattr(m, "fetch_top", lambda: JPEG); monkeypatch.setattr(m, "fetch_wrist", lambda: None)
+    monkeypatch.setattr(m, "rec", rec, raising=False); monkeypatch.setattr(m.time, "sleep", lambda s: None); monkeypatch.setattr(m, "fetch_top", lambda: JPEG); monkeypatch.setattr(m, "fetch_wrist", lambda: None); monkeypatch.setattr(m, "follower_joints", lambda: None)   # why: hermetic: the arm cut-out never reads a live /api/state
     return m
 
 

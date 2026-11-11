@@ -285,3 +285,12 @@ def test_the_default_safe_box_is_the_approved_one_and_every_reset_stays_inside_i
     r = autorig(); s, out = r.run(capsys, cycles=10, max_retries=0)
     for c in events(out, "cycle"):
         if c.get("reset_to_in"): x, y = c["reset_to_in"]; assert 6.0 <= x <= 13.0 and 4.0 <= y <= 8.0, c["reset_to_in"]
+
+
+def test_start_near_is_the_first_cycles_search_hint(autorig, capsys, al):
+    r = autorig(); s, out = r.run(capsys, cycles=1, max_retries=0, start_near=(6.1, 7.9)); c, = events(out, "cycle")
+    assert c["locates"][0]["near_in"] == [6.1, 7.9] and c["ok"]
+    r2 = autorig(); s2, out2 = r2.run(capsys, cycles=1, max_retries=0); c2, = events(out2, "cycle")
+    assert c2["locates"][0]["near_in"] is None, "no flag: no hint, as before"
+    a = al.build_parser().parse_args(["--start-near", "11.3", "5.8"]); assert al.make_cfg(a, "o").start_near == (11.3, 5.8)
+    assert al.make_cfg(al.build_parser().parse_args([]), "o").start_near is None

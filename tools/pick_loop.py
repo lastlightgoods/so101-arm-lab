@@ -134,12 +134,36 @@ def mat_mask(cc, table, shape, markers_in, marker_in=2.0, margin_mm=10.0, mat_in
     return m
 
 
-def find_nut_mat(cc, table, near_in=None, jpeg=None, markers_in=None, marker_in=2.0, dark=60, area=(8, 300)):
-    """find_nut over the WHOLE mat (markers masked): the dark blob nearest `near_in` (else the mat centre) -> (mat_in, pixel, area) or None. Never raises."""
+def follower_joints():
+    """The follower's joints (LeRobot degrees) from /api/state, or None when the dashboard or the arm stream is down."""
+    try:
+        pos = ((api("/api/state").get("arms") or {}).get("follower") or {}).get("pos") or {}
+        return {k: float(pos[k]) for k in ARM} if all(k in pos for k in ARM) else None
+    except Exception: return None
+
+
+def arm_cut(cc, table, mask, joints):
+    """`mask` with the arm cut out: cam_calib.arm_mask_px_from_joints (links, wrist camera, cables, +30 % for the shadow), each point a filled
+    circle and consecutive points joined by a stroke 2 x the larger radius, as the scene map's kinematic mask does. Unchanged without joints."""
+    if not joints: return mask
+    try: arm = cc.arm_mask_px_from_joints(joints, table)
+    except Exception: return mask
+    P = [(int(round(u)), int(round(v)), max(1, int(math.ceil(r)))) for (u, v), r in zip(arm.get("points") or [], arm.get("radii_px") or []) if all(math.isfinite(x) for x in (u, v, r))]
+    for u, v, r in P: cv2.circle(mask, (u, v), r, 0, -1)
+    for (u0, v0, r0), (u1, v1, r1) in zip(P, P[1:]): cv2.line(mask, (u0, v0), (u1, v1), 0, thickness=2 * max(r0, r1))
+    return mask
+
+
+def find_nut_mat(cc, table, near_in=None, jpeg=None, markers_in=None, marker_in=2.0, dark=60, area=(8, 300), joints="live"):
+    """find_nut over the WHOLE mat (markers AND the arm masked): the dark blob nearest `near_in` (else the mat centre) -> (mat_in, pixel, area)
+    or None. Never raises. `joints`: the follower's joints for the arm cut-out ("live" reads /api/state; None skips it). why: 10 Nov 2026, with
+    no hint the search took the parked arm's dark parts at mat (8.1, 3.8) for the nut, closer to the mat centre than the real nut; first10b
+    cycles 9-10 went there and found nothing in the jaws."""
     try:
         img = cv2.imdecode(np.frombuffer(fetch_top() if jpeg is None else jpeg, np.uint8), cv2.IMREAD_COLOR)
         if img is None: return None
         g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY); mask = mat_mask(cc, table, g.shape, marker_centres_in(table) if markers_in is None else markers_in, marker_in)
+        mask = arm_cut(cc, table, mask, follower_joints() if joints == "live" else joints)
         n, lab, st, cen = cv2.connectedComponentsWithStats(((g < dark) & (mask > 0)).astype(np.uint8))
         ref = near_in if near_in else (MAT_IN[0] / 2.0, MAT_IN[1] / 2.0); cu, cv_ = cc.table_to_pixel(table, ref[0] * 25.4, ref[1] * 25.4)
         cands = [(math.hypot(cen[i][0] - cu, cen[i][1] - cv_), int(st[i, cv2.CC_STAT_AREA]), float(cen[i][0]), float(cen[i][1])) for i in range(1, n) if area[0] <= st[i, cv2.CC_STAT_AREA] <= area[1]]

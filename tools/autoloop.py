@@ -279,6 +279,7 @@ class Runner:
 
     def run(self):
         cfg, t0, end = self.cfg, self.ctx.now(), "cycles"
+        if self.opt("start_near", None): self.cur_in = [float(v) for v in cfg.start_near]   # the first locate's hint
         with self.track.run(f"autoloop-{cfg.session}", tags={"host": "mac", "session": cfg.session, "kind": "session"}) as parent:
             parent.params({"session": cfg.session, "cycles": cfg.cycles, "minutes": cfg.minutes, "mode": "random" if cfg.random_target else "fixed", "target": f"{cfg.target[0]:g},{cfg.target[1]:g}", "safe_box": ",".join(f"{v:g}" for v in cfg.safe_box),
                            "radius_mm": cfg.radius_mm, "max_retries": cfg.max_retries, "dry_run": int(cfg.dry_run)})
@@ -382,7 +383,7 @@ def make_cfg(a, out_dir):
     box = tuple(a.safe_box) if a.safe_box else SAFE_BOX_IN
     return argparse.Namespace(cycles=a.cycles, minutes=a.minutes, target=tuple(a.target), random_target=a.random_target, safe_box=box, radius_mm=a.radius_mm, session=a.session or time.strftime("%Y%m%d-%H%M%S"),
                               dry_run=a.dry_run, max_retries=a.max_retries, settle_s=a.settle, moved_mm=20.0, spot_mm=(40.0, 50.0, 60.0), out_dir=out_dir,
-                              judge_wait_s=a.judge_wait, save_frames=not a.dry_run)
+                              judge_wait_s=a.judge_wait, save_frames=not a.dry_run, start_near=tuple(a.start_near) if a.start_near else None)
 
 
 def build_parser():
@@ -396,6 +397,7 @@ def build_parser():
     ap.add_argument("--stop-file", default=None, help="while this file exists the session stops cleanly (default ~/so101/outputs/run/autoloop.stop)")
     ap.add_argument("--max-err-deg", type=float, default=8.0); ap.add_argument("--margin-mm", type=float, default=20.0); ap.add_argument("--ceiling-in", type=float, default=4.0)
     ap.add_argument("--settle", type=float, default=1.0, help="seconds to wait before judging the landing or a reset")
+    ap.add_argument("--start-near", type=float, nargs=2, default=None, metavar=("X", "Y"), help="where the first cycle looks for the nut (mat inches); without it the first search has no hint and the whole-mat fallback can take the parked arm's shadow for the nut")
     ap.add_argument("--judge-wait", type=float, default=4.0, help="after the settle, wait up to this long while the map still has objects pending confirmation"); ap.add_argument("--table", default=None, help="top_table.json (default jetson/calib/top_table.json)")
     ap.add_argument("--dry-miss", type=float, default=0.1, help="--dry-run: chance that a pick misses the nut"); ap.add_argument("--out-dir", default=None)
     return ap
