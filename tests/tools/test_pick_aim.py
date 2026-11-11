@@ -67,25 +67,25 @@ def test_the_jaw_direction_points_at_the_moving_jaw_in_the_real_wrist_frame(pl, 
 
 
 def test_the_aim_point_moves_the_fixed_jaw_back_from_the_nut_along_the_jaw_direction(pl):
-    assert pl.GRASP_AIM_MM == 10.0
+    assert pl.GRASP_AIM_MM == 4.0, "10 mm landed the fixed jaw 1/4 in too far back (TC, first10c)"
     a = pl.aim_point([10.0, 6.0], (0.0, 1.0), 25.4); assert a == pytest.approx([10.0, 5.0])
     a = pl.aim_point([10.0, 6.0], (0.6, 0.8), 10.0); assert math.hypot(10.0 - a[0], 6.0 - a[1]) * 25.4 == pytest.approx(10.0)
     assert (10.0 - a[0]) / (6.0 - a[1]) == pytest.approx(0.75), "straight back along the jaw direction"
     assert pl.aim_point([10.0, 6.0], None, 10.0) == [10.0, 6.0] and pl.aim_point([10.0, 6.0], (0.0, 1.0), 0.0) == [10.0, 6.0], "no direction or no aim: the nut itself"
 
 
-def test_the_closed_loop_lands_the_fixed_jaw_10mm_behind_the_nut_by_default(pl, cc, table, monkeypatch, capsys, tmp_path):
+def test_the_closed_loop_lands_the_fixed_jaw_grasp_aim_mm_behind_the_nut_by_default(pl, cc, table, monkeypatch, capsys, tmp_path):
     arm = ShortArm(cc, table, shortfall_mm=7.0)
     out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--state", str(tmp_path / "s.json")]); st = stages(out); rec, = records(out)
     final = {k: arm.rows[-2][0]["reached"][k] for k in ARM}   # the FINAL grasp, read back
     x, y, _ = pl.fk_mat(cc, table, final); u = pl.jaw_dir_mat(cc, table, final)
     nut = np.array(PROBE_NUT_IN); tip = np.array([x, y]); d_mm = (nut - tip) * 25.4
-    assert np.linalg.norm(d_mm) == pytest.approx(10.0, abs=1.0), f"the fixed jaw's tip ends {np.linalg.norm(d_mm):.1f} mm from the nut"
+    aim = pl.GRASP_AIM_MM; assert np.linalg.norm(d_mm) == pytest.approx(aim, abs=1.0), f"the fixed jaw's tip ends {np.linalg.norm(d_mm):.1f} mm from the nut"
     assert np.dot(d_mm / np.linalg.norm(d_mm), u) > 0.99, "and the nut lies toward the open moving jaw, inside the gap"
-    assert st["hover"]["aim_mm"] == 10.0 and st["hover"]["jaw_dir"] == rec["jaw_dir"] and rec["aim_mm"] == 10.0
-    assert rec["aim_in"] == pytest.approx(pl.aim_point(PROBE_NUT_IN, rec["jaw_dir"], 10.0), abs=1e-3)
+    assert st["hover"]["aim_mm"] == aim and st["hover"]["jaw_dir"] == rec["jaw_dir"] and rec["aim_mm"] == aim
+    assert rec["aim_in"] == pytest.approx(pl.aim_point(PROBE_NUT_IN, rec["jaw_dir"], aim), abs=1e-3)
     assert rec["final_residual_mm"] < 1.0, "the residual is measured against the aim point, not the nut"
-    r, = pl.rec.runs; assert r.params_["grasp_aim_mm"] == 10.0 and r.metrics_["aim_mm"] == 10.0
+    r, = pl.rec.runs; assert r.params_["grasp_aim_mm"] == aim and r.metrics_["aim_mm"] == aim
 
 
 def test_grasp_aim_0_aims_the_fixed_jaw_at_the_nut_as_before(pl, cc, table, monkeypatch, capsys, tmp_path):
@@ -112,6 +112,6 @@ def test_the_session_runner_grasps_with_the_default_aim(autorig, capsys, monkeyp
         plan, rows, info = orig(*args, **kw); seen.append(info); return plan, rows, info
     monkeypatch.setattr(rig.pl, "closed_loop_pick", spy)
     summary, out = rig.run(capsys, cycles=1)
-    assert rig.runner.pick_args.grasp_aim_mm == rig.pl.GRASP_AIM_MM == 10.0
-    assert len(seen) == 2 and all(i["aim_mm"] == 10.0 and i["jaw_dir"] for i in seen), "the pick AND the reset aim the fixed jaw beside the nut"
+    assert rig.runner.pick_args.grasp_aim_mm == rig.pl.GRASP_AIM_MM == 4.0
+    assert len(seen) == 2 and all(i["aim_mm"] == 4.0 and i["jaw_dir"] for i in seen), "the pick AND the reset aim the fixed jaw beside the nut"
     assert [o for o in out if o.get("event") == "cycle"][0]["ok"], "and the dry-run world (grasp within 15 mm) still counts it a pick"

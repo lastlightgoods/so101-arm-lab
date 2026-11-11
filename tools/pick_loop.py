@@ -33,11 +33,10 @@ JAW_OPEN = 35
 # why: the two-step close parks the moving jaw at 20 (just clear of a 10 mm nut) first, so the final squeeze starts from a standstill next to the nut instead of flicking it (open-loop runs landed 10-40 mm off partly because the nut slid in the single-moving-jaw gripper)
 CLOSE_MID = 20
 # why: the arm fit's tip is where the CLOSED jaws meet (the fixed jaw's inner face), so a grasp aimed at the nut's centre brought the fixed jaw
-# down on the nut's near half and pushed it forward into the gap (10 Nov 2026, seen by TC; the wrist frame at the grasp shows the nut's centre
-# 23 px past the fixed tip). The grasp puts the nut this far into the open gap instead. At the grasp depth 10 mm is 48 px in the wrist frame and
-# the nut's ring is about 20 px (4 mm) in radius, so about 6 mm clears the fixed jaw, more than first10b's 5.1 mm median landing error.
-# The moving jaw then pushes the nut back against the fixed jaw, where it was held before.
-GRASP_AIM_MM = 10.0
+# down on the nut's near half and pushed it forward into the gap (10 Nov 2026, seen by TC). The grasp puts the nut this far into the open gap
+# instead. 10 mm (the first value: the nut's ~4 mm radius plus clearance) was too much: TC watched the fixed jaw land "a 1/4 in too far back,
+# then slide up to the nut and hit it" (session first10c, 10 Nov 2026), so 10 - 6.35 = 3.65 -> 4 mm, the fixed jaw's face at the nut's edge.
+GRASP_AIM_MM = 4.0
 WP = [("hover_nut", "nut", 1.5, JAW_OPEN, 1.6, 0.4), ("grasp", "nut", GRASP_H_IN, JAW_OPEN, 0.9, 0.5),
       ("close1", "nut", GRASP_H_IN, CLOSE_MID, 0.5, 0.4), ("close2", "nut", GRASP_H_IN, 0, 0.6, 0.6),
       ("lift", "nut", 1.5, 0, 0.8, 0.2), ("hover_tgt", "tgt", 1.5, 0, 1.2, 0.3), ("place", "tgt", 0.3, 0, 0.9, 0.5),
