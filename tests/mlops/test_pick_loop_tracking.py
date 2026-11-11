@@ -60,7 +60,7 @@ def test_one_run_per_pick_with_params_metrics_tags_and_artifacts(pl, store, tmp_
     assert r1.data.params["state"] == "pick_state.json" and r1.data.params["runs"] == "3"
     m = r1.data.metrics
     assert m["picked"] == 1.0 and m["found_at_landing"] == 1.0 and m["landing_err_mm"] == pytest.approx(out[0]["err_mm"], abs=0.06) and m["before_mm"] > 0 and m["seconds"] >= 0
-    assert {k for k in m if k.startswith("sag_")} == {"sag_hover_nut", "sag_grasp", "sag_close1", "sag_close2", "sag_lift", "sag_hover_tgt", "sag_place", "sag_open", "sag_lift2", "sag_rest"} and m["sag_grasp"] == 1.5 and m["sag_close1"] == m["sag_close2"] == 0.0
+    assert {k for k in m if k.startswith("sag_")} == {"sag_hover_nut", "sag_pregrasp", "sag_grasp", "sag_close1", "sag_close2", "sag_lift", "sag_hover_tgt", "sag_place", "sag_open", "sag_lift2", "sag_rest"} and m["sag_grasp"] == 1.5 and m["sag_close1"] == m["sag_close2"] == 0.0
     assert p1 == {"plan.json", "waypoints.json", "frames/landing.jpg", "state/pick_state.json"}
     assert by_run[3][0].data.tags["target_in"] == "9.00,6.00" and by_run[2][0].data.tags["target_in"] == "9.00,6.00", "even runs and the last run go to --target"
 
