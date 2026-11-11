@@ -22,7 +22,7 @@ How the outside world is kept out
 * ``http`` binds ``Srv`` on 127.0.0.1 port 0 in a daemon thread and shuts it down after the test. Nothing here talks to
   8765/8766/9333.
 """
-import copy, importlib.util, json, os, queue, subprocess, sys, threading, time, urllib.error, urllib.request
+import threading, copy, importlib.util, json, os, queue, subprocess, sys, threading, time, urllib.error, urllib.request
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -135,8 +135,9 @@ class StopLoop(Exception): pass
 def run_loop(srv, monkeypatch):
     """Run an infinite loop function until time.sleep has been called ``sleeps`` times, then unwind it."""
     def _run(fn, sleeps=1, *args):
-        n = {"left": sleeps}
-        def fake_sleep(_s):
+        n = {"left": sleeps}; me = threading.get_ident(); real_sleep = time.sleep
+        def fake_sleep(s):
+            if threading.get_ident() != me: return real_sleep(min(float(s), 0.01))   # why: the server's own threads sleep too; only the loop under test is counted (CI flake, 11 Nov)
             n["left"] -= 1
             if n["left"] <= 0: raise StopLoop
         monkeypatch.setattr(time, "sleep", fake_sleep)
