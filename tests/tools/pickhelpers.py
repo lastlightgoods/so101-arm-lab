@@ -4,7 +4,9 @@
     wrist_campose.json and labtrack.py, so the loop reads its calibration and writes outputs/run/ where it expects;
   * ShortArm answers /api/ik from the real kinematics and "runs" a plan by reporting reached joints whose FK tip sits `shortfall_mm`
     short of the command along the base->tip direction (what the real arm did on 10 Nov 2026: 5-8 mm) and `high_mm` above it;
-  * Recorder stands in for labtrack and keeps params / metrics / artifact names in memory.
+  * Recorder stands in for labtrack and keeps params / metrics / artifact names in memory;
+  * jaw_frame / frame_feed fake the wrist camera after the lift (a ring between the jaw tips, or not), overhead_frame paints dark blobs
+    at mat points into a frame the size of the calibration's image for the whole-mat finder.
 Joint solves use a damped Gauss-Newton on fk_tip (~1 ms) rather than cam_calib.ik_tip (0.5 s, searches for a vertical gripper): a fake
 arm needs the kinematics, not the posture search."""
 import contextlib, importlib.util, json, os, shutil, sys
@@ -75,9 +77,10 @@ def mat_to_base(cc, table, x_in, y_in, h_mm=0.0):
 class ShortArm:
     """The dashboard's /api/ik and the ssh'd pick_seq, faked on the real kinematics. Every arm waypoint is 'reached' `shortfall_mm`
     short along the base->tip direction and `high_mm` above the command (gripper-only waypoints and rest are reached exactly).
-    The nut is found at `nut_in`; at landing it is `land_off_in` from where the loop placed it."""
-    def __init__(self, cc, table, shortfall_mm=7.0, high_mm=0.0, nut_in=PROBE_NUT_IN, land_off_in=(0.1, -0.05)):
-        self.cc, self.table, self.shortfall, self.high, self.nut_in, self.land_off = cc, table, shortfall_mm, high_mm, nut_in, land_off_in
+    The nut is found at `nut_in` (not at all when `found` is False: the near search misses and the loop falls back to the scene map
+    `scene` / the whole-mat search); at landing it is `land_off_in` from where the loop placed it."""
+    def __init__(self, cc, table, shortfall_mm=7.0, high_mm=0.0, nut_in=PROBE_NUT_IN, land_off_in=(0.1, -0.05), found=True, scene=None):
+        self.cc, self.table, self.shortfall, self.high, self.nut_in, self.land_off, self.found, self.scene = cc, table, shortfall_mm, high_mm, nut_in, land_off_in, found, list(scene or [])
         self.calls, self.plans, self.rows, self.ik_calls, self.frames = [], [], [], [], 0
 
     def api(self, path):
@@ -99,7 +102,7 @@ class ShortArm:
         self.rows.append(rows); return rows
 
     def find_nut(self, cc, table, near_in, radius_px=70, jpeg=None):
-        if jpeg is None: return list(self.nut_in), [320, 180], 40
+        if jpeg is None: return (list(self.nut_in), [320, 180], 40) if self.found else None
         self.frames += 1; return [near_in[0] + self.land_off[0], near_in[1] + self.land_off[1]], [320, 180], 40
 
 
@@ -132,6 +135,33 @@ def pl(tmp_path, monkeypatch, cc, wc):
 
 def drive(pl, monkeypatch, capsys, arm, argv):
     """Run pick_loop.main() against `arm`; returns every stdout line parsed as JSON."""
-    monkeypatch.setattr(pl, "find_nut", arm.find_nut); monkeypatch.setattr(pl, "api", arm.api); monkeypatch.setattr(pl, "run_plan", arm.run_plan)
+    monkeypatch.setattr(pl, "find_nut", arm.find_nut); monkeypatch.setattr(pl, "api", arm.api); monkeypatch.setattr(pl, "run_plan", arm.run_plan); monkeypatch.setattr(pl, "fetch_scene_objects", lambda: list(arm.scene))
     monkeypatch.setattr(sys, "argv", ["pick_loop.py", *argv]); pl.main()
     return [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+
+
+JAW_RING_UV = (340, 330)   # where the held nut's ring sat between the jaw tips in the 10 Nov diag frame (window 300-380 x 300-360)
+
+
+def jaw_frame(ring=True, uv=JAW_RING_UV, r=15, jpeg=True):
+    """A wrist frame after the lift: grey mat, two dark jaw bars either side of the window and, when `ring`, the nut's bright ring with a dark hole at `uv`."""
+    import cv2
+    img = np.full((480, 640, 3), 110, np.uint8); cv2.rectangle(img, (250, 290), (298, 480), (40, 40, 40), -1); cv2.rectangle(img, (382, 290), (430, 480), (40, 40, 40), -1)
+    if ring: cv2.circle(img, tuple(int(v) for v in uv), r, (235, 235, 235), -1); cv2.circle(img, tuple(int(v) for v in uv), int(r * 0.4), (25, 25, 25), -1)
+    return cv2.imencode(".jpg", img)[1].tobytes() if jpeg else img
+
+
+def frame_feed(*frames):
+    """A fetch_wrist stand-in handing out `frames` in order (the last one repeats); `.calls` counts the fetches."""
+    def fetch():
+        fetch.calls += 1; return frames[min(fetch.calls, len(frames)) - 1]
+    fetch.calls = 0; return fetch
+
+
+def overhead_frame(cc, table, blobs_in=(), r_px=3, bright=200):
+    """PNG bytes of an overhead frame the size of the calibration's image: a light mat with a dark disc (radius r_px) at each mat point (inches)."""
+    import cv2
+    w, h = table.get("image_size") or [640, 360]; img = np.full((h, w, 3), bright, np.uint8)
+    for x, y in blobs_in:
+        u, v = cc.table_to_pixel(table, x * 25.4, y * 25.4); cv2.circle(img, (int(round(u)), int(round(v))), r_px, (20, 20, 20), -1)
+    return cv2.imencode(".png", img)[1].tobytes()

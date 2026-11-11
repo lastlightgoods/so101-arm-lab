@@ -5,8 +5,8 @@ import json, math, os, subprocess, sys
 import cv2, numpy as np, pytest
 from pickhelpers import ARM, FIXTURE_TABLE, PROBE_FRAME, PROBE_JOINTS, PROBE_NUT_IN, SEED, TOOLS, WRIST_POSE, ShortArm, drive, mat_to_base, solve_joints, tip_of
 
-FINAL = ["grasp", "close", "lift", "hover_tgt", "place", "open", "lift2", "rest"]
-ALL = ["hover_nut", *FINAL]
+LIFT = ["grasp", "close1", "close2", "lift"]; CARRY = ["hover_tgt", "place", "open", "lift2", "rest"]; FINAL = LIFT + CARRY
+ALL = ["hover_nut", *FINAL]; GRIPPER_ONLY = {"close1", "close2", "open"}
 
 
 def stages(out): return {o["stage"]: o for o in out if "stage" in o}
@@ -22,29 +22,31 @@ def test_two_readback_corrections_converge_on_an_arm_that_reaches_7mm_short(pl, 
     out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--target", "9", "6", "--state", str(state)])
     for o in out: print(json.dumps(o))   # the transcript, visible with pytest -s
     st = stages(out); rec, = records(out)
-    assert [n for n, _ in arm.calls] == [["hover_nut"], ["hover_nut", "grasp"], FINAL], "three staged pick_seq runs"
+    assert [n for n, _ in arm.calls] == [["hover_nut"], ["hover_nut", "grasp"], LIFT, CARRY], "four staged pick_seq runs: the jaw check (no frame here: unknown, carry) splits the final stage after the lift"
     assert all(v == 50.0 for _, v in arm.calls), "closed loop defaults to 50 deg/s"
     c1, c2 = st["hover"]["corr1_mm"], st["grasp_pose"]["corr2_mm"]
     assert 6.0 < math.hypot(*c1) < 8.0, f"the first correction is the 7 mm shortfall: {c1}"
     assert math.hypot(*c2) < 1.0, f"the second pass only trims the residual: {c2}"
     assert math.hypot(*st["final"]["residual_mm"]) < 1.0 and rec["final_residual_mm"] < 1.0
-    x, y, h = fk_mat(pl, cc, table, {k: arm.rows[-1][0]["reached"][k] for k in ARM})   # the FINAL grasp, read back
+    x, y, h = fk_mat(pl, cc, table, {k: arm.rows[-2][0]["reached"][k] for k in ARM})   # the FINAL grasp (first waypoint of the lift stage), read back
     assert math.hypot(x - PROBE_NUT_IN[0], y - PROBE_NUT_IN[1]) * 25.4 < 1.0 and abs(h - 0.12 * 25.4) < 0.5
     # the correction points along the reach direction (base -> nut), the way the real shortfall did
     base_in = np.array(cc.arm_to_table(table, 38.8353, 0.0)) / 25.4; d = np.array(PROBE_NUT_IN) - base_in; d /= np.linalg.norm(d)
     assert np.dot(np.array(c1) / np.linalg.norm(c1), d) > 0.98
     # the history record carries the stage numbers and the sag of the final stage only
     assert rec["mode"] == "closed" and rec["jaw_open"] == 35 and rec["corr1_mm"] == c1 and rec["corr2_mm"] == c2 and rec["grasp_h_mm"] == st["grasp_pose"]["h_mm"] and rec["grasp_lowered_mm"] == 0.0
-    assert set(rec["sag_deg"]) == set(FINAL) and rec["picked"] is True
-    saved = json.load(open(state)); assert set(saved["biases"]) == set(FINAL) - {"close", "open"}, "sag is learned on the final stage's waypoints"
+    assert set(rec["sag_deg"]) == set(FINAL) and rec["picked"] is True and rec["in_jaws"] is None and rec["reason"] is None and rec["nut_source"] == "near"
+    saved = json.load(open(state)); assert set(saved["biases"]) == set(FINAL) - GRIPPER_ONLY, "sag is learned on the final stages' waypoints, never on the jaw moves"
     assert saved["history"][-1]["corr1_mm"] == c1
     # and MLflow gets them as metrics through the (faked) labtrack
     r, = pl.rec.runs; m = r.metrics_
     assert m["corr1_mm"] == pytest.approx(math.hypot(*c1)) and m["corr1_x_mm"] == c1[0] and m["corr1_y_mm"] == c1[1] and m["corr2_mm"] == pytest.approx(math.hypot(*c2))
     assert m["grasp_h_mm"] == rec["grasp_h_mm"] and m["grasp_lowered_mm"] == 0.0 and m["final_residual_mm"] == rec["final_residual_mm"] and m["jaw_open"] == 35 and m["picked"] == 1.0
     assert {k for k in m if k.startswith("sag_")} == {f"sag_{n}" for n in FINAL} and "wrist_offset_mm" not in m
-    assert r.params_["mode"] == "closed" and r.params_["jaw_open"] == 35 and r.params_["max_deg_s"] == 50.0 and r.params_["wrist_check"] == 0
+    assert r.params_["mode"] == "closed" and r.params_["jaw_open"] == 35 and r.params_["max_deg_s"] == 50.0 and r.params_["wrist_check"] == 0 and r.params_["jaw_check"] == 1
     assert "plan.json" in r.files and "waypoints.json" in r.files and "frames/landing.jpg" in r.files
+    capsys.readouterr(); arm2 = ShortArm(cc, table, shortfall_mm=7.0); out2 = drive(pl, monkeypatch, capsys, arm2, ["--runs", "1", "--no-jaw-check", "--state", str(tmp_path / "s2.json")])   # (the transcript echo above is drained first)
+    assert [n for n, _ in arm2.calls] == [["hover_nut"], ["hover_nut", "grasp"], FINAL] and records(out2)[0]["picked"] and "jaw_check" not in stages(out2), "--no-jaw-check: the three staged runs of before"
 
 
 @pytest.mark.parametrize("high_mm", [2.0, 5.0, 12.0])
@@ -54,8 +56,8 @@ def test_the_grasp_is_lowered_only_when_the_tip_sits_more_than_6mm_high(pl, cc, 
     h = st["grasp_pose"]["h_mm"]; want = min(h - 3.0, 6.0) if h > 6.0 else 0.0
     assert h == pytest.approx(0.12 * 25.4 + high_mm, abs=0.2) and st["grasp_pose"]["lowered_mm"] == pytest.approx(want, abs=0.06) and rec["grasp_lowered_mm"] == pytest.approx(want, abs=0.06)
     assert (want == 0.0) == (high_mm == 2.0) and (want == 6.0) == (high_mm == 12.0), "5.05 mm high -> no change; 8.05 -> lowered 5.05; 15.05 -> capped at 6"
-    grasp_h = [h_in for (_, _, h_in) in arm.ik_calls][-7]   # the final stage's grasp is the first of its 7 IK calls (close/lift/hover_tgt/place/open/lift2 follow)
-    assert grasp_h == pytest.approx(0.12 - want / 25.4, abs=0.005), "the lowering goes through /api/ik, not through the joints (h is printed to 0.1 mm, so 0.1 mm of slack)"
+    low = [h_in for (_, _, h_in) in arm.ik_calls if h_in < 0.2]   # stage 2's grasp at 0.12, then the lift stage's grasp, close1, close2
+    assert len(low) == 4 and low[0] == 0.12 and all(h == pytest.approx(0.12 - want / 25.4, abs=0.005) for h in low[1:]), "the lowering goes through /api/ik for the grasp AND the close steps (h is printed to 0.1 mm, so 0.1 mm of slack)"
     assert pl.rec.runs[0].metrics_["grasp_lowered_mm"] == pytest.approx(want, abs=0.06)
 
 
@@ -71,11 +73,11 @@ def test_open_loop_is_one_run_of_the_whole_plan_at_80(pl, cc, table, monkeypatch
 
 
 def test_jaws_open_to_35_by_default_and_follow_the_flag(pl, cc, table, monkeypatch, capsys, tmp_path):
-    assert pl.JAW_OPEN == 35 and [g for _, _, _, g, _, _ in pl.WP if g] == [35, 35, 35, 35]
+    assert pl.JAW_OPEN == 35 and [g for _, _, _, g, _, _ in pl.WP if g] == [35, 35, 20, 35, 35]
     arm = ShortArm(cc, table); out = drive(pl, monkeypatch, capsys, arm, ["--runs", "2", "--state", str(tmp_path / "s.json")])
     grips = {w["name"]: w["gripper"] for p in arm.plans for w in p["waypoints"]}
-    assert grips == {"hover_nut": 35, "grasp": 35, "close": 0, "lift": 0, "hover_tgt": 0, "place": 0, "open": 35, "lift2": 35, "rest": 0}
-    assert [r["run"] for r in records(out)] == [1, 2] and all(r["picked"] for r in records(out)) and len(arm.calls) == 6, "two closed-loop picks, three stages each; the second starts from the learned biases"
+    assert grips == {"hover_nut": 35, "grasp": 35, "close1": 20, "close2": 0, "lift": 0, "hover_tgt": 0, "place": 0, "open": 35, "lift2": 35, "rest": 0}
+    assert [r["run"] for r in records(out)] == [1, 2] and all(r["picked"] for r in records(out)) and len(arm.calls) == 8, "two closed-loop picks, four stages each; the second starts from the learned biases"
     arm2 = ShortArm(cc, table); drive(pl, monkeypatch, capsys, arm2, ["--runs", "1", "--jaw-open", "30", "--state", str(tmp_path / "s2.json")])
     assert {w["gripper"] for p in arm2.plans for w in p["waypoints"] if w["name"] in ("hover_nut", "grasp", "open", "lift2")} == {30} and pl.rec.runs[-1].params_["jaw_open"] == 30
 
@@ -152,13 +154,13 @@ def test_the_loop_runs_the_wrist_check_at_hover_and_survives_a_dead_feed(pl, wc,
         j = {k: arm.rows[-1][-1]["reached"][k] for k in ARM}; uv, _ = wc.project_base_point(cc, table, wpose, wc.mat_to_base_mm(cc, table, *PROBE_NUT_IN), j)
         return cv2.imencode(".jpg", synthetic_frame(ring_uv=(int(round(uv[0])), int(round(uv[1]))), shadow_uv=(int(uv[0]) - 15, int(uv[1]) + 75)))[1].tobytes()
     monkeypatch.setattr(pl, "fetch_wrist", live_frame)
-    out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--wrist-check", "--state", str(tmp_path / "s.json")]); st = stages(out); rec, = records(out)
+    out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--wrist-check", "--no-jaw-check", "--state", str(tmp_path / "s.json")]); st = stages(out); rec, = records(out)
     assert list(st) == ["hover", "wrist_check", "grasp_pose", "final"] and st["wrist_check"]["offset_norm_mm"] < 1.5 and st["wrist_check"]["px_off"] < 3
     assert rec["wrist_offset_mm"] == st["wrist_check"]["offset_mm"] and pl.rec.runs[0].metrics_["wrist_offset_mm"] < 1.5 and pl.rec.runs[0].params_["wrist_check"] == 1
     jpgs = os.listdir(os.path.join(pl.ROOT, "outputs", "run")); assert len(jpgs) == 1 and jpgs[0].startswith("wrist_check_") and f"frames/{jpgs[0]}" in pl.rec.runs[0].files
     assert math.hypot(*st["final"]["residual_mm"]) < 1.0, "the check does not steer the grasp"
     monkeypatch.setattr(pl, "fetch_wrist", lambda: None); arm2 = ShortArm(cc, table)
-    out2 = drive(pl, monkeypatch, capsys, arm2, ["--runs", "1", "--wrist-check", "--state", str(tmp_path / "s2.json")]); st2 = stages(out2); rec2, = records(out2)
+    out2 = drive(pl, monkeypatch, capsys, arm2, ["--runs", "1", "--wrist-check", "--no-jaw-check", "--state", str(tmp_path / "s2.json")]); st2 = stages(out2); rec2, = records(out2)
     assert st2["wrist_check"]["ring"] is None and rec2["wrist_offset_mm"] is None and rec2["picked"] and "wrist_offset_mm" not in pl.rec.runs[-1].metrics_, "no frame: the pick goes on without the check"
 
 
