@@ -2,6 +2,8 @@
 (so101-datasets-dry for the dry run, like so101-autoloop-dry), and with no tracking server everything still works (jetson/labtrack.py never raises)."""
 import json, os
 import pytest
+
+pytest.importorskip("lerobot")   # why: these tests write and read real LeRobot datasets; CI installs only requirements-dev.txt (no lerobot), so the file skips there
 from mlhelpers import ROOT, TOOLS, runs, free_port, store  # noqa: F401
 
 

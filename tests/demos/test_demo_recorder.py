@@ -3,6 +3,8 @@ Features, fps, episode counts, keep/discard routing, resume, tick/frame alignmen
 import json, os
 import numpy as np
 import pytest
+
+pytest.importorskip("lerobot")   # why: these tests write and read real LeRobot datasets; CI installs only requirements-dev.txt (no lerobot), so the file skips there
 from demohelpers import MOTORS, SMALL, feed_ticks, record_episode
 
 

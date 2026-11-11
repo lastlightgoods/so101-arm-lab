@@ -1,16 +1,26 @@
 """tools/autoloop.py --record-demos (tools/demo_session.py + jetson/demo_recorder.py) on the ShortArm / FakeWorld dry-run rig: each TRY becomes a LeRobot episode that is
 kept or rejected by the judge's result, the dry-run command line writes real datasets, and with the flag OFF nothing changes. No arm, no ssh, no camera, no Hugging Face."""
-import hashlib, json, os, sys
+import hashlib, json, os, re, sys
 import pytest
 from autohelpers import events
 from pickhelpers import load, JETSON, TOOLS
 
 SMALL = {"top": (36, 64, 3), "front": (36, 64, 3), "wrist": (48, 64, 3)}
-GOLDEN_OFF = ("1ddd6e431d3d3b49cbb0fd7d93d31a7dc5437c9ab424b0aeeb6bda2c6e50157b", 63)   # sha256 of the normalised dry-run output of main's autoloop.py (6 cycles, seed 11, dry-miss 0.3), before --record-demos existed
+# why: libm differs in the last bits between macOS and glibc and OpenCV's error text carries its version and a source line, so floats are rounded to 9 decimals and that prefix cut before hashing; the golden is of the pre-flag code (caa06b5, parent of the --record-demos commit), not of this code
+def portable(x):
+    if isinstance(x, float): return round(x, 9)
+    if isinstance(x, str): return re.sub(r"OpenCV\([^)]*\) \S+:\d+: ", "OpenCV: ", x)
+    if isinstance(x, dict): return {k: portable(v) for k, v in x.items()}
+    if isinstance(x, list): return [portable(v) for v in x]
+    return x
+
+
+GOLDEN_OFF = ("ab1d345ce1fc4216b7a0cc08d5f449bb7ec54744f151e1fba0d9d82eaeea02a4", 63)   # sha256 of the normalised dry-run output of main's autoloop.py (6 cycles, seed 11, dry-miss 0.3), before --record-demos existed (regenerated from caa06b5 with portable(), same value under OpenCV 4.13 and 5.0)
 
 
 @pytest.fixture(scope="module")
 def dmods():
+    pytest.importorskip("lerobot")   # why: DemoRecorder writes real LeRobot datasets; CI has no lerobot (requirements-dev.txt), so every test built on this fixture skips there
     dr = load(os.path.join(JETSON, "demo_recorder.py"), "demo_recorder_for_autotests"); lc = load(os.path.join(JETSON, "lab_config.py"), "lab_config_for_autotests")
     ds = load(os.path.join(TOOLS, "demo_session.py"), "demo_session_for_autotests"); return dr, lc, ds
 
@@ -133,6 +143,7 @@ def run_main(al, tmp_path, capsys, extra, session="cli", cycles=3):
 
 
 def test_main_dry_run_record_demos_writes_a_dataset_lerobot_loads_back(al, tmp_path, capsys):
+    pytest.importorskip("lerobot")
     rc, out_dir, out = run_main(al, tmp_path, capsys, ["--record-demos", "--lighting-tag", "lamp-b"]); s = json.load(open(out_dir / "autoloop_cli.json"))
     assert rc == 0 and s["cycles"] == 3 and s["demos"]["kept"] == 3 and s["demos"]["rejected"] == 0
     root = out_dir / "demos" / "cli" / "so101-nut-pick"; ds = load_back(str(root), "lastlight/so101-nut-pick")
@@ -151,7 +162,7 @@ def test_record_demos_needs_dry_run_until_the_camera_tee_exists(al, tmp_path):
 def test_with_the_flag_off_the_dry_run_output_is_what_main_printed_before_the_flag_existed(al, tmp_path, capsys):
     out_dir = tmp_path / "gold"; rc = al.main(["--dry-run", "--cycles", "6", "--seed", "11", "--session", "gold", "--out-dir", str(out_dir), "--dry-miss", "0.3", "--settle", "0", "--stop-file", str(tmp_path / "none.stop")])
     lines = [json.loads(l) for l in capsys.readouterr().out.splitlines() if l.startswith("{")]
-    norm = [{k: v for k, v in d.items() if k not in ("cycle_s", "duration_s")} for d in lines]
+    norm = [portable({k: v for k, v in d.items() if k not in ("cycle_s", "duration_s")}) for d in lines]
     assert rc == 0 and (hashlib.sha256(json.dumps(norm, sort_keys=True).encode()).hexdigest(), len(lines)) == GOLDEN_OFF
     assert not any("demo" in d for d in lines if d.get("event") == "cycle") and "demos" not in json.load(open(out_dir / "autoloop_gold.json")) and not (out_dir / "demos").exists()
 

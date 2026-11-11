@@ -1,12 +1,17 @@
 """jetson/pick_seq.py --tick-sink: OFF by default, and with it off the commands sent to the servos are byte for byte what main sent before the flag existed.
-GOLDEN_* are sha256 hashes of the exact float reprs of every command, computed with the pick_seq.py of main (commit 1db8807) BEFORE the change; REFERENCE_MOVE is
-that move() verbatim. No robot, no sleeping, no /dev/shm."""
+The reference is the pick_seq.py of main (commit 1db8807) BEFORE the change, frozen as pick_seq_reference.py (REFERENCE_MOVE is its move() verbatim), and both run on the
+same machine at test time. No robot, no sleeping, no /dev/shm."""
 import json, math, os
 import pytest
-from demohelpers import FakeRobot, PLAN, commands_hash, run_pick_seq
+from demohelpers import FakeRobot, PLAN, commands_hash, load, run_pick_seq
 
-GOLDEN_MAIN = ("add29c5913024ac8bfe940050babcaa2ab3c8912bdf60e883b444a8ae52c2d18", 124)   # main() on PLAN from the fake start pose, --correct 0.8
-GOLDEN_MOVES = ("3f489cc64ff358178515c06e1c6124b8a00063c8542794ec1ded3170dccee0b7", 136)   # three move() calls, see MOVE_CASES
+# why: sha256 goldens of the float reprs differ between macOS and glibc libm (math.cos in the easing), so the pre-change code is frozen and compared at test time, exact equality
+@pytest.fixture
+def ref_main(tmp_path, monkeypatch, capsys):
+    """(hash, count) of the commands the frozen pre-change pick_seq.py sends for main() on PLAN from the fake start pose, --correct 0.8."""
+    ref = load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pick_seq_reference.py"), "pick_seq_reference")
+    (tmp_path / "ref").mkdir(); rob, _ = run_pick_seq(ref, tmp_path / "ref", monkeypatch, capsys)
+    return commands_hash(rob.sent), len(rob.sent)
 
 
 def REFERENCE_MOVE(robot, cur, tgt, seconds, max_deg_s, J, sleep):
@@ -27,19 +32,18 @@ def test_move_without_a_sink_sends_exactly_what_main_sent(ps, monkeypatch):
         a, b = FakeRobot(ps.J), FakeRobot(ps.J); s1 = ps.move(a, cur, tgt, sec, v); s2 = REFERENCE_MOVE(b, cur, tgt, sec, v, ps.J, ref_sleeps.append)
         assert a.sent == b.sent and s1 == s2; new += a.sent
     assert sleeps == ref_sleeps, "the pacing is unchanged too"
-    assert (commands_hash(new), len(new)) == GOLDEN_MOVES
 
 
-def test_main_without_the_flag_sends_the_golden_command_sequence(ps, tmp_path, monkeypatch, capsys):
+def test_main_without_the_flag_sends_the_pre_change_command_sequence(ps, ref_main, tmp_path, monkeypatch, capsys):
     rob, rows = run_pick_seq(ps, tmp_path, monkeypatch, capsys)
-    assert (commands_hash(rob.sent), len(rob.sent)) == GOLDEN_MAIN
+    assert (commands_hash(rob.sent), len(rob.sent)) == ref_main
     assert [r.get("wp") for r in rows if "wp" in r] == [w["name"] for w in PLAN["waypoints"]] and rows[-1].get("done") is True
     assert rob.reads == 1 + len(PLAN["waypoints"]), "flag off: the state is read only at the start and after each waypoint, as before"
 
 
-def test_the_flag_does_not_change_a_single_command(ps, tmp_path, monkeypatch, capsys):
+def test_the_flag_does_not_change_a_single_command(ps, ref_main, tmp_path, monkeypatch, capsys):
     sink = tmp_path / "ticks.jsonl"; rob, _ = run_pick_seq(ps, tmp_path, monkeypatch, capsys, argv=["--tick-sink", str(sink)])
-    assert (commands_hash(rob.sent), len(rob.sent)) == GOLDEN_MAIN, "with the sink ON the servos still get exactly the golden commands"
+    assert (commands_hash(rob.sent), len(rob.sent)) == ref_main, "with the sink ON the servos still get exactly the pre-change commands"
 
 
 def test_off_by_default_writes_nothing_even_with_the_env_var_set(ps, tmp_path, monkeypatch, capsys):
@@ -82,19 +86,19 @@ def test_the_sink_costs_one_extra_state_read_per_tick(ps, tmp_path, monkeypatch,
     rob, _ = run_pick_seq(ps, tmp_path, monkeypatch, capsys, argv=["--tick-sink", str(tmp_path / "t.jsonl")]); assert rob.reads == 1 + len(PLAN["waypoints"]) + 124
 
 
-def test_a_dead_sink_path_never_stops_the_arm(ps, tmp_path, monkeypatch, capsys):
+def test_a_dead_sink_path_never_stops_the_arm(ps, ref_main, tmp_path, monkeypatch, capsys):
     rob, rows = run_pick_seq(ps, tmp_path, monkeypatch, capsys, argv=["--tick-sink", str(tmp_path / "no" / "such" / "dir" / "t.jsonl")])
-    assert (commands_hash(rob.sent), len(rob.sent)) == GOLDEN_MAIN and rows[-1].get("done") is True
+    assert (commands_hash(rob.sent), len(rob.sent)) == ref_main and rows[-1].get("done") is True
 
 
-def test_one_failed_state_read_turns_the_sink_off_and_the_moves_go_on(ps, tmp_path, monkeypatch, capsys):
+def test_one_failed_state_read_turns_the_sink_off_and_the_moves_go_on(ps, ref_main, tmp_path, monkeypatch, capsys):
     class Flaky(FakeRobot):
         def get_observation(self):
             if len(self.sent) == 30 and not getattr(self, "failed_once", False): self.failed_once = True; self.reads += 1; raise OSError("bus read failed once")   # the sink's read before tick 31
             return super().get_observation()
     rob = Flaky(ps.J, {"shoulder_pan": 0.0, "shoulder_lift": -100.0, "elbow_flex": 95.0, "wrist_flex": 70.0, "wrist_roll": 0.5, "gripper": 0.0})
     sink = tmp_path / "t.jsonl"; rob, rows = run_pick_seq(ps, tmp_path, monkeypatch, capsys, argv=["--tick-sink", str(sink)], robot=rob)
-    assert (commands_hash(rob.sent), len(rob.sent)) == GOLDEN_MAIN and rows[-1].get("done") is True
+    assert (commands_hash(rob.sent), len(rob.sent)) == ref_main and rows[-1].get("done") is True
     assert len([t for t in read_lines(sink) if "seq" in t]) == 30, "the sink stopped at the failure and never raised into the motion code"
 
 
