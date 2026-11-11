@@ -82,14 +82,14 @@ in cycle 4 because a LeRobot teleop job had started and was holding the arm; the
 
 Landed cycles were all within 8 mm of the target.
 
-## Two things I know are wrong
+## What went wrong, from the stage logs
 
-- **The fixed jaw nudges the nut before the grasp.** The SO-101 has one moving jaw and one fixed jaw (the thumb). The aim point
-  I command is the tip of the fixed jaw, not the centre of the open jaw gap, so the fixed jaw comes down on the nut and moves it
-  before the jaws close. A fix is in progress.
-- **Resets are not judged.** The runner checks where the nut landed, but not where the reset left it. In cycle 4 the reset left
-  the nut on the target. Cycle 5 then started with the nut 4.2 mm from the target and the "pick" moved it 1.7 mm, which the
-  judge scored as not picked.
+Every pick logs its stages to MLflow. Reading them after the session changed what I thought had happened.
+
+- **The fixed jaw came down on the nut.** The SO-101 has one moving jaw and one fixed jaw, the thumb. The point I aimed was the fixed jaw's tip, where the jaws meet when they are closed, so the thumb landed on the nut. In some cycles it pushed the nut forward; in others it came down on top of it. Fixed after the session: the pick now aims the fixed jaw 10 mm behind the nut, along the direction the jaws open, so the nut sits inside the open gap ([`pick-loop.md`](pick-loop.md), "The grasp aim").
+- **Cycle 4's reset failed and nothing noticed.** The wrist camera found no nut between the jaws on both tries, so the reset put nothing down and the nut stayed on the target. The runner does not check a reset, so it assumed the nut was at the reset spot.
+- **Cycles 5 and 6 picked the nut but scored as misses.** The jaw check saw the nut held after every grasp. The nut started on or next to the target, so carrying it back moved it less than 20 mm, and the judge's rule that a picked nut moves more than 20 mm called that a miss.
+- **In cycles 8 to 10 the map lost the nut.** After cycle 8's place the overhead map reported no objects at all, although the jaw check had seen the nut held. In cycle 9 the map sent the arm to two spots where the wrist camera found nothing between the jaws. The nut had sat on the target through cycles 4 to 6, and the map's background absorbs anything that stays still for about 8 minutes, so the likely cause is the nut being learned into the background there. I have not confirmed that.
 
 ## About the video
 
@@ -107,5 +107,7 @@ cycle durations in the log, so they can be a few seconds off. The nut is a small
 
 ## What is next
 
-Fix the aim point so the nut ends up between the jaws rather than under the fixed one, judge the reset the same way as the
-landing, and run the ten cycles again.
+- Judge every reset with the overhead map, and start the next cycle from where the nut really is.
+- When the nut already sits on the target at the start of a cycle, reset it first instead of scoring a pick that cannot move it.
+- Keep the map from learning a still nut into the background during a session, and test a learned object detector on the same camera frames.
+- Run the ten cycles again with me at the STOP.

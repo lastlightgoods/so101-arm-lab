@@ -107,18 +107,24 @@
         </table>
         <p>5 of 10 landed (success rate 0.5), mean error 14.3 mm, median 5.4 mm, 5 retries. The landed cycles were all within 8 mm of the target. The runner stopped after cycle 10 with a <code>consecutive_failures</code> trip (cycles 8 to 10 failed). That is below the bar of 9 of 10 with zero trips, so the milestone is not met. An earlier session, <code>first10</code>, ran 4 cycles, landed 3 (mean error 9.2 mm) and stopped on a <code>run_plan</code> trip in cycle 4 because a LeRobot teleop job had started and was holding the arm. The arm-busy check exists because of that.</p>
 
-        <h2>Two things I know are wrong</h2>
+        <h2>What went wrong, from the stage logs</h2>
+        <p>Every pick logs its stages to MLflow. Reading them after the session changed what I thought had happened.</p>
         <ul>
-          <li><strong>The fixed jaw nudges the nut before the grasp.</strong> The SO-101 has one moving jaw and one fixed jaw, the thumb. The aim point I command is the tip of the fixed jaw, not the centre of the open jaw gap, so the fixed jaw comes down on the nut and moves it before the jaws close. A fix is in progress.</li>
-          <li><strong>Resets are not judged.</strong> The runner checks where the nut landed, not where the reset left it. In cycle 4 the reset left the nut on the target. Cycle 5 then started with the nut 4.2 mm from the target, and the "pick" moved it 1.7 mm, which the judge scored as not picked.</li>
+          <li><strong>The fixed jaw came down on the nut.</strong> The SO-101 has one moving jaw and one fixed jaw, the thumb. The point I aimed was the fixed jaw's tip, where the jaws meet when they are closed, so the thumb landed on the nut. In some cycles it pushed the nut forward; in others it came down on top of it. Fixed after the session: the pick now aims the fixed jaw 10 mm behind the nut, along the direction the jaws open, so the nut sits inside the open gap.</li>
+          <li><strong>Cycle 4's reset failed and nothing noticed.</strong> The wrist camera found no nut between the jaws on both tries, so the reset put nothing down and the nut stayed on the target. The runner does not check a reset, so it assumed the nut was at the reset spot.</li>
+          <li><strong>Cycles 5 and 6 picked the nut but scored as misses.</strong> The jaw check saw the nut held after every grasp. The nut started on or next to the target, so carrying it back moved it less than 20 mm, and the judge's rule that a picked nut moves more than 20 mm called that a miss.</li>
+          <li><strong>In cycles 8 to 10 the map lost the nut.</strong> After cycle 8's place the overhead map reported no objects at all, although the jaw check had seen the nut held. In cycle 9 the map sent the arm to two spots where the wrist camera found nothing between the jaws. The nut had sat on the target through cycles 4 to 6, and the map's background absorbs anything that stays still for about 8 minutes, so the likely cause is the nut being learned into the background there. I have not confirmed that.</li>
         </ul>
-
         <h2>About the recording</h2>
         <p>I started it partway into the session. The dashboard dropped the wrist stream after 35 s and the overhead stream after 95 s, and the front stream ran on. The clip is the first 95 s of the three recordings at 3x. I estimated the cycle boundaries from the cycle durations in the log, so they can be a few seconds off.</p>
 
         <h2>What is next</h2>
-        <p>Fix the aim point so the nut ends up between the jaws and not under the fixed one, judge the reset the same way as the landing, and run the ten cycles again.</p>
-
+        <ul>
+          <li>Judge every reset with the overhead map, and start the next cycle from where the nut really is.</li>
+          <li>When the nut already sits on the target at the start of a cycle, reset it first instead of scoring a pick that cannot move it.</li>
+          <li>Keep the map from learning a still nut into the background during a session, and test a learned object detector on the same camera frames.</li>
+          <li>Run the ten cycles again with me at the STOP.</li>
+        </ul>
         <h2>Where the code is</h2>
         <p><code>tools/autoloop.py</code>, <code>tools/guardrails.py</code>, <code>tools/pick_loop.py</code> and <code>docs/autoloop-explained.md</code> in the so101-arm-lab repository at <a href="https://github.com/lastlightgoods/so101-arm-lab">github.com/lastlightgoods/so101-arm-lab</a>.</p>
 
