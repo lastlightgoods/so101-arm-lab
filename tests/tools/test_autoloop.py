@@ -294,3 +294,28 @@ def test_start_near_is_the_first_cycles_search_hint(autorig, capsys, al):
     assert c2["locates"][0]["near_in"] is None, "no flag: no hint, as before"
     a = al.build_parser().parse_args(["--start-near", "11.3", "5.8"]); assert al.make_cfg(a, "o").start_near == (11.3, 5.8)
     assert al.make_cfg(al.build_parser().parse_args([]), "o").start_near is None
+
+
+def test_the_judge_looks_at_the_image_when_the_map_misses_the_nut_at_the_target(autorig, capsys, monkeypatch):
+    """pregrasp1 (10 Nov): the nut was placed 5.5 mm from the target on the mat's dark centre square and the map reported no objects, so a good
+    place scored as a miss and was retried. The judge now asks the whole-mat image search near the target."""
+    r = autorig(); world = r.world; place = world.on_plan
+    def on_plan(plan):
+        place(plan)
+        if "place" in {w["name"] for w in plan["waypoints"]} and world.picks == 1: world.hidden = True   # the map loses the nut after the try's place
+    monkeypatch.setattr(world, "on_plan", on_plan)
+    monkeypatch.setattr(r.pl, "find_nut_mat", lambda cc, table, near_in=None, *a, **k: ([world.nut[0] / 25.4, world.nut[1] / 25.4], [320, 180], 30))
+    s, out = r.run(capsys, cycles=1, max_retries=1); c, = events(out, "cycle")
+    assert c["landed"] and c["ok"] and c["retries"] == 0 and c["judge_source"] == "mat" and c["landed_err_mm"] <= 15
+    assert c["reset_how"] == "at_spot" and c["reset_ok"], "and the reset is judged through the same fallback while the map stays blind"
+
+
+def test_a_far_mat_blob_is_not_taken_for_the_landed_nut(autorig, capsys, monkeypatch):
+    r = autorig(); world = r.world; place = world.on_plan
+    def on_plan(plan):
+        place(plan)
+        if "place" in {w["name"] for w in plan["waypoints"]} and world.picks == 1: world.hidden = True
+    monkeypatch.setattr(world, "on_plan", on_plan)
+    monkeypatch.setattr(r.pl, "find_nut_mat", lambda cc, table, near_in=None, *a, **k: ([near_in[0] + 2.0, near_in[1]], [320, 180], 30))   # 51 mm away
+    s, out = r.run(capsys, cycles=1, max_retries=0); c, = events(out, "cycle")
+    assert not c["landed"] and c["landed_err_mm"] is None, "a blob 51 mm away is outside 2 x radius: not seen"

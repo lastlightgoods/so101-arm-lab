@@ -165,16 +165,28 @@ class Runner:
         _, rows, info = self.pl.closed_loop_pick(self.cc, self.table, list(nut_in), list(place_in), self.biases, self.pick_args, n, self.stage)
         self.in_motion = False; return rows, info
 
+    def seen_near(self, objs, near_in, within_mm):
+        """The object nearest `near_in` from the scene map when it is within `within_mm`; else the whole-mat image search near it (arm cut out),
+        tagged source "mat", when that is within `within_mm`; else None. why: the map does not report a nut on the printed mat's dark centre
+        square (pregrasp1, 10 Nov: a nut 5.5 mm from the target, foreground too small to count); the image search found it."""
+        o, d = nearest_object(objs, near_in)
+        if o is not None and d <= within_mm: return o
+        fn = getattr(self.pl, "find_nut_mat", None)
+        try: f = fn(self.cc, self.table, list(near_in)) if fn else None
+        except Exception: f = None
+        if f and dist_mm(f[0], near_in) <= within_mm: return {"x_in": round(float(f[0][0]), 3), "y_in": round(float(f[0][1]), 3), "source": "mat"}
+        return o
+
     def judge(self, nut_before_in, target_in, info, name=None):
         """After the settle and the map's confirmation: where the nut is now (the scene object nearest the target) and what that means."""
         sc, waited = self.settled_scene(); objs = (sc or {}).get("objects") or []; frame = self.snapshot(name) if name else None
-        o, _ = nearest_object(objs, target_in)
+        o = self.seen_near(objs, target_in, 2 * self.cfg.radius_mm)
         if o is None: return {"after_in": None, "moved_mm": None, "picked": False, "err_mm": None, "landed": False, "objects": objs, "wait_s": waited, "frame": frame}
         after = [o["x_in"], o["y_in"]]; moved = dist_mm(after, nut_before_in); err = dist_mm(after, target_in)
         jaws = [v for v in (info.get("in_jaws"), o.get("in_jaws")) if v is not None]
         picked = moved > self.cfg.moved_mm and all(jaws)
         return {"after_in": after, "moved_mm": round(moved, 1), "picked": picked, "err_mm": round(err, 1), "landed": picked and err <= self.cfg.radius_mm, "objects": objs, "obj": o,
-                "wait_s": waited, "frame": frame}
+                "wait_s": waited, "frame": frame, "source": o.get("source", "scene")}
 
     def judge_reset(self, spot_in, before_in, name=None):
         """Where a reset really left the nut (first10b: an unjudged reset left the nut on the target and the runner never knew). The nut-like
@@ -183,6 +195,9 @@ class Runner:
         sc, waited = self.settled_scene(); small = self.nutlike((sc or {}).get("objects") or []); frame = self.snapshot(name) if name else None
         res = {"at_in": None, "err_mm": None, "ok": False, "how": "not_seen", "wait_s": waited, "frame": frame}
         o, d = nearest_object(small, spot_in)
+        if o is None or d > self.cfg.radius_mm:   # the map may miss it where the print is dark: look at the image near the spot too
+            m = self.seen_near([], spot_in, self.cfg.radius_mm)
+            if m is not None: o, d = m, dist_mm([m["x_in"], m["y_in"]], spot_in); res["source"] = "mat"
         if o is None: return res
         res.update(at_in=[o["x_in"], o["y_in"]], err_mm=round(d, 1))
         if d <= self.cfg.radius_mm: res.update(ok=True, how="at_spot"); return res
@@ -233,7 +248,7 @@ class Runner:
                     rec["nut_in"] = [round(v, 3) for v in nut[0]]; last = nut[0]
                     try: rows, info = self.pick(nut[0], tgt, n)
                     except SystemExit as e: rec["error"] = str(e)[:200]; break   # why: pick_loop raises SystemExit when ik fails; that is a failed try, not a dead runner
-                    j = self.judge(nut[0], tgt, info, f"c{n}_try{attempt + 1}"); rec.update(picked=j["picked"], landed=j["landed"], landed_err_mm=j["err_mm"], moved_mm=j["moved_mm"], judge_wait_s=j["wait_s"])
+                    j = self.judge(nut[0], tgt, info, f"c{n}_try{attempt + 1}"); rec.update(picked=j["picked"], landed=j["landed"], landed_err_mm=j["err_mm"], moved_mm=j["moved_mm"], judge_wait_s=j["wait_s"], judge_source=j.get("source"))
                     if j["after_in"]: self.cur_in = last = j["after_in"]
                     if j["picked"] or attempt == self.cfg.max_retries: break
                     rec["retries"] += 1   # not picked: the nut has not moved, so one more try is cheap; a nut that was picked and dropped is not retried
