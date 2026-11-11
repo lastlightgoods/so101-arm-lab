@@ -55,6 +55,17 @@ def nearest_object(objs, near_in):
 
 
 # ---------------------------------------------------------------- the runner
+ARM_JOB_RE = "lerobot-(teleoperate|record|rollout|calibrate|replay)"
+
+
+def jetson_arm_jobs(host="jetson", timeout=8):
+    """Command lines of LeRobot jobs holding the arm on the Jetson (same pattern pick_seq refuses on); [] when none. Raises when ssh fails."""
+    import subprocess
+    r = subprocess.run(["ssh", "-o", f"ConnectTimeout={timeout}", host, f"pgrep -af '{ARM_JOB_RE}' | grep -v pgrep || true"], capture_output=True, text=True, timeout=timeout + 5)
+    if r.returncode not in (0, 1): raise RuntimeError(f"ssh rc {r.returncode}: {r.stderr.strip()[:120]}")
+    return [l for l in r.stdout.splitlines() if l.strip()]
+
+
 def load_biases(path):
     """The pick loop's learned per-waypoint biases from its state file, or {} (missing or unreadable). Read only."""
     try:
@@ -332,7 +343,7 @@ def main(argv=None):
         ctx = gr.Ctx(world.api_state, world.api_scene, time.time, lambda s: None, lambda d: print(json.dumps(d), flush=True)); track = lt.LabTrack(EXPERIMENT + "-dry")
     else:
         get = lambda path, t: json.load(urllib.request.urlopen(pl.DASH + path, timeout=t))
-        ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True)); track = lt.LabTrack(EXPERIMENT)
+        ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True), arm_jobs=jetson_arm_jobs); track = lt.LabTrack(EXPERIMENT)
     guard = gr.Guard(cc, table, lim, ctx); s = Runner(pl, cc, table, guard, ctx, cfg, track, rng, out=lambda l: print(l, flush=True)).run()
     return 0 if all(x["clean"] for x in s["stops"]) else 2
 

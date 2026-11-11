@@ -1,6 +1,6 @@
 """tools/guardrails.py: every trip fires exactly at its threshold and not below. Pure functions first, then the Guard against a fake dashboard
 on a fake clock, then the promise that matters most: a plan outside the workspace box never reaches run_plan. No dashboard, no ssh, no arm."""
-import pytest
+import time, pytest
 from autohelpers import events
 
 
@@ -184,3 +184,19 @@ def test_a_dead_panel_ends_the_session_before_any_motion(autorig, capsys):
     r = autorig(); r.world.jetson_up = False
     s, out = r.run(capsys, cycles=3)
     t, = events(out, "trip"); assert t["reason"] == "panel" and t["rest"] is False and r.arm.calls == [] and s["cycles"] == 0 and s["end"] == "panel"
+
+
+
+def test_another_arm_job_trips_arm_busy_before_the_cycle_and_a_failing_probe_only_notes(gr, cc, table):
+    """11 Nov first10: lerobot-teleoperate started mid-session; the guard must catch it before a pick is planned."""
+    st = lambda: {"jetson": {"online": True, "last": time.time()}, "arms": {"follower": {"pos": {}}}}
+    sc = lambda: {"ok": True, "objects": [], "n_markers_seen": 4, "calib_ok": True, "holding": False}
+    notes = []
+    busy = gr.Ctx(st, sc, time.time, lambda s: None, notes.append, arm_jobs=lambda: ["123 /home/tc/so101/.venv/bin/lerobot-teleoperate --robot.type=so101_follower"])
+    t = gr.Guard(cc, table, gr.Limits(stop_file=""), busy).check_before_cycle()
+    assert t and t.reason == "arm_busy" and "lerobot-teleoperate" in t.detail["jobs"][0]
+    free = gr.Ctx(st, sc, time.time, lambda s: None, notes.append, arm_jobs=lambda: [])
+    assert gr.Guard(cc, table, gr.Limits(stop_file=""), free).check_before_cycle() is None
+    def boom(): raise RuntimeError("ssh down")
+    down = gr.Ctx(st, sc, time.time, lambda s: None, notes.append, arm_jobs=boom)
+    assert gr.Guard(cc, table, gr.Limits(stop_file=""), down).check_before_cycle() is None and any("arm jobs not checked" in str(n) for n in notes)

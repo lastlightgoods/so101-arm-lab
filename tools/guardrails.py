@@ -48,6 +48,7 @@ class Ctx:
     now: object = time.time
     sleep: object = time.sleep
     note: object = print   # one-off notes ("fps not checked"), called with a dict
+    arm_jobs: object = None   # () -> list of command lines of other jobs holding the arm (lerobot teleop/record/...), or None when unknown
 
 
 # ---------------------------------------------------------------- pure functions
@@ -132,6 +133,10 @@ class Guard:
         if t := self.check_stop(): return t
         st, t = self.poll_state(ctx)
         if t: return t
+        if ctx.arm_jobs:   # why: 11 Nov first10 cycle 4: a lerobot-teleoperate started mid-session and only pick_seq's own refusal stopped the pick
+            try: jobs = ctx.arm_jobs()
+            except Exception as e: jobs = None; self._note(ctx, "arm_jobs", f"arm jobs not checked: {type(e).__name__}: {e}")
+            if jobs: return Trip("arm_busy", {"jobs": [j[:160] for j in jobs][:3]})
         fol = (st.get("arms") or {}).get("follower") or {}
         if "overload" in fol or "overload" in st:   # the dashboard does not publish one yet (docs/autoloop.md); honoured the day it does
             ov = fol.get("overload", st.get("overload"))
