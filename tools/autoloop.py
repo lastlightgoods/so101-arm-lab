@@ -5,7 +5,7 @@ outcome from the overhead camera, put the nut somewhere new, repeat, with tools/
   tools/autoloop.py --cycles 10 [--minutes 60] [--target 9 6 | --random-target] [--safe-box X0 Y0 X1 Y1] [--radius-mm 15] [--session NAME] [--dry-run]
 
 One cycle: guard.before -> TRY (closed-loop pick to the target, tools/pick_loop.py) -> JUDGE (/api/scene after a short settle) -> RESET
-(pick_loop.reset_nut when it exists, else a closed-loop pick to a spot sampled with the box rules) -> guard.after. One JSON line per cycle,
+(a closed-loop pick to a spot sampled with the box rules; never pick_loop.reset_nut, which writes the pick state file) -> guard.after. One JSON line per cycle,
 one MLflow run per cycle in `so101-autoloop`, a parent run and outputs/run/autoloop_<session>.json for the session. Any trip: one JSON line,
 the session ends, the arm goes to rest only if the dashboard still reads back. --dry-run runs the whole loop on a fake arm and a fake dashboard.
 """
