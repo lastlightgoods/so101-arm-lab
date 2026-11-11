@@ -39,6 +39,7 @@ class FakeV4L2:
     def __init__(self, devdir):
         self.devdir = devdir
         self.state, self.light, self.clobber_pending, self.sticky, self.jitter = {}, {}, set(), {}, {}
+        self.clip = {}                 # dev -> (fraction of pixels >= 250, brightest-decile local std); default: no clipping
         self.restart_quirk = True      # a new stream start re-derives C920 exposure
         self.log, self.calls, self.sleeps, self.streams = [], 0, [], []
         for by_id in NODES: self.replug(by_id)
@@ -61,7 +62,7 @@ class FakeV4L2:
         s = self.state[dev]
         if s["auto_exposure"] == 3: return AUTO_MEAN[[b for b, n in NODES.items() if self.dev(b) == dev][0]]
         if self.is_c920(dev): m = self.light[dev] * (s["exposure_time_absolute"] / 78) * 2 ** (s["gain"] / 64)
-        else: m = self.light[dev] * s["exposure_time_absolute"]
+        else: m = self.light[dev] * s["exposure_time_absolute"] * 2 ** (s["brightness"] / 64)   # the wrist has no gain: its brightness offset scales the picture
         return min(255.0, m)
 
     def sleep(self, secs):
@@ -126,6 +127,7 @@ def lab(cam_lock, tmp_path, monkeypatch):
             if not os.path.exists(d): raise cam_lock.V4L2Error(f"cannot open {d}")
             self.dev = d; fake.stream_start(d); FakeFrames.opened.append((d, kind, os.path.exists(str(tmp_path / ".cams_busy"))))
         def pump(self, s): pass
+        def clip_stats(self, skip=6, n=3): return fake.clip.get(self.dev, (0.0, 10.0))
         def mean(self, skip=6, n=3): return fake.mean(self.dev)
         def close(self): FakeFrames.opened.append((self.dev, "closed"))
     FakeFrames.opened = []
@@ -259,7 +261,7 @@ def test_capture_tunes_gain_when_light_changed_since_auto_readback(lab):
 
 def test_capture_steps_exposure_down_when_gain_hits_zero(lab):
     lab.fake.light[lab.fake.dev(TOP)] *= 12
-    assert lab.capture() == 0
+    assert lab.run("capture", "--settle", "0", "--min-exposure", "top=1") == 0, "floor lowered by hand: the stop-down path still works"
     assert lab.plan(TOP)["exposure_time_absolute"] < 78 and abs(lab.fake.mean(lab.fake.dev(TOP)) - 116) <= 8
 
 
@@ -294,6 +296,126 @@ def test_capture_flags_light_starved_camera(lab):
     assert f["exposure_time_absolute"] == 312 and f["gain"] >= 240, "went up to the longest 30 fps stop, then nearly all the gain"
     assert any("starved for light" in n for n in lab.data()["cameras"][FRONT]["notes"])
     assert 60 <= lab.fake.mean(lab.fake.dev(FRONT)) <= 190
+
+
+# ---------- capture: flicker floor ----------
+def exposure_of(lab, cam): return lab.plan(cam)["exposure_time_absolute"]
+
+
+def test_c920_auto_at_38_is_lifted_to_the_flicker_floor_and_gain_pays_for_it(lab):
+    for cam in (TOP, FRONT): lab.live(cam)["exposure_time_absolute"] = 38; lab.live(cam)["gain"] = 200
+    lab.fake.light[lab.fake.dev(TOP)] = AUTO_MEAN[TOP] / ((38 / 78) * 2 ** (200 / 64))     # auto's numbers still give auto's picture
+    assert lab.capture() == 0
+    for cam in (TOP, FRONT):
+        assert exposure_of(lab, cam) >= 77 and lab.plan(cam)["gain"] < 200, "longer exposure, so gain comes down"
+    assert abs(lab.fake.mean(lab.fake.dev(TOP)) - 116) <= 8
+    d = lab.data()["cameras"][TOP]
+    assert d["exposure_floor"] == 78 and any("exposure floor 78" in n and "60 Hz" in n for n in d["notes"])
+    assert any("shorter than the floor" in n for n in d["notes"])
+
+
+def test_c920_gain_comes_right_down_when_auto_was_short_and_bright(lab):
+    lab.live(TOP)["exposure_time_absolute"] = 38; lab.live(TOP)["gain"] = 80
+    lab.fake.light[lab.fake.dev(TOP)] = AUTO_MEAN[TOP] / ((38 / 78) * 2 ** (80 / 64))
+    assert lab.capture() == 0
+    assert exposure_of(lab, TOP) == 78 and lab.plan(TOP)["gain"] <= 30 and abs(lab.fake.mean(lab.fake.dev(TOP)) - 116) <= 8
+
+
+def test_mains_50_hz_floor_is_156_on_a_c920(lab):
+    lab.live(TOP)["exposure_time_absolute"] = 38; lab.live(TOP)["gain"] = 200
+    lab.fake.light[lab.fake.dev(TOP)] = AUTO_MEAN[TOP] / ((38 / 78) * 2 ** (200 / 64)) / 4   # dim enough that gain stays above zero
+    assert lab.run("capture", "--settle", "0", "--mains-hz", "50") == 0
+    assert exposure_of(lab, TOP) >= 156
+    d = lab.data()
+    assert d["mains_hz"] == 50 and d["cameras"][TOP]["exposure_floor"] == 156 and any("50 Hz" in n for n in d["cameras"][TOP]["notes"])
+    assert exposure_of(lab, WRIST) == 313 and d["cameras"][WRIST]["exposure_floor"] is None, "the wrist has no floor unless asked"
+    assert lab.run("capture", "--settle", "0", "--mains-hz", "50", "--flicker-floor", "wrist") == 0
+    assert exposure_of(lab, WRIST) >= 120 and lab.data()["cameras"][WRIST]["exposure_floor"] == 120, "the wrist floor scales 100 * 60/50"
+    with pytest.raises(SystemExit): lab.run("capture", "--mains-hz", "55")    # only 50 and 60 exist
+
+
+def test_wrist_keeps_auto_exposure_by_default(lab):
+    """A forced 100 clipped 46 % of the wrist picture (measured 11 Nov 2026): the wrist floor is opt-in."""
+    lab.live(WRIST)["exposure_time_absolute"] = 35
+    lab.fake.light[lab.fake.dev(WRIST)] = AUTO_MEAN[WRIST] / 35
+    assert lab.capture() == 0
+    w = lab.plan(WRIST)
+    assert w["exposure_time_absolute"] == 35 and w["brightness"] == 0
+    d = lab.data()["cameras"][WRIST]
+    assert d["exposure_floor"] is None and not any("floor" in n for n in d["notes"])
+
+
+def test_wrist_with_flicker_floor_flag_is_lifted_to_100_and_brightness_reaches_the_target(lab):
+    lab.live(WRIST)["exposure_time_absolute"] = 35
+    lab.fake.light[lab.fake.dev(WRIST)] = AUTO_MEAN[WRIST] / 35
+    assert lab.run("capture", "--settle", "0", "--flicker-floor", "wrist") == 0
+    w = lab.plan(WRIST)
+    assert w["exposure_time_absolute"] >= 100 and w["brightness"] < 0, "longer exposure, darker by the brightness offset"
+    assert abs(lab.fake.mean(lab.fake.dev(WRIST)) - 125) <= 8 and -128 <= w["brightness"] <= 127
+    d = lab.data()["cameras"][WRIST]
+    assert d["exposure_floor"] == 100 and any("exposure floor 100" in n for n in d["notes"]) and any("brightness" in n for n in d["notes"])
+
+
+def test_min_exposure_override_replaces_the_floor(lab, capsys):
+    for cam in (TOP, WRIST): lab.live(cam)["exposure_time_absolute"] = 38 if cam == TOP else 35
+    lab.live(TOP)["gain"] = 200
+    lab.fake.light[lab.fake.dev(TOP)] = AUTO_MEAN[TOP] / ((38 / 78) * 2 ** (200 / 64))
+    lab.fake.light[lab.fake.dev(WRIST)] = AUTO_MEAN[WRIST] / 35
+    assert lab.run("capture", "--settle", "0", "--min-exposure", "top=156", "--min-exposure", "wrist=200") == 0
+    assert exposure_of(lab, TOP) >= 156 and exposure_of(lab, WRIST) >= 200
+    d = lab.data()["cameras"]
+    assert d[TOP]["exposure_floor"] == 156 and any("--min-exposure 156" in n for n in d[TOP]["notes"])
+    assert d[WRIST]["exposure_floor"] == 200 and d[FRONT]["exposure_floor"] == 78
+    assert lab.run("capture", "--settle", "0", "--flicker-floor", "nope") == 2
+    assert lab.run("capture", "--settle", "0", "--min-exposure", "nope=5") == 2
+    assert lab.run("capture", "--settle", "0", "--min-exposure", "top") == 2
+
+
+def test_picture_that_cannot_reach_the_range_at_the_floor_rolls_back(lab, capsys):
+    """Too bright even at gain 0 / brightness -128 on the shortest allowed exposure: back to auto, no block, never a shorter exposure."""
+    lab.fake.light[lab.fake.dev(TOP)] *= 12
+    lab.fake.light[lab.fake.dev(WRIST)] *= 40
+    assert lab.run("capture", "--settle", "0", "--flicker-floor", "wrist") == 1
+    out = capsys.readouterr().out
+    assert "top: locked picture mean" in out and "ROLLED BACK TO AUTO" in out and "wrist: locked picture mean" in out
+    assert set(lab.data()["cameras"]) == {FRONT}
+    for cam in (TOP, WRIST): assert lab.live(cam)["auto_exposure"] == 3
+    for cam, floor in ((TOP, 77), (WRIST, 100)):
+        assert all(v >= floor for n, v in lab.fake.sets(cam) if n == "exposure_time_absolute" and v > 0), "the tuning loop never wrote a shorter exposure"
+
+
+@pytest.mark.parametrize("hz,floors", [(60, {TOP: 77, FRONT: 77, WRIST: 100}), (50, {TOP: 156, FRONT: 156, WRIST: 120})])
+@pytest.mark.parametrize("auto_exposure", [5, 20, 38, 60])
+def test_no_saved_exposure_is_below_the_floor_for_any_kind(lab, hz, floors, auto_exposure):
+    """Regression for the 11 Nov 2026 flicker bands: whatever auto chose, neither the saved file nor any write is shorter than the floor."""
+    for cam in floors:
+        lab.live(cam)["exposure_time_absolute"] = auto_exposure; lab.live(cam)["gain"] = 100
+        lab.fake.light[lab.fake.dev(cam)] = AUTO_MEAN[cam] / (((auto_exposure / 78) * 2 ** (100 / 64)) if cam != WRIST else auto_exposure)
+    lab.run("capture", "--settle", "0", "--mains-hz", str(hz), "--flicker-floor", "wrist")   # wrist floor is opt-in; some cases may roll back (rc 1); what is saved must still obey the floor
+    for cam, floor in floors.items():
+        sets = [v for n, v in lab.fake.sets(cam) if n == "exposure_time_absolute"]
+        assert sets and all(v >= floor for v in sets), (cam, sets)
+        if os.path.exists(lab.settings) and cam in lab.data()["cameras"]: assert lab.plan(cam)["exposure_time_absolute"] >= floor
+
+
+@pytest.mark.parametrize("clip", [(0.46, 10.0), (0.0, 2.0)], ids=["46pct-saturated", "flat-bright-decile"])
+def test_clipping_is_reported_and_exposure_is_not_raised_further(lab, clip):
+    """Wrist picture too dark at auto's exposure but the sensor already clips: report it, leave the exposure where it is."""
+    w = lab.fake.dev(WRIST); lab.fake.light[w] /= 3; lab.fake.clip[w] = clip
+    assert lab.capture() in (0, 1)
+    data = lab.data()["cameras"]
+    if WRIST in data:
+        assert lab.plan(WRIST)["exposure_time_absolute"] <= 313
+        assert any("sensor clipping" in n for n in data[WRIST]["notes"])
+    assert not any(v > 313 for n, v in lab.fake.sets(WRIST) if n == "exposure_time_absolute"), "never lengthened while clipping"
+    assert not any("sensor clipping" in n for n in data[TOP]["notes"]), "clean cameras are not flagged"
+
+
+def test_clipping_c920_stays_on_its_stop_and_is_flagged(lab):
+    t = lab.fake.dev(TOP); lab.fake.light[t] /= 3; lab.fake.clip[t] = (0.2, 10.0)
+    assert lab.capture() in (0, 1)
+    assert not any(v > 78 for n, v in lab.fake.sets(TOP) if n == "exposure_time_absolute"), "the exposure stays on the floor stop; gain does the work"
+    assert any("sensor clipping" in n for n in lab.data()["cameras"][TOP]["notes"])
 
 
 # ---------- apply: ordering, inactive-while-auto, refusals ----------

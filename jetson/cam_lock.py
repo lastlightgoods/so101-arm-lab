@@ -9,6 +9,7 @@
                       by the /dev/v4l/by-id name). A camera whose locked picture ends outside BAND (60..190 mean) is put
                       back on auto and reported; it gets no block, so `check` fails until it is captured again.
                       Needs OpenCV: run with the venv python (`source ~/so101/env.sh` does that). The cameras are LOCKED afterwards.
+                      Exposure is never locked below one light-flicker period: --mains-hz 60|50 (default 60), --min-exposure ROLE=N.
     cam_lock.py apply [--verify] [--wait S]
                       write the saved values (auto flag off first, then the manual value), verify the controls, exit 1 on a
                       miss. With --verify also stream each camera and measure the picture; outside BAND the camera is rolled
@@ -35,6 +36,13 @@ What the hardware does (measured on the lab's C920s, USB id 046d:08e5, 9 Nov 202
     written in between, so `apply` waits SETTLE seconds after a transition and re-writes what moved (up to ROUNDS times);
   * at every stream start in Manual Mode the camera re-derives exposure (78 came up as 156, then 312); a write issued
     while the stream runs holds for that stream. lerobot opens the cameras itself, hence `guard`.
+Flicker floor (measured 11 Nov 2026): the room lights flicker at twice the mains frequency (120 Hz on 60 Hz = 8.3 ms). An exposure
+shorter than one flicker period bands the picture (auto chose 38 on the C920s and 35 on the wrist: 16 and 35 grey levels peak to
+peak), so on a C920 capture never locks below a floor, whatever auto chose: the smallest stop >= one period (77/78 at 60 Hz,
+156 at 50 Hz); gain is then tuned back down. The icSpring wrist has no gain and at >= 90 its sensor clips in this light (46 % of
+pixels at 255), so its floor is OPT-IN: `--flicker-floor wrist` (100 units at 60 Hz, scaled by 60/mains_hz) or `--min-exposure
+wrist=N`; brightness offset then does the darkening. `--mains-hz 50|60`. Every camera is checked for sensor clipping (> 5 % of
+pixels >= 250, or the brightest decile's local std < 3): reported in the notes and the exposure is not raised further.
 Recording runs at 30 fps, so a C920 exposure must stay <= 333 (one frame); the longest stop that fits is 312. If auto
 picked more, capture starts from 312 with gain raised instead (~64 gain steps per stop) and the tuning loop takes it
 from there; the wrist exposure is capped at 333 as well.
@@ -63,6 +71,12 @@ EXPOSURE_MAX_30FPS = 333                                        # 100 us units: 
 C920_STOPS = [3, 5, 10, 20, 39, 78, 156, 312, 625, 1250, 2047]  # what the C920 actually exposes at, 1/4096 s .. 1/5 s
 EXPOSURE_CLAMP = 312                                            # longest stop inside a 30 fps frame
 GAIN_STEPS_PER_STOP = 64                                        # first guess for the C920; the tuning loop refines it
+MAINS_HZ = 60                                                   # US shop; 50 is allowed (--mains-hz)
+FLOOR_TOL = 7                                                   # 100 us units: 78 (7.8 ms) counts as one 60 Hz period (8.3 ms)
+WRIST_FLOOR_60 = 100                                            # icSpring floor at 60 Hz mains when opted in: 78..87 banded, 90..100 clean but clips
+CLIP_LEVEL, CLIP_FRAC, CLIP_STD = 250, 0.05, 3.0               # sensor clipping: > 5 % of pixels >= 250, or brightest-decile local std < 3
+BRIGHTNESS_RANGE = (-128, 127)                                  # icSpring brightness offset
+BRIGHTNESS_STEPS_PER_STOP = 64                                  # first guess for the wrist brightness offset; the loop refines it
 TOLERANCE = {"exposure_time_absolute": 2}                       # the same stop reads back 77 or 78
 SETTLE = 1.5                                                    # s the C920 needs after leaving auto before a gain write sticks
 ROUNDS = 3                                                      # write / verify rounds in apply
@@ -233,7 +247,25 @@ class FrameSource:
             if ok and i >= skip: vals.append(float(self.cv2.cvtColor(f, self.cv2.COLOR_BGR2GRAY).mean()))
         if not vals: raise V4L2Error("no frames")
         return sum(vals) / len(vals)
+    def clip_stats(self, skip=6, n=3):
+        """(fraction of pixels >= CLIP_LEVEL, local std of the brightest decile) averaged over n frames."""
+        cv2 = self.cv2; fr, sd = [], []
+        for i in range(skip + n):
+            ok, f = self.cap.read()
+            if not ok or i < skip: continue
+            g = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY).astype("float32"); fr.append(float((g >= CLIP_LEVEL).mean()))
+            hi = g >= max(float(sorted(g.ravel())[int(g.size * 0.9)]), 1.0)             # brightest decile
+            sd.append(float((g - cv2.blur(g, (5, 5)))[hi].std()) if hi.any() else 0.0)  # why: clipped regions are flat
+        if not fr: raise V4L2Error("no frames")
+        return sum(fr) / len(fr), sum(sd) / len(sd)
     def close(self): self.cap.release()
+
+
+def clipping(src):
+    """(is the sensor clipping, description) from src.clip_stats(); (False, '') when the source cannot tell."""
+    if not hasattr(src, "clip_stats"): return False, ""
+    frac, std = src.clip_stats()
+    return (frac > CLIP_FRAC or std < CLIP_STD), f"{frac * 100:.0f} % of pixels >= {CLIP_LEVEL}, brightest-decile local std {std:.1f}"
 
 
 # ---------------------------------------------------------------- capture
@@ -241,8 +273,23 @@ def snap(value, stops):
     return min(stops, key=lambda s: abs(s - value)) if stops else value
 
 
-def plan_from_auto(kind, seen, overrides=None):
-    """Turn what auto chose (`seen`, {control: value}) into the ordered manual settings and a list of notes."""
+def exposure_floor(kind, mains_hz=MAINS_HZ, override=None, opt_in=False):
+    """(shortest exposure capture may lock, note saying why). One flicker period = 1/(2*mains_hz) s = 10000/(2*mains_hz) units.
+    The wrist (no gain, clips at the period) has no floor, (0, None), unless `override` or `opt_in` asks for one."""
+    period = 10000.0 / (2 * mains_hz); stops = KINDS[kind]["stops"]
+    if not stops and override is None and not opt_in: return 0, None   # why: forced 100 clipped 46 % of the wrist picture
+    if override is not None: raw, why = override, f"--min-exposure {override}"
+    elif stops: raw, why = period, f"one flicker period at {mains_hz} Hz mains ({period / 10:.1f} ms)"
+    else: raw, why = WRIST_FLOOR_60 * 60.0 / mains_hz, f"measured wrist floor for {mains_hz} Hz mains (--flicker-floor; may clip)"
+    if stops: floor = min([s for s in stops if s >= raw - FLOOR_TOL] or [stops[-1]])   # why: manual exposure only exists at stops
+    else: floor = int(round(raw))
+    floor = min(floor, EXPOSURE_CLAMP if stops else EXPOSURE_MAX_30FPS)                 # why: never past one 30 fps frame
+    return floor, f"exposure floor {floor} ({floor / 10:.1f} ms): {why}"
+
+
+def plan_from_auto(kind, seen, overrides=None, floor=0, floor_note=None):
+    """Turn what auto chose (`seen`, {control: value}) into the ordered manual settings and a list of notes.
+    `floor` is the shortest exposure allowed (see exposure_floor); a shorter one is lifted and brightness compensated."""
     k = KINDS[kind]; plan = dict(k["pre"]); notes = []
     for flag, _on, off, manual in k["autos"]:
         plan[flag] = off
@@ -265,16 +312,27 @@ def plan_from_auto(kind, seen, overrides=None):
     elif e > EXPOSURE_MAX_30FPS:
         plan["exposure_time_absolute"] = EXPOSURE_MAX_30FPS
         notes.append(f"auto exposure {e} exceeds the 30 fps ceiling of {EXPOSURE_MAX_30FPS}: clamped")
+    e = plan["exposure_time_absolute"]
+    if floor_note: notes.append(floor_note)
+    if e < floor:   # why: starting brightness stays near auto's: darken by the stops the longer exposure adds
+        stops_up = math.log2(floor / max(e, 1)); plan["exposure_time_absolute"] = floor
+        if k["stops"]:
+            g = plan["gain"]; plan["gain"] = max(0, int(round(g - GAIN_STEPS_PER_STOP * stops_up)))
+            notes.append(f"exposure {e} is shorter than the floor {floor}: raised to {floor}, gain {g} -> {plan['gain']}")
+        else:
+            b = plan["brightness"]; plan["brightness"] = int(min(BRIGHTNESS_RANGE[1], max(BRIGHTNESS_RANGE[0], round(b - BRIGHTNESS_STEPS_PER_STOP * stops_up))))
+            notes.append(f"exposure {e} is shorter than the floor {floor}: raised to {floor}, brightness {b} -> {plan['brightness']}")
     return plan, notes
 
 
-def tune(dev, kind, plan, src, target):
+def tune(dev, kind, plan, src, target, floor=0):
     """Lock `plan` on a streaming camera, then nudge gain (C920, whole-stop exposure moves when gain runs out) or exposure
-    (wrist) until the picture mean is within TARGET_TOL of `target`. Returns (controls the camera holds, final mean, notes)."""
-    notes = []; stops = KINDS[kind]["stops"]; spp = float(GAIN_STEPS_PER_STOP)
+    (wrist; brightness offset once exposure would drop under `floor`) until the picture mean is within TARGET_TOL of `target`.
+    Exposure never goes below `floor`. Returns (controls the camera holds, final mean, notes)."""
+    notes = []; stops = KINDS[kind]["stops"]; spp = float(GAIN_STEPS_PER_STOP); spb = float(BRIGHTNESS_STEPS_PER_STOP)
     diffs = apply_block(dev, {"controls": plan})
     if diffs: raise V4L2Error("would not take: " + ", ".join(f"{n}={d['got']} (want {d['want']})" for n, d in diffs.items()))
-    m = src.mean(); prev = None
+    m = src.mean(); prev = None; clip, why = clipping(src); clipped = clip
     for _ in range(TUNE_ROUNDS):
         if abs(m - target) <= TARGET_TOL: break
         ratio = target / max(m, 1.0); changed = {}
@@ -284,21 +342,32 @@ def tune(dev, kind, plan, src, target):
             if prev and prev["e"] == e and prev["g"] != g and prev["m"] > 0 and m > 0 and m != prev["m"]:
                 est = (g - prev["g"]) / math.log2(m / prev["m"])         # measured gain steps per stop
                 if 16 <= est <= 256: spp = est
-            usable = [s for s in stops if s <= EXPOSURE_CLAMP]
+            usable = [s for s in stops if floor <= s <= EXPOSURE_CLAMP] or [EXPOSURE_CLAMP]
             i = usable.index(e) if e in usable else len(usable) - 1
             ng = g + spp * math.log2(ratio)
             while ng > 255 and i + 1 < len(usable): i += 1; ng -= spp * math.log2(usable[i] / usable[i - 1])
             while ng < 0 and i > 0: i -= 1; ng += spp * math.log2(usable[i + 1] / usable[i])
             ng = int(round(min(255, max(0, ng))))
+            if clip and usable[i] > e: i = usable.index(e) if e in usable else i   # why: clipping, longer exposure only whitens
             if usable[i] != e: changed["exposure_time_absolute"] = usable[i]
             if ng != g: changed["gain"] = ng
             prev = {"e": e, "g": g, "m": m}
         else:
-            ne = int(round(min(EXPOSURE_MAX_30FPS, max(1, e * ratio))))
+            ne = int(round(min(EXPOSURE_MAX_30FPS, max(1, e * ratio)))); b = plan["brightness"]
+            if prev and prev["e"] == e and prev["b"] != b and prev["m"] > 0 and m > 0 and m != prev["m"]:
+                est = (b - prev["b"]) / math.log2(m / prev["m"])         # measured brightness steps per stop
+                if 16 <= est <= 256: spb = est
+            prev = {"e": e, "b": b, "m": m}
+            if ne < floor:   # why: flicker banding; take the rest of the darkening from the brightness offset
+                ne = floor; rest = ratio * e / floor
+                nb = int(round(min(BRIGHTNESS_RANGE[1], max(BRIGHTNESS_RANGE[0], b + spb * math.log2(rest)))))
+                if nb != b: changed["brightness"] = nb
+            if clip and ne > e: ne = e     # why: clipping, longer exposure only whitens
             if ne != e: changed["exposure_time_absolute"] = ne
         if not changed: break
         for n, v in changed.items(): set_ctrl(dev, n, v); plan[n] = v
-        time.sleep(TUNE_WAIT); m = src.mean()
+        time.sleep(TUNE_WAIT); m = src.mean(); clip, why = clipping(src); clipped = clipped or clip
+    if clipped: notes.append(f"sensor clipping ({why}): exposure not raised further; use flicker-free light or an ND filter on the lens")
     held = get_ctrls(dev, list(plan)); diffs = compare(plan, held)
     if diffs: raise V4L2Error("drifted during tuning: " + ", ".join(f"{n}={d['got']} (want {d['want']})" for n, d in diffs.items()))
     controls = {n: held.get(n, v) for n, v in plan.items()}
@@ -317,14 +386,29 @@ def parse_overrides(items):
     return out
 
 
+def parse_min_exposure(items):
+    """--min-exposure ROLE=N -> {role: N}"""
+    out = {}
+    for it in items or []:
+        m = re.match(r"^(\w+)=(\d+)$", it)
+        if not m: raise ValueError(f"--min-exposure wants ROLE=N, got {it!r}")
+        out[m.group(1)] = int(m.group(2))
+    return out
+
+
 def capture(cams, args):
     """Per camera: auto on, settle, read, lock, tune to auto's brightness, verify; write what the cameras hold."""
-    try: overrides = parse_overrides(args.set)
+    try: overrides = parse_overrides(args.set); min_exp = parse_min_exposure(args.min_exposure)
     except ValueError as e: print(e); return 2
+    mains_hz = getattr(args, "mains_hz", MAINS_HZ); opt_in = set(getattr(args, "flicker_floor", None) or [])
     out = {"captured": datetime.datetime.now().isoformat(timespec="seconds"), "host": os.uname().nodename,
            "note": "manual camera settings frozen for training; re-run `cam_lock.py capture` whenever the lighting setup changes (it locks too)",
            "exposure_rule": f"C920 exposure_time_absolute is 100 us units in 1/2^n s stops; recording at 30 fps needs <= {EXPOSURE_MAX_30FPS}, capture clamps at {EXPOSURE_CLAMP}",
+           "mains_hz": mains_hz,
+           "flicker_rule": f"capture never locks an exposure shorter than one light-flicker period ({10000 / (2 * mains_hz) / 10:.1f} ms at {mains_hz} Hz mains) (C920; the wrist only with --flicker-floor wrist or --min-exposure); see each block's exposure_floor",
            "band": list(BAND), "cameras": {}}
+    for r in [*min_exp, *opt_in]:
+        if r not in cams: print(f"--min-exposure: no camera role {r}"); return 2
     missing = []; failed = []
     with Cams():
         for role, by_id in cams.items():
@@ -340,8 +424,9 @@ def capture(cams, args):
                 src.pump(args.settle)
                 seen = get_ctrls(dev, controls_of(kind)); m_auto = src.mean()
                 target = min(TARGET_MAX, max(TARGET_MIN, m_auto))
-                plan, notes = plan_from_auto(kind, seen, overrides.get(role))
-                controls, m, more = tune(dev, kind, plan, src, target)
+                floor, floor_note = exposure_floor(kind, mains_hz, min_exp.get(role), role in opt_in)
+                plan, notes = plan_from_auto(kind, seen, overrides.get(role), floor, floor_note)
+                controls, m, more = tune(dev, kind, plan, src, target, floor)
                 notes += more
                 if not BAND[0] <= m <= BAND[1]:
                     release_to_auto(dev, kind); failed.append(role)
@@ -349,7 +434,7 @@ def capture(cams, args):
                     for n in notes: print(f"  note: {n}")
                     continue
                 out["cameras"][by_id] = {"role": role, "kind": kind, "device_at_capture": dev, "controls": controls, "auto_seen": seen,
-                                         "auto_mean": round(m_auto, 1), "target_mean": round(target, 1), "verified_mean": round(m, 1), "notes": notes}
+                                         "exposure_floor": floor or None, "auto_mean": round(m_auto, 1), "target_mean": round(target, 1), "verified_mean": round(m, 1), "notes": notes}
                 summary = " ".join(f"{n}={controls[n]}" for n in ("exposure_time_absolute", "gain", "white_balance_temperature", "focus_absolute") if n in controls)
                 print(f"{role}: locked {summary}  picture mean {m:.0f} (auto gave {m_auto:.0f}, target {target:.0f})")
                 for n in notes: print(f"  note: {n}")
@@ -546,6 +631,9 @@ def main(argv=None):
     ap.add_argument("--verify", action="store_true", help="apply: also stream each camera, measure the picture, roll back to auto if it is off")
     ap.add_argument("--settle", type=float, default=4.0, help="capture: seconds to let auto settle (default %(default)s)")
     ap.add_argument("--set", action="append", metavar="ROLE:CTRL=VAL", help="capture: override one starting value, e.g. wrist:exposure_time_absolute=156")
+    ap.add_argument("--mains-hz", type=int, choices=[50, 60], default=MAINS_HZ, help="capture: mains frequency; lights flicker at twice this, exposure is kept >= one flicker period (default %(default)s)")
+    ap.add_argument("--min-exposure", action="append", metavar="ROLE=N", help="capture: override the shortest exposure allowed for one camera (100 us units), e.g. wrist=120")
+    ap.add_argument("--flicker-floor", action="append", metavar="ROLE", help="capture: also apply the flicker floor to a camera that has none by default (the icSpring wrist; it may clip), e.g. wrist")
     ap.add_argument("--wait", type=float, default=0.0, help="apply: wait up to S seconds for the cameras to appear (boot)")
     ap.add_argument("--interval", type=float, default=1.0, help="guard: seconds between checks (default %(default)s)")
     args = ap.parse_args(argv)

@@ -63,6 +63,32 @@ clipped areas, which looked like glare. The icSpring has no gain control, so her
 unclipped (35 -> 33 grey levels of banding, 50 -> 8 with 19 % clipped, 65 -> 24 with 31 % clipped; auto exposure with
 60 Hz anti-flicker banded worst, 45). The wrist keeps its bands until the room light is flicker-free (a DC-driven LED
 lamp fixes all three cameras) or its lens gets a neutral-density filter so a full-period exposure does not clip.
+
+`cam_lock.py capture` now enforces this for the C920s. Whatever auto chose, it never locks a C920 exposure shorter than one
+flicker period `1/(2 x mains_hz)`: the smallest stop at or above it (77/78 at `--mains-hz 60`, the default; 156 at
+`--mains-hz 50`, where the period is 10 ms). A shorter auto exposure is lifted to the floor and gain (which a C920 has) brings
+the picture back to the target mean, down to 0. `--min-exposure ROLE=N` (repeatable, 100 us units) replaces the floor for one
+camera; use 1 to switch it off. Each saved block records `exposure_floor` and a note saying why ("exposure floor 78 (7.8 ms):
+one flicker period at 60 Hz mains"). A locked picture outside 60..190 is still rolled back to auto and not saved, so too much
+light at the floor fails the capture instead of shortening the exposure.
+
+**The wrist is different, so its floor is opt-in.** The icSpring has no gain, and measured on 11 Nov 2026 an exposure of one
+period or more (90+) saturates its sensor in this light: 46 % of pixels at 255 at exposure 100, brightness 0. Brightness -70 only
+greys the clipped areas out (it reads as glare; local contrast in the brightest regions fell from 9 to 2 grey levels). Shorter
+exposures band (35: 33 grey levels, 50: 8, 65: 24), and auto with 60 Hz anti-flicker banded worst (45). Capture therefore keeps
+the wrist at auto's exposure unless asked: `--flicker-floor wrist` applies the measured floor (100 units at 60 Hz, 120 at
+`--mains-hz 50`) and darkens with the brightness offset (-128..127), or `--min-exposure wrist=N` sets it by hand. The real fix
+for the wrist is flicker-free light or an ND filter on its lens.
+
+Every camera is also checked for **sensor clipping** during capture: more than 5 % of pixels at 250 or above, or the local std
+of the brightest decile under 3 grey levels. A hit adds a "sensor clipping" note to the block, and the tuning loop does not
+raise the exposure further.
+```
+so101-cams-capture                                  # 60 Hz mains
+python3 ~/so101/cam_lock.py capture --mains-hz 50   # 50 Hz mains
+python3 ~/so101/cam_lock.py capture --flicker-floor wrist   # opt the wrist in (may clip)
+python3 ~/so101/cam_lock.py capture --min-exposure wrist=120
+```
 Watch out: on the front C920 a gain write sometimes reads back a different number for a few seconds (set 0 read 109,
 set 30 read 229); `cam_lock.py check` settled on the written value within 5 s here.
 
@@ -81,7 +107,7 @@ again and `so101-cams-check` within a few seconds.
 
 | command | what it does |
 |---|---|
-| `so101-cams-capture` | New lighting session. Per camera: takes it from the dashboard, streams it in the mode recording uses, hands it back to auto, lets auto settle (4 s), reads what it chose and the picture's mean grey, locks the camera, then tunes gain (C920) or exposure (wrist) until the locked picture matches auto's mean (clamped to 100..140, within 8). Writes the file. A camera whose locked picture ends outside 60..190 is **put back on auto and not saved**; fix the light and run it again. Takes about 15 s per camera; the dashboard feeds pause meanwhile. Needs the venv python (this shell has it). |
+| `so101-cams-capture` | New lighting session. Per camera: takes it from the dashboard, streams it in the mode recording uses, hands it back to auto, lets auto settle (4 s), reads what it chose and the picture's mean grey, locks the camera, lifts a C920 exposure to the flicker floor (see above), then tunes gain (C920) or exposure (wrist) until the locked picture matches auto's mean (clamped to 100..140, within 8). Writes the file. A camera whose locked picture ends outside 60..190 is **put back on auto and not saved**; fix the light and run it again. Takes about 15 s per camera; the dashboard feeds pause meanwhile. Needs the venv python (this shell has it). |
 | `so101-cams-lock` | `apply --verify`: re-apply the saved values, stream each camera, measure the picture, roll back to auto if it is outside 60..190. |
 | `so101-cams-check` | Compare live values with the file, one line, exit 0 only if everything matches. `--json` for machines. |
 | `so101-cams-guard` | Start the resident re-locker in the background if none is running (the systemd user unit normally does this). |
