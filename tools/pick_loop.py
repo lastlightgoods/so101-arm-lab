@@ -160,6 +160,13 @@ def find_nut_near(cc, table, near_in, radius_px=70, radius_mm=None, wait_s=3.0, 
     f = Found(d); f.source = "dark"; return f
 
 
+def find_nut_hints(cc, table, hints, sleep=None):
+    """The nut near any of `hints` ((near_in, radius_px), ...) -> Found or None: the scene map at EVERY hint first, then the dark blob at every hint.
+    why: 11 Nov 2026 asking hint by hint let a printed-square fragment found by the dark search at the first hint beat a nut the scene map saw from the second."""
+    return (next((f for f in (find_nut_near(cc, table, h, radius_px=r, sleep=sleep, dark=False) for h, r in hints) if f), None)
+            or next((f for f in (find_nut_near(cc, table, h, radius_px=r, sleep=sleep, wait_s=0.0) for h, r in hints) if f), None))
+
+
 def find_nut(cc, table, near_in, radius_px=70, jpeg=None, joints="live"):
     """Dark blob nearest to `near_in` (mat inches) in a fresh overhead frame (or the given JPEG bytes) -> (mat_in, pixel, area) or None. `joints`: the
     follower's joints for the arm cut-out, as in find_nut_mat ("live" reads /api/state; None skips it; a dict is used as is). why: 11 Nov 2026 13:45 the
@@ -578,8 +585,7 @@ def main():
     run, misses = 0, 0
     while run < a.runs:
         nxt = run + 1; tgt = list(a.target) if (nxt == a.runs or nxt % 2 == 0) else list(a.alt); key = f"{tgt[0]:.2f},{tgt[1]:.2f}"
-        hints = ((near, 70), (list(a.target), 140), (list(a.alt), 140))   # why: the scene map at EVERY hint before the dark blob at any: a printed-square fragment at the first hint must not beat a nut the map sees from the second (11 Nov 2026)
-        found = next((f for f in (find_nut_near(cc, table, h, radius_px=r, dark=False) for h, r in hints) if f), None) or next((f for f in (find_nut_near(cc, table, h, radius_px=r, wait_s=0.0) for h, r in hints) if f), None); source = found.source if found else None
+        found = find_nut_hints(cc, table, ((near, 70), (list(a.target), 140), (list(a.alt), 140))); source = found.source if found else None
         if not found:   # the whole-mat finder: the scene map, then a dark-blob search over the whole mat with the markers masked
             anywhere = find_nut_anywhere(cc, table, near_in=near, markers_in=markers)
             if anywhere: found, source = (anywhere[0], None, None), anywhere[1]; say({"run": nxt, "note": "nut found by the whole-mat finder", "source": source, "nut_in": [round(v, 3) for v in anywhere[0]]})

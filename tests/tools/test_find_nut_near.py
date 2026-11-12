@@ -91,3 +91,15 @@ def test_autoloop_locate_uses_it(autorig, capsys):
     assert loc["source"] == "scene" and loc["chosen_in"] == pytest.approx([9.0, 6.2], abs=1e-3)
     r2 = autorig(); r2.pl.find_nut_near = lambda *a, **k: None   # nothing near: the whole-mat finder answers as before
     s2, o2 = r2.run(capsys, cycles=1, max_retries=0); l2 = events(o2, "cycle")[0]["locates"][0]; assert l2["source"] == "scene" and l2["chosen_in"] == pytest.approx([6.0, 8.0], abs=1e-3)
+
+
+def test_the_scene_at_every_hint_beats_a_dark_fragment_at_the_first(pl, cc, table, monkeypatch):
+    """11 Nov 2026: asked hint by hint, the dark search's printed-square fragment at the first hint beat the nut the scene map saw from the second."""
+    nut = {"x_in": 10.17, "y_in": 7.32, "w_mm": 10.0, "h_mm": 8.0, "area_mm2": 60.0}
+    monkeypatch.setattr(pl, "fetch_scene_state", lambda: ([nut], 0))
+    frag = ([6.78, 4.81], [370.6, 153.7], 10); monkeypatch.setattr(pl, "find_nut", lambda *a, **k: frag)
+    got = pl.find_nut_hints(cc, table, (([6.8, 4.8], 70), ([10.0, 7.2], 140)), sleep=lambda s: None)
+    assert got and got.source == "scene" and got[0] == [10.17, 7.32], "the map's nut from the second hint, not the fragment at the first"
+    monkeypatch.setattr(pl, "fetch_scene_state", lambda: ([], 0))
+    got = pl.find_nut_hints(cc, table, (([6.8, 4.8], 70), ([10.0, 7.2], 140)), sleep=lambda s: None)
+    assert got and got.source == "dark" and got[0] == [6.78, 4.81], "no scene nut anywhere: the dark search still answers"
