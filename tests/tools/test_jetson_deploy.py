@@ -265,3 +265,14 @@ def test_no_lan_addresses_or_hosts_in_the_tool():
     import re
     src = open(_p).read()
     assert not re.search(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", src) and "/Users/" not in src and "@" not in src.replace("\"@\"", "")
+
+
+def test_restart_scripts_never_match_their_own_shell():
+    """2026-11-11: `bash -c '... pkill -f "demo_recorderd.py serve" ...'` matches (and kills) its own shell; the patterns must be bracketed."""
+    import re
+    scripts = {}
+    for name in ("recorder", "camd"):
+        seen = []; tr = jd.SshTransport(run=lambda argv, data, _s=seen: (_s.append(argv), (0, b"restarted"))[1]); tr.restart(name); scripts[name] = seen[-1][-1]
+    for name, daemon in (("recorder", "/home/x/.venv/bin/python /home/x/so101/demo_recorderd.py serve"), ("camd", "python3 /home/x/so101/camd.py serve")):
+        sc = scripts[name]; pats = re.findall(r'(?:pkill -TERM|pgrep) -f "([^"]+)"', sc); assert pats, sc
+        for pat in pats: assert re.search(pat, daemon) and not re.search(pat, "bash -c " + sc), (pat, name)

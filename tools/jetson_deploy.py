@@ -204,14 +204,16 @@ class SshTransport:
         return sorted(l for l in out.decode().split() if l)
 
     def restart(self, name):
+        # why: the script runs as `bash -c '<script>'`, whose own command line contains the process name: a plain `pkill -f "demo_recorderd.py serve"` kills this very
+        # shell and `pgrep` always finds it (2026-11-11). The [d]/[c] bracket regex matches the daemon's command line but not its own literal text.
         if name == "recorder":
-            script = ('cd "$HOME/so101"; pkill -TERM -f "demo_recorderd.py serve"; for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "demo_recorderd.py serve" >/dev/null || break; sleep 1; done; '
-                      'pgrep -f "demo_recorderd.py serve" >/dev/null && { echo "old recorder still running"; exit 1; }; mkdir -p outputs/run; '
-                      'nohup nice -n 5 "$HOME/so101/.venv/bin/python" "$HOME/so101/demo_recorderd.py" serve > "$HOME/so101/outputs/run/demo_recorderd.log" 2>&1 < /dev/null & sleep 3; pgrep -f "demo_recorderd.py serve" >/dev/null && echo restarted')
+            script = ('cd "$HOME/so101"; pkill -TERM -f "[d]emo_recorderd.py serve"; for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "[d]emo_recorderd.py serve" >/dev/null || break; sleep 1; done; '
+                      'pgrep -f "[d]emo_recorderd.py serve" >/dev/null && { echo "old recorder still running"; exit 1; }; mkdir -p outputs/run; '
+                      'nohup nice -n 5 "$HOME/so101/.venv/bin/python" "$HOME/so101/demo_recorderd.py" serve > "$HOME/so101/outputs/run/demo_recorderd.log" 2>&1 < /dev/null & sleep 3; pgrep -f "[d]emo_recorderd.py serve" >/dev/null && echo restarted')
         elif name == "camd":
-            script = ('cd "$HOME/so101"; pkill -TERM -f "camd.py serve"; for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "camd.py serve" >/dev/null || break; sleep 1; done; '
-                      'pgrep -f "camd.py serve" >/dev/null && { echo "old camd still running"; exit 1; }; mkdir -p outputs/run; '
-                      'nohup python3 "$HOME/so101/camd.py" serve > "$HOME/so101/outputs/run/camd.log" 2>&1 < /dev/null & sleep 3; pgrep -f "camd.py serve" >/dev/null && echo restarted')
+            script = ('cd "$HOME/so101"; pkill -TERM -f "[c]amd.py serve"; for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "[c]amd.py serve" >/dev/null || break; sleep 1; done; '
+                      'pgrep -f "[c]amd.py serve" >/dev/null && { echo "old camd still running"; exit 1; }; mkdir -p outputs/run; '
+                      'nohup python3 "$HOME/so101/camd.py" serve > "$HOME/so101/outputs/run/camd.log" 2>&1 < /dev/null & sleep 3; pgrep -f "[c]amd.py serve" >/dev/null && echo restarted')
         else: raise ValueError(name)
         rc, out = self.sh(script, check=False)
         return rc == 0 and b"restarted" in out, out.decode().strip()[-200:]
