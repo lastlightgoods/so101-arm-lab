@@ -276,3 +276,10 @@ def test_restart_scripts_never_match_their_own_shell():
     for name, daemon in (("recorder", "/home/x/.venv/bin/python /home/x/so101/demo_recorderd.py serve"), ("camd", "python3 /home/x/so101/camd.py serve")):
         sc = scripts[name]; pats = re.findall(r'(?:pkill -TERM|pgrep) -f "([^"]+)"', sc); assert pats, sc
         for pat in pats: assert re.search(pat, daemon) and not re.search(pat, "bash -c " + sc), (pat, name)
+
+
+def test_a_try_import_counts_as_a_user_so_servo_telemetry_lists_the_streamer_and_pick_seq():
+    """2026-11-11: arm_state.py and pick_seq.py import servo_telemetry as `try: import servo_telemetry`; the scan missed it and called the file 'run on demand'."""
+    git = jd.Git(); items = jd.manifest(git, "HEAD")
+    whats = [w for w, _, _ in jd.users(git, "HEAD", items, "servo_telemetry.py")]
+    assert any(w.startswith("arm_state.py") for w in whats) and any(w.startswith("pick_seq.py") for w in whats), whats

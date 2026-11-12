@@ -120,9 +120,9 @@ def users(git, ref, items, remote):
         except Exception: return graph[mod]
         found = set()
         for line in src.splitlines():
-            m = re.match(r"\s*from\s+(\w+)\s+import\b", line)
+            m = re.match(r"\s*(?:try:\s*)?from\s+(\w+)\s+import\b", line)   # why: arm_state.py / pick_seq.py import servo_telemetry as `try: import servo_telemetry` (2026-11-11: missed, so its users were not listed)
             if m: found.add(m.group(1))
-            m = re.match(r"\s*import\s+([\w\s,]+?)(?:\s+as\s+\w+)?\s*(?:#.*)?$", line)
+            m = re.match(r"\s*(?:try:\s*)?import\s+([\w\s,]+?)(?:\s+as\s+\w+)?\s*(?:#.*)?$", line)
             if m: found |= {x.strip() for x in m.group(1).split(",")}
         graph[mod] = found & names
         return graph[mod]
