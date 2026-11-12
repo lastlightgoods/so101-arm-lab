@@ -87,14 +87,14 @@ def scene_b(sd, calib_b, frames):
     s = sd.MatScene(calib_b); s.set_background(frames["new"]); return s
 
 
-def paste_square(scene, raw_bg, x_mm, y_mm, size_mm=30.0, color=(40, 60, 230), angle_deg=0.0):
+def paste_square(scene, raw_bg, x_mm, y_mm, size_mm=30.0, color=(40, 60, 230), angle_deg=0.0, length_mm=None):
     """A synthetic object: a coloured square of `size_mm` centred at (x_mm, y_mm) on the mat, drawn in mat space and
     un-warped into the raw camera frame through the inverse homography, composited over the clean frame."""
     hi = 4.0                                                                     # mm -> px of the drawing canvas
     W, H = int(round(scene.mat_w * hi)), int(round(scene.mat_h * hi))
     canvas = np.zeros((H, W, 3), np.uint8); mask = np.zeros((H, W), np.uint8)
     c = (x_mm * hi, (scene.mat_h - y_mm) * hi)
-    box = cv2.boxPoints((c, (size_mm * hi, size_mm * hi), -angle_deg)).astype(np.int32)
+    box = cv2.boxPoints((c, ((size_mm if length_mm is None else length_mm) * hi, size_mm * hi), -angle_deg)).astype(np.int32)
     cv2.fillConvexPoly(canvas, box, color); cv2.fillConvexPoly(mask, box, 255)
     A = np.array([[hi, 0, 0], [0, -hi, scene.mat_h * hi], [0, 0, 1]])            # mm -> canvas px
     M = np.linalg.inv(A @ scene.H)                                               # canvas px -> raw px

@@ -81,11 +81,12 @@ class ShortArm:
     `scene` / the whole-mat search); at landing it is `land_off_in` from where the loop placed it."""
     def __init__(self, cc, table, shortfall_mm=7.0, high_mm=0.0, nut_in=PROBE_NUT_IN, land_off_in=(0.1, -0.05), found=True, scene=None):
         self.cc, self.table, self.shortfall, self.high, self.nut_in, self.land_off, self.found, self.scene = cc, table, shortfall_mm, high_mm, nut_in, land_off_in, found, list(scene or [])
-        self.calls, self.plans, self.rows, self.ik_calls, self.frames = [], [], [], [], 0
+        self.calls, self.plans, self.rows, self.ik_calls, self.frames, self.rolls = [], [], [], [], 0, []
 
     def api(self, path):
         q = dict(p.split("=") for p in path.split("?")[1].split("&")); x, y, h = float(q["x_in"]), float(q["y_in"]), float(q.get("h_in", 0.0)); self.ik_calls.append((x, y, h))
-        j = solve_joints(self.cc, self.table, SEED, mat_to_base(self.cc, self.table, x, y, h * 25.4)); j["wrist_roll"] = float(self.table["arm_fit"].get("wrist_roll_deg", 0.0))
+        roll = float(q["roll"]) if "roll" in q else float(self.table["arm_fit"].get("wrist_roll_deg", 0.0)); self.rolls.append(roll)   # why: the dashboard IK takes &roll= (12 Nov 2026)
+        j = solve_joints(self.cc, self.table, dict(SEED, wrist_roll=roll), mat_to_base(self.cc, self.table, x, y, h * 25.4)); j["wrist_roll"] = roll
         return {"ok": True, "joints_deg": {k: round(v, 3) for k, v in j.items()}}
 
     def reached(self, joints):

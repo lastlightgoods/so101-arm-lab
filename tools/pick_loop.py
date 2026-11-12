@@ -14,7 +14,7 @@ back again, c2, and the tip height h decides whether the grasp target is lowered
 camera looks for the nut between the jaw tips (jaw check); not there -> ONE more corrected grasp (b + c); still not there -> open over
 the spot and rest, `picked=false, reason="not_in_jaws"`; (e) carry, place, open, lift, rest. `--open-loop` is the single-run plan of before.
 
-  tools/pick_loop.py --runs 4 [--target 9 6] [--open-loop] [--jaw-open 35] [--grasp-aim-mm 10] [--grasp-tilt-deg -3] [--wrist-check] [--no-jaw-check] [--fast-close]
+  tools/pick_loop.py --runs 4 [--target 9 6] [--open-loop] [--jaw-open 35] [--grasp-aim-mm 10] [--grasp-tilt-deg -3] [--grasp-roll auto] [--wrist-check] [--no-jaw-check] [--fast-close]
                      [--jaw-window 300 300 380 360] [--lost-after 3] [--state jetson/calib/pick_state.json]
   tools/pick_loop.py --reset [--safe-box 6 4 13 8] [--seed N]      # put the nut at a random clear spot inside the safe box
 State (biases, place offset, history) persists in --state so later sessions start where this one ended.
@@ -48,6 +48,12 @@ GRASP_AIM_MM = 4.0
 # thumb; the IK target is shifted back by the tilt's own tip shift so the tilted tip lands where the untilted one would. 16:35 test pick: picked and placed, 5.9 mm from the target.
 GRASP_TILT_DEG = -3.0
 TILT_WPS = ("pregrasp", "grasp", "close1", "close2", "close")   # not hover_nut, lift, hover_tgt, place, open, lift2, rest
+# why: 11 Nov 2026 18:2x a ~6 x 13 mm spacer lying along the reach was pushed 1.8 in instead of picked: the jaws close along jaw_dir, which with wrist_roll fixed is roughly the reach direction,
+# so they closed along its length. --grasp-roll turns the wrist so jaw_dir is perpendicular to the object's long axis; the nut-side waypoints carry the roll (hover_pre and pregrasp_up through
+# hover_nut / pregrasp), the carry and rest do not. Off by default.
+ROLL_WPS = ("hover_nut", "pregrasp", "grasp", "close1", "close2", "close", "lift")
+ROLL_MIN_RATIO = 1.3     # long / short below this is round: no roll
+ROLL_OBJ_MM = 15.0       # --grasp-roll auto: the scene object used must be this close to the nut position
 # why: the final stage goes from the stage-2 grasp pose UP to pregrasp, and lifting is the servo's bad side (P-only, I=0: it stops short; the 11:56 sweep on 11 Nov 2026 measured
 # 1.7-4.7 deg of droop on the shoulder, 3 deg on the elbow). A live tilt pick had a pregrasp sag of 4.35 deg, and the commanded pregrasp -> grasp descent is only ~1.4 deg on shoulder_lift
 # and elbow_flex, less than the droop, so the real shoulder move was a reversal from the bad side: the grasp landed 6.4 mm high and 4 mm past the aim. A final move that INCREASES
@@ -302,24 +308,28 @@ def calib():
     return _CALIB[ROOT]
 
 
-def build_plan(nut_in, tgt_in, biases, names=None, jaw_open=JAW_OPEN, grasp_h_in=None, fast_close=False, tilt_deg=0.0, cc=None, table=None):
+def build_plan(nut_in, tgt_in, biases, names=None, jaw_open=JAW_OPEN, grasp_h_in=None, fast_close=False, tilt_deg=0.0, cc=None, table=None, roll_deg=0.0):
     """The waypoints of WP (all, or only `names`, in WP order) through /api/ik with the learned biases; `jaw_open` replaces every
     open-jaw value, `grasp_h_in` the grasp (and close) height (the closed loop lowers it when the readback says the tip sits high).
     `tilt_deg` is added to wrist_flex on the TILT_WPS; their IK target is shifted back by the tilt's own tip shift (FK through the arm
-    fit, `cc`/`table` or calib()), so the tilted tip lands on the commanded point; `desired` carries the tilt (the sag learning must not learn it)."""
-    def ik(x, y, h):
-        r = api(f"/api/ik?x_in={x:.4f}&y_in={y:.4f}&h_in={h:.4f}")
+    fit, `cc`/`table` or calib()), so the tilted tip lands on the commanded point; `desired` carries the tilt (the sag learning must not learn it).
+    `roll_deg` (0/None: the plan of before) is added to the arm fit's wrist_roll on the ROLL_WPS (the nut side; hover_pre and pregrasp_up through the waypoint they copy) and goes to
+    /api/ik as &roll=, so the tip still lands on the commanded point (the tip is off the roll axis); the carry and rest keep the fit's roll."""
+    roll_deg = float(roll_deg or 0.0); base_roll = float((((cc, table) if cc is not None and table is not None else calib())[1].get("arm_fit") or {}).get("wrist_roll_deg", 0.0)) if roll_deg else 0.0
+    def ik(x, y, h, roll=None):
+        r = api(f"/api/ik?x_in={x:.4f}&y_in={y:.4f}&h_in={h:.4f}" + ("" if roll is None else f"&roll={roll:.4f}"))
         if not r.get("ok"): raise SystemExit(f"ik failed for ({x:.2f},{y:.2f},{h}): {r.get('err')}")
         return r["joints_deg"]
     want = None if names is None else set(names) | ({"close"} if {"close1", "close2"} & set(names) else set())   # why: a stage naming the two-step close also names its --fast-close stand-in
     def arm_wp(name, which, h):   # (desired, command) joints of one mat-point or rest waypoint: IK, the tilt's shift, the bias, the clamp
         tilt = float(tilt_deg or 0.0) if name in TILT_WPS else 0.0; pt = nut_in if which == "nut" else tgt_in
-        j = dict(REST) if which is None else ik(*pt, h)
+        roll = base_roll + roll_deg if (roll_deg and which == "nut" and name in ROLL_WPS) else None
+        j = dict(REST) if which is None else ik(*pt, h, roll)
         if tilt and which is not None:
             c, t = (cc, table) if cc is not None and table is not None else calib()
             for _ in range(2):   # why: the shift barely depends on the pose, so twice is enough (11 Nov 2026); the tilted tip must land on the commanded point
                 # ... in height too: xy alone left the tilted tip -2.8 mm (8, 5) to +1.75 mm (14, 8) off the commanded height (arm fit), and the grasp height is what made the 11 Nov misses
-                x0, y0, h0 = fk_mat(c, t, j); x1, y1, h1 = fk_mat(c, t, dict(j, wrist_flex=j["wrist_flex"] + tilt)); j = ik(pt[0] - (x1 - x0), pt[1] - (y1 - y0), h - (h1 - h0) / 25.4)
+                x0, y0, h0 = fk_mat(c, t, j); x1, y1, h1 = fk_mat(c, t, dict(j, wrist_flex=j["wrist_flex"] + tilt)); j = ik(pt[0] - (x1 - x0), pt[1] - (y1 - y0), h - (h1 - h0) / 25.4, roll)
             j = dict(j, wrist_flex=j["wrist_flex"] + tilt)
         b = biases.get(name, {}); cmd = {k: j[k] + b.get(k, 0.0) for k in j}; cmd["wrist_flex"] = max(-93.0, min(93.0, cmd["wrist_flex"])); return j, cmd
     wps = []
@@ -370,6 +380,66 @@ def aim_point(nut_in, jaw_dir, aim_mm):
     return [nut_in[0] - aim_mm / 25.4 * jaw_dir[0], nut_in[1] - aim_mm / 25.4 * jaw_dir[1]]
 
 
+def _scene_mod():
+    """dashboard/scene_detect.py by path (not through ROOT, which the tests move): long_axis_mat lives next to the detector whose angle it reads."""
+    import importlib.util
+    if "_scene_detect" not in globals():
+        spec = importlib.util.spec_from_file_location("scene_detect_for_pick", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dashboard", "scene_detect.py")); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); globals()["_scene_detect"] = m
+    return globals()["_scene_detect"]
+
+
+def long_axis_mat(obj, min_ratio=ROLL_MIN_RATIO): return _scene_mod().long_axis_mat(obj, min_ratio)
+
+
+def parse_grasp_roll(v):
+    """--grasp-roll: "off" (None / ""), "auto", or degrees -> "off" | "auto" | float (SystemExit on anything else)."""
+    t = "off" if v is None or str(v).strip() == "" else str(v).strip().lower()
+    if t in ("off", "auto"): return t
+    try: return float(t)
+    except ValueError: raise SystemExit(f"--grasp-roll wants auto, off or degrees, not {v!r}") from None
+
+
+def roll_to_perpendicular(cc, table, joints, axis, span=90.0):
+    """The wrist_roll OFFSET (degrees, |offset| <= span) that turns jaw_dir_mat of `joints` perpendicular to `axis` (a unit mat vector): the root of
+    jaw_dir . axis closest to zero, found by scanning the offset and bisecting, with jaw_dir from FK through the arm fit (the sign of wrist_roll vs the
+    jaw's turn on the mat is whatever the fit says, never assumed). None when jaw_dir is undefined (gripper not near vertical) or no root lies in range."""
+    def f(r):
+        u = jaw_dir_mat(cc, table, dict(joints, wrist_roll=float(joints["wrist_roll"]) + r)); return None if u is None else u[0] * axis[0] + u[1] * axis[1]
+    grid = [i * 1.0 for i in range(-int(span), int(span) + 1)]; vals = [f(r) for r in grid]
+    if any(v is None for v in vals): return None
+    roots = []
+    for (r0, v0), (r1, v1) in zip(zip(grid, vals), zip(grid[1:], vals[1:])):
+        if v0 == 0.0: roots.append(r0)
+        elif v0 * v1 < 0:
+            lo, hi, flo = r0, r1, v0
+            for _ in range(40):
+                mid = (lo + hi) / 2.0; fm = f(mid)
+                if fm * flo <= 0: hi = mid
+                else: lo, flo = mid, fm
+            roots.append((lo + hi) / 2.0)
+    if vals[-1] == 0.0: roots.append(grid[-1])
+    return min(roots, key=abs) if roots else None
+
+
+def resolve_grasp_roll(spec, cc, table, nut_in, tilt_deg=0.0, objects=None):
+    """(roll offset in degrees or None, info) for --grasp-roll `spec`. "off": (None, {}). A number: that offset. "auto": the scene-map object nearest
+    `nut_in` (within ROLL_OBJ_MM; `objects` or /api/scene), its long axis, and roll_to_perpendicular at the IK pose for the grasp (tilted). No object,
+    a round one or no axis: (None, info with why). info: {"spec", "axis", "obj", "why"} for the stage line and MLflow."""
+    spec = parse_grasp_roll(spec)
+    if spec == "off": return None, {}
+    if spec != "auto": return float(spec), {"spec": spec}
+    info = {"spec": "auto", "axis": None, "obj": None, "why": None}
+    objs = fetch_scene_objects() if objects is None else objects
+    near = sorted(((math.hypot(float(o["x_in"]) - nut_in[0], float(o["y_in"]) - nut_in[1]) * 25.4, o) for o in objs if "x_in" in o and "y_in" in o), key=lambda t: t[0])
+    if not near or near[0][0] > ROLL_OBJ_MM: info["why"] = "no scene object at the nut position"; return None, info
+    o = near[0][1]; info["obj"] = {k: o.get(k) for k in ("id", "x_in", "y_in", "w_mm", "h_mm", "angle_deg")}; ax = long_axis_mat(o)
+    if ax is None: info["why"] = f"round (long/short < {ROLL_MIN_RATIO:g})"; return None, info
+    j = api(f"/api/ik?x_in={nut_in[0]:.4f}&y_in={nut_in[1]:.4f}&h_in={GRASP_H_IN:.4f}")["joints_deg"]; j = dict(j, wrist_flex=j["wrist_flex"] + float(tilt_deg or 0.0))
+    r = roll_to_perpendicular(cc, table, j, ax); info["axis"] = [round(ax[0], 3), round(ax[1], 3)]
+    if r is None: info["why"] = "jaw_dir undefined at the grasp pose"; return None, info
+    return round(r, 2), info
+
+
 def reached_joints(rows, name):
     r = [r for r in rows if r["wp"] == name][-1]; return {k: float(r["reached"][k]) for k in ARM}
 
@@ -408,14 +478,17 @@ def closed_loop_pick(cc, table, nut_in, place_in, biases, a, run, say, wpose=Non
     (grasp .. lift, then carry .. rest, or the abort), info carries corr1_mm, corr2_mm, grasp_h_mm, grasp_lowered_mm, final_residual_mm,
     wrist_check, in_jaws, jaw_ring, jaw_retry, jaw_frames and reason ("not_in_jaws" when the nut was not carried) for the record and MLflow."""
     tilt = float(getattr(a, "grasp_tilt_deg", GRASP_TILT_DEG) or 0.0); jaw = getattr(a, "jaw_check", True); fast = getattr(a, "fast_close", False); window = tuple(getattr(a, "jaw_window", None) or JAW_WINDOW)
+    spec = parse_grasp_roll(getattr(a, "grasp_roll", "off")); roll, rinfo = resolve_grasp_roll(spec, cc, table, nut_in, tilt)   # why: once per pick, from the scene map; every nut-side stage (and the retry) turns the wrist the same way
+    if spec != "off": say({"run": run, "stage": "grasp_roll", "roll_deg": roll, **rinfo})
     def stage(xy, names, grasp_h_in=None):
-        p = build_plan(list(xy), list(place_in), biases, names=names, jaw_open=a.jaw_open, grasp_h_in=grasp_h_in, fast_close=fast, tilt_deg=tilt, cc=cc, table=table); return p, run_plan(p, a.max_deg_s)
+        p = build_plan(list(xy), list(place_in), biases, names=names, jaw_open=a.jaw_open, grasp_h_in=grasp_h_in, fast_close=fast, tilt_deg=tilt, cc=cc, table=table, roll_deg=roll); return p, run_plan(p, a.max_deg_s)
     # (a) hover over the commanded point; the readback says where the tip really went
     _, r1 = stage(nut_in, STAGES[0]); j1 = reached_joints(r1, "hover_nut"); x, y, h = fk_mat(cc, table, j1)
     aim_mm = float(getattr(a, "grasp_aim_mm", GRASP_AIM_MM) or 0.0); u = jaw_dir_mat(cc, table, j1) if aim_mm else None
     aim = aim_point(nut_in, u, aim_mm)   # the fixed jaw's tip goes here; every correction below steers the readback onto it
     c1 = (aim[0] - x, aim[1] - y); info = {"corr1_mm": _mm(c1), "wrist_check": None, "in_jaws": None, "jaw_ring": None, "jaw_retry": False, "jaw_frames": [], "reason": None,
-                                          "aim_mm": aim_mm if u else 0.0, "jaw_dir": [round(u[0], 3), round(u[1], 3)] if u else None, "aim_in": [round(v, 3) for v in aim]}
+                                          "aim_mm": aim_mm if u else 0.0, "jaw_dir": [round(u[0], 3), round(u[1], 3)] if u else None, "aim_in": [round(v, 3) for v in aim],
+                                          "grasp_roll_deg": roll, "grasp_roll_info": rinfo or None}
     say({"run": run, "stage": "hover", "cmd_in": [round(v, 3) for v in nut_in], "reached_in": [round(x, 3), round(y, 3)], "h_mm": round(h, 1), "corr1_mm": info["corr1_mm"], "aim_in": info["aim_in"], "aim_mm": info["aim_mm"], "jaw_dir": info["jaw_dir"]})
     if a.wrist_check:   # a look, not a correction: does the camera see the nut where the command says it is?
         info["wrist_check"] = wrist_mod().wrist_check(cc, table, wpose, nut_in, j1, fetch_wrist() or b"", check_path) if wpose else None
@@ -465,10 +538,12 @@ def pick_once(cc, table, state, a, run, nut_in, tgt, place_in, off, say, session
         tr.params({"target_in": f"{a.target[0]:.2f},{a.target[1]:.2f}", "alt_in": f"{a.alt[0]:.2f},{a.alt[1]:.2f}", "place_in": f"{place_in[0]:.3f},{place_in[1]:.3f}", "gain": a.gain, "outcome_gain": a.outcome_gain,
                    "max_deg_s": a.max_deg_s, "runs": a.runs, "state": os.path.relpath(a.state, ROOT) if a.state.startswith(ROOT) else a.state, "dash": DASH, "mode": mode, "jaw_open": a.jaw_open, "wrist_check": int(a.wrist_check),
                    "jaw_check": int(a.jaw_check), "fast_close": int(a.fast_close), "jaw_window": ",".join(str(int(v)) for v in a.jaw_window),
-                   "grasp_aim_mm": float(getattr(a, "grasp_aim_mm", GRASP_AIM_MM)) if control == "closed" else None, "grasp_tilt_deg": float(getattr(a, "grasp_tilt_deg", GRASP_TILT_DEG))})
+                   "grasp_aim_mm": float(getattr(a, "grasp_aim_mm", GRASP_AIM_MM)) if control == "closed" else None, "grasp_tilt_deg": float(getattr(a, "grasp_tilt_deg", GRASP_TILT_DEG)), "grasp_roll": str(parse_grasp_roll(getattr(a, "grasp_roll", "off")))})
         t0 = time.time(); check_path = os.path.join(ROOT, "outputs", "run", f"wrist_check_{session}_r{run}.jpg"); jaw_path = os.path.join(ROOT, "outputs", "run", f"in_jaws_{session}_r{run}.jpg")
         if a.closed_loop: plan, rows, info = closed_loop_pick(cc, table, nut_in, place_in, state["biases"], a, run, say, wpose, check_path, jaw_path); tr.json(plan, "plan.json")
-        else: plan = build_plan(nut_in, place_in, state["biases"], jaw_open=a.jaw_open, fast_close=a.fast_close, tilt_deg=float(getattr(a, "grasp_tilt_deg", GRASP_TILT_DEG) or 0.0), cc=cc, table=table); tr.json(plan, "plan.json"); rows = run_plan(plan, a.max_deg_s); info = {}
+        else:
+            tilt = float(getattr(a, "grasp_tilt_deg", GRASP_TILT_DEG) or 0.0); roll, rinfo = resolve_grasp_roll(getattr(a, "grasp_roll", "off"), cc, table, nut_in, tilt)
+            plan = build_plan(nut_in, place_in, state["biases"], jaw_open=a.jaw_open, fast_close=a.fast_close, tilt_deg=tilt, cc=cc, table=table, roll_deg=roll); tr.json(plan, "plan.json"); rows = run_plan(plan, a.max_deg_s); info = {"grasp_roll_deg": roll, "grasp_roll_info": rinfo or None}
         dt = time.time() - t0
         # learn the servo sag per waypoint: bias += gain * (target - reached), capped; closed loop: on the FINAL stages only (their waypoints are the ones the corrected command drove)
         desired = {w["name"]: w["desired"] for w in plan["waypoints"]}
@@ -497,7 +572,7 @@ def pick_once(cc, table, state, a, run, nut_in, tgt, place_in, off, say, session
         c1, c2 = info.get("corr1_mm"), info.get("corr2_mm"); ij = info.get("in_jaws")
         tr.metrics({"landing_err_mm": err_mm, "before_mm": before_mm, "seconds": dt, "picked": int(picked), "found_at_landing": int(landed is not None), **{f"sag_{r['wp']}": r["max_err_deg"] for r in rows if "max_err_deg" in r},
                     "corr1_mm": math.hypot(*c1) if c1 else None, "corr1_x_mm": c1[0] if c1 else None, "corr1_y_mm": c1[1] if c1 else None, "corr2_mm": math.hypot(*c2) if c2 else None, "corr2_x_mm": c2[0] if c2 else None, "corr2_y_mm": c2[1] if c2 else None,
-                    "grasp_h_mm": info.get("grasp_h_mm"), "grasp_lowered_mm": info.get("grasp_lowered_mm"), "final_residual_mm": info.get("final_residual_mm"), "wrist_offset_mm": wc["offset_norm_mm"] if wc else None, "jaw_open": a.jaw_open, "aim_mm": info.get("aim_mm"),
+                    "grasp_h_mm": info.get("grasp_h_mm"), "grasp_lowered_mm": info.get("grasp_lowered_mm"), "final_residual_mm": info.get("final_residual_mm"), "wrist_offset_mm": wc["offset_norm_mm"] if wc else None, "jaw_open": a.jaw_open, "aim_mm": info.get("aim_mm"), "grasp_roll_deg": info.get("grasp_roll_deg"),
                     "in_jaws": None if ij is None else int(ij), "jaw_retry": int(bool(info.get("jaw_retry"))), "not_in_jaws": int(not_in_jaws),
                     **(servo_tele().metrics(tele) if (tele := tele_of(rows)) else {})})   # why: sag, heat, current and voltage per pick, so sessions compare (docs/telemetry.md)
         if tele: tr.json(tele, "servo_telemetry.json")
@@ -572,6 +647,7 @@ def parser():
     ap.add_argument("--open-loop", dest="closed_loop", action="store_false", help="one pick_seq run of the whole plan, no readback correction")
     ap.add_argument("--grasp-aim-mm", type=float, default=GRASP_AIM_MM, help=f"closed loop: put the nut this far inside the open jaw gap, so the fixed jaw lands beside it, not on it (default {GRASP_AIM_MM:g}; 0 aims the fixed jaw's tip at the nut as before 10 Nov 2026)")
     ap.add_argument("--grasp-tilt-deg", type=float, default=GRASP_TILT_DEG, help=f"wrist_flex tilt on pregrasp, grasp and close (default {GRASP_TILT_DEG:g}; negative lifts the front finger off the mat; the tip is held on the commanded point; 0 = the vertical gripper of before 11 Nov 2026)")
+    ap.add_argument("--grasp-roll", type=parse_grasp_roll, default="off", metavar="auto|off|DEG", help="turn the wrist so the jaws close across the object's long axis: auto = the scene-map object at the nut position (round ones: no roll), DEG = that wrist_roll offset from the arm fit's roll, off = today (default); nut-side waypoints only, see docs/pick-loop.md")
     ap.add_argument("--jaw-open", type=int, default=JAW_OPEN, help=f"gripper opening for hover/grasp/open/lift2 (default {JAW_OPEN}; 45 flicks the nut away, see docs/pick-loop.md)")
     ap.add_argument("--wrist-check", action="store_true", help="closed loop: at hover, look for the nut in the wrist frame near its predicted pixel and report the offset (check only; annotated JPEG in outputs/run/)")
     ap.add_argument("--no-jaw-check", dest="jaw_check", action="store_false", default=True, help="skip the wrist-camera nut-in-jaws check after the lift (and its one retry); the final stage runs in one session as before")

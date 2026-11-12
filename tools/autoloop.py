@@ -84,7 +84,7 @@ class Runner:
         self.demo = demo   # a tools/demo_session.DemoSession, or None (the default: nothing below changes)
         self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0; self.tele_rows = []; self.session_tele = []
         self.markers_mm = list((table.get("layout_markers") or {}).values())
-        self.pick_args = argparse.Namespace(jaw_open=pl.JAW_OPEN, max_deg_s=pl.SPEED["closed"], wrist_check=False, grasp_aim_mm=pl.GRASP_AIM_MM, grasp_tilt_deg=pl.GRASP_TILT_DEG)
+        self.pick_args = argparse.Namespace(jaw_open=pl.JAW_OPEN, max_deg_s=pl.SPEED["closed"], wrist_check=False, grasp_aim_mm=pl.GRASP_AIM_MM, grasp_tilt_deg=pl.GRASP_TILT_DEG, grasp_roll=self.opt("grasp_roll", "off"))
         self.biases = load_biases(os.path.join(getattr(pl, "ROOT", "."), "jetson", "calib", "pick_state.json"))   # read only: the pick loop's learned sag biases; the runner never writes that file
 
     def say(self, d): self.out(json.dumps(d))
@@ -423,8 +423,9 @@ class DryArm:
     def api(self, path):
         import numpy as np
         q = dict(p.split("=") for p in path.split("?")[1].split("&")); x, y, h = float(q["x_in"]), float(q["y_in"]), float(q.get("h_in", 0.0))
-        ax, ay = self.cc.table_to_arm(self.table, x * IN, y * IN); j = self.solve(self.seed, np.array([ax, ay, float(self.table["arm_fit"]["table_z_mm"]) + h * IN]))
-        j["wrist_roll"] = float(self.table["arm_fit"].get("wrist_roll_deg", 0.0)); return {"ok": True, "joints_deg": {k: round(v, 3) for k, v in j.items()}}
+        roll = float(q["roll"]) if "roll" in q else float(self.table["arm_fit"].get("wrist_roll_deg", 0.0))   # why: the dashboard IK takes &roll= (12 Nov 2026, --grasp-roll)
+        ax, ay = self.cc.table_to_arm(self.table, x * IN, y * IN); j = self.solve(dict(self.seed, wrist_roll=roll), np.array([ax, ay, float(self.table["arm_fit"]["table_z_mm"]) + h * IN]))
+        j["wrist_roll"] = roll; return {"ok": True, "joints_deg": {k: round(v, 3) for k, v in j.items()}}
 
     def run_plan(self, plan, max_deg_s):
         import numpy as np
@@ -444,7 +445,7 @@ def make_cfg(a, out_dir):
     box = tuple(a.safe_box) if a.safe_box else SAFE_BOX_IN
     return argparse.Namespace(cycles=a.cycles, minutes=a.minutes, target=tuple(a.target), random_target=a.random_target, safe_box=box, radius_mm=a.radius_mm, session=a.session or time.strftime("%Y%m%d-%H%M%S"),
                               dry_run=a.dry_run, max_retries=a.max_retries, settle_s=a.settle, moved_mm=20.0, spot_mm=(40.0, 50.0, 60.0), out_dir=out_dir,
-                              judge_wait_s=a.judge_wait, save_frames=not a.dry_run, start_near=tuple(a.start_near) if a.start_near else None)
+                              judge_wait_s=a.judge_wait, save_frames=not a.dry_run, start_near=tuple(a.start_near) if a.start_near else None, grasp_roll=a.grasp_roll)
 
 
 def make_dry_demo(a, cfg, lt, pl_unused=None):
@@ -470,6 +471,7 @@ def build_parser():
     ap.add_argument("--max-consecutive-failures", type=int, default=3); ap.add_argument("--max-retries", type=int, default=1); ap.add_argument("--lost-after", type=int, default=3)
     ap.add_argument("--stop-file", default=None, help="while this file exists the session stops cleanly (default ~/so101/outputs/run/autoloop.stop)")
     ap.add_argument("--max-err-deg", type=float, default=8.0); ap.add_argument("--margin-mm", type=float, default=20.0); ap.add_argument("--ceiling-in", type=float, default=4.0)
+    ap.add_argument("--grasp-roll", default="off", metavar="auto|off|DEG", help="pick_loop --grasp-roll: turn the wrist so the jaws close across the object's long axis (auto = from the scene map; default off)")
     ap.add_argument("--settle", type=float, default=1.0, help="seconds to wait before judging the landing or a reset")
     ap.add_argument("--start-near", type=float, nargs=2, default=None, metavar=("X", "Y"), help="where the first cycle looks for the nut (mat inches); without it the first search has no hint and the whole-mat fallback can take the parked arm's shadow for the nut")
     ap.add_argument("--judge-wait", type=float, default=4.0, help="after the settle, wait up to this long while the map still has objects pending confirmation"); ap.add_argument("--table", default=None, help="top_table.json (default jetson/calib/top_table.json)")

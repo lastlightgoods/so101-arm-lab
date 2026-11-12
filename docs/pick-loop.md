@@ -89,6 +89,25 @@ next arrival behaves like the last, which only holds when every arrival at a pan
 - `pregrasp_up` also takes the 3 deg off pan, so `pregrasp_up` -> `pregrasp` increases pan, shoulder_lift and elbow_flex together;
 - `hover_pre` and `pregrasp_up` are in `NO_LEARN` (table `BACKOFF`): they never change a bias. The guard checks both like every waypoint; with the 9 Nov arm fit the 3 deg is 17-20 mm sideways at the hover, so a nut within about 1 in of the mat's bottom edge (hover_pre) or of the left edge / 2 in of the top edge (pregrasp_up) can now trip the workspace check where the nut itself passes.
 
+## Gripping an elongated object across its long axis (`--grasp-roll`, 12 Nov 2026)
+
+The jaws close along `jaw_dir_mat` (gripper_link +x on the mat, fixed jaw toward the moving jaw). With wrist_roll fixed that is roughly the reach direction, so a ~6 x 13 mm
+spacer lying along the reach was closed on lengthwise and pushed 1.8 in (11 Nov, 18:2x). `--grasp-roll auto|off|DEG` (default `off`, nothing changes) turns the wrist so
+`jaw_dir` is perpendicular to the object's long axis.
+
+* **The axis.** `/api/scene` objects carry `w_mm >= h_mm` and `angle_deg` from `cv2.minAreaRect` on the rectified mat image. `detect()` negates cv2's image-frame angle (image rows run
+  against mat +Y), so `angle_deg` is the long side's direction **counter-clockwise from mat +X, in mat millimetres**: the frame of `x_in / y_in` and `jaw_dir_mat`. `long_axis_mat(obj)`
+  (`dashboard/scene_detect.py`) returns `(cos a, sin a)`, or `None` when long/short < 1.3 (round: no roll). `tests/scene/test_long_axis.py` draws bars at known mat angles and runs them through
+  `MatScene.detect`.
+* **The roll.** `roll_to_perpendicular` scans the roll offset over -90..90 deg and bisects the zero of `jaw_dir . axis`, with `jaw_dir` from forward kinematics through the arm fit at the IK pose of
+  the grasp (tilt included): the smaller of the two solutions, `|offset| <= 90`. Measured with the 9 Nov fit: **+wrist_roll turns `jaw_dir` counter-clockwise on the mat, about 1.02 deg per degree**.
+  `auto` uses the scene object nearest the nut position (within 15 mm); no object or a round one means no roll. A number is the offset in degrees from the arm fit's roll.
+* **The plan.** `build_plan(..., roll_deg=)` passes `&roll=` (the fit's roll plus the offset) to `/api/ik` on hover_pre, hover_nut, pregrasp_up, pregrasp, grasp, close1/close2/close and lift (hover_pre and pregrasp_up
+  copy hover_nut and pregrasp, so the pan and approach back-offs and the biases work as before). The tilt's tip-shift loop passes the roll too, so the tilted, rolled tip still lands on the commanded point
+  (0.3 mm xy and height, tested at six mat spots). The carry (hover_tgt onward) and rest keep the fit's roll. Roll off sends no `&roll=` and gives exactly the old plan.
+* **The aim.** `closed_loop_pick` reads `jaw_dir` from the hover readback, which is rolled, so the nut still sits `GRASP_AIM_MM` inside the open gap along the rolled jaw direction.
+* **Logging.** The `grasp_roll` param (`auto`, `off` or the number) and the `grasp_roll_deg` metric go to MLflow; a `grasp_roll` stage line shows the object, axis and roll. `tools/autoloop.py --grasp-roll` passes it on (default `off`).
+
 ## Running it
 
 ```
@@ -153,6 +172,8 @@ tools/wrist_check.py --image frame.jpg --joints '{"shoulder_pan": 14.9, "shoulde
 (that is the 10 Nov frame; the nut sat at about (11.5, 6.4), the command said (11.44, 6.26).)
 
 ## Tests
+
+`tests/scene/test_long_axis.py` (angle convention) and `tests/tools/test_grasp_roll.py` (roll, plan, aim, CLI, autoloop) cover --grasp-roll.
 
 `tests/tools/test_pick_closed_loop.py` (fixtures in `tests/tools/pickhelpers.py`): a fake arm on the real kinematics answers `/api/ik`
 and "reaches" every waypoint 7 mm short along the base-to-tip direction; the staged corrections must converge (c1 is the 7 mm, c2 under

@@ -37,6 +37,18 @@ MM_PER_IN = 25.4
 DEFAULT_DICT = "DICT_4X4_50"
 
 
+
+def long_axis_mat(obj, min_ratio=1.3):
+    """Unit (x, y) of an object's long axis in the MAT frame (the frame of x_in / y_in and pick_loop.jaw_dir_mat: X along the long edge,
+    Y away from the arm), or None when it is roughly round (long / short < min_ratio) or has no usable size. The sign is arbitrary (an axis).
+    why: 11 Nov 2026 the detector's angle_deg is counter-clockwise from mat +X (detect() negates cv2's image-frame angle because image rows run
+    against mat +Y) of the LONG side (w_mm >= h_mm); tests/scene/test_long_axis.py proves it on synthetic bars at known angles."""
+    try: w, h, a = float(obj["w_mm"]), float(obj["h_mm"]), math.radians(float(obj["angle_deg"]))
+    except (KeyError, TypeError, ValueError): return None
+    if min(w, h) <= 0.0 or max(w, h) / min(w, h) < min_ratio: return None
+    if h > w: a += math.pi / 2.0   # a caller that hands the sides the other way round
+    return (math.cos(a), math.sin(a))
+
 # ---------------------------------------------------------------- small helpers
 def _h_apply(H, pts):
     """Apply a 3x3 homography to (N,2) points -> (N,2)."""
