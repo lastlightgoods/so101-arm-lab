@@ -48,6 +48,9 @@ def load_gr(): return load(os.path.join(ROOT, "tools", "guardrails.py"), "guardr
 def load_al(): return load(os.path.join(ROOT, "tools", "autoloop.py"), "autoloop_for_tidy")
 
 
+ko = load(os.path.join(ROOT, "tools", "keepout.py"), "keepout_for_tidy")   # keep-outs: the toy frogs and anything else that is not a toy (TC 2026-11-11: "be careful not to hurt the frogs")
+
+
 def dist_mm(a, b): return math.hypot(a[0] - b[0], a[1] - b[1]) * IN
 
 
@@ -62,13 +65,26 @@ def blue_pixels(img):
     b, g, r = [img[:, :, i].astype(int) for i in range(3)]; m = ((b - r) > 60) & ((b - g) > 25) & (b > 90); m[int(img.shape[0] * BLUE_ROWS):, :] = False; return np.nonzero(m)
 
 
-def fit_ring(jpeg, cc, table, min_px=150):
-    """(x_in, y_in) of the ring's centre from one top frame: its blue rim, a least-squares circle, pixel -> mat. None when fewer than min_px blue pixels."""
+def ring_band(img, cc, table, min_px=150, r_mm=(30.0, 65.0)):
+    """(ys, xs, (cx, cy, r_px)) of the ring's blue band: the largest connected blue region whose least-squares circle is ring-sized (r_mm) and whose pixels lie on
+    that circle (an annulus, not a filled blob). Other blue things on the mat (the toy frogs) are separate regions and fail one test or the other. None when none passes."""
+    b, g, r = [img[:, :, i].astype(int) for i in range(3)]; m = ((b - r) > 60) & ((b - g) > 25) & (b > 90); m[int(img.shape[0] * BLUE_ROWS):, :] = False
+    for ys, xs in ko.blue_components(m, min_px):
+        cx, cy, rp = fit_circle(xs, ys)
+        if rp <= 0: continue
+        X, Y = cc.pixel_to_table(table, cx, cy); X2, Y2 = cc.pixel_to_table(table, cx + rp, cy); rmm = math.hypot(X2 - X, Y2 - Y)
+        if r_mm[0] <= rmm <= r_mm[1] and float(np.median(np.abs(np.hypot(xs - cx, ys - cy) - rp))) < 0.2 * rp: return ys, xs, (cx, cy, rp)
+    return None
+
+
+def fit_ring(jpeg, cc, table, min_px=150, r_mm=(30.0, 65.0)):
+    """(x_in, y_in) of the ring's centre from one top frame (ring_band), pixel -> mat. None when no ring-shaped blue band is seen.
+    why: 11 Nov 22:4x two blue toy frogs pulled the old all-blue-pixels fit 4 in off the ring."""
     import cv2
     img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR) if isinstance(jpeg, (bytes, bytearray)) else jpeg
-    ys, xs = blue_pixels(img)
-    if len(xs) < min_px: return None
-    cx, cy, _ = fit_circle(xs, ys); X, Y = cc.pixel_to_table(table, cx, cy); return (X / IN, Y / IN)
+    band = ring_band(img, cc, table, min_px, r_mm)
+    if band is None: return None
+    X, Y = cc.pixel_to_table(table, band[2][0], band[2][1]); return (X / IN, Y / IN)
 
 
 # ---------------------------------------------------------------- the toys
@@ -132,7 +148,7 @@ class Rig:
         self.pl, self.cc, self.table, self.ring, self.fluid, self.part_r = pl, cc, table, tuple(ring), fluid, part_r_mm
         self.off = table["arm_fit"].get("joint_offsets_deg") or {}; self.tz = float(table["arm_fit"].get("table_z_mm", 0.0) or 0.0)
         self.base = tuple(v / IN for v in cc.arm_to_table(table, 0.0, 0.0)); self._ik_free = ik_free or self.default_ik_free; self.wp0 = list(pl.WP); self.end_direct = None
-        self._cache = {}
+        self._cache = {}; self.keepouts = []
 
     def default_ik_free(self, x, y, h_mm, roll=None):
         tg = self.pl.api(f"/api/ik?x_in={x}&y_in={y}&h_in=2.0")["target_mm"]; s = self.cc.ik_tip([tg[0], tg[1], tg[2] + h_mm - 50.8], self.off, roll_deg=0.0, down=False)
@@ -179,11 +195,14 @@ class Rig:
                 p = a + f * (b - a); X, Y = self.cc.arm_to_table(self.table, float(p[0]), float(p[1])); out.append((X / IN, Y / IN, float(p[2]) - self.tz))
         out.append(self.pl.fk_mat(self.cc, self.table, j)); return out
 
-    def hits(self, j):
+    def hits(self, j, ring=True):
+        """Body points of pose j that touch the ring (x, y, h, clearance) or a keep-out (x, y, h, clearance, "keep-out"); ring=False: keep-outs only (the ring lift grips the ring)."""
         bad = []; pts = self.points(j); tx, ty, th = pts[-1]
         for x, y, h in pts:
-            wall = math.hypot(x - self.ring[0], y - self.ring[1]) * IN - RING_R_MM; at_tip = math.dist((x * IN, y * IN, h), (tx * IN, ty * IN, th)) < 15.0; rad = TIP_R_MM if at_tip else self.part_r
-            if wall < rad and h - self.droop_mm(x, y) < RING_H_MM + MARGIN_MM: bad.append((round(x, 2), round(y, 2), round(h, 1), round(wall, 1)))
+            at_tip = math.dist((x * IN, y * IN, h), (tx * IN, ty * IN, th)) < 15.0; rad = TIP_R_MM if at_tip else self.part_r; droop = self.droop_mm(x, y)
+            wall = math.hypot(x - self.ring[0], y - self.ring[1]) * IN - RING_R_MM
+            if ring and wall < rad and h - droop < RING_H_MM + MARGIN_MM: bad.append((round(x, 2), round(y, 2), round(h, 1), round(wall, 1)))
+            for k in ko.point_hits(x, y, h, rad, self.keepouts, droop, MARGIN_MM): bad.append((round(x, 2), round(y, 2), round(h, 1), round(ko.dist_mm((x, y), (k["x_in"], k["y_in"])) - k["r_mm"], 1), "keep-out"))
         return bad
 
     def lerp(self, a, b, f): return {k: a[k] + f * (b[k] - a[k]) for k in self.pl.ARM}
@@ -255,7 +274,8 @@ class Rig:
                 with self.patched(lift, hover, trim=False):
                     for names in (pl.STAGES[0], pl.STAGES[1], pl.STAGES[2]): seq += [w["joints"] for w in pl.build_plan(list(obj), list(dest), {}, names=names, tilt_deg=pl.GRASP_TILT_DEG, cc=self.cc, table=self.table)["waypoints"]]
                 bad = self.seq_hits(seq)
-            v["n_bad"] = len(bad); v["worst"] = min(bad, key=lambda t: t[3]) if bad else None; v["ok"] = not bad; v["why"] = None if not bad else "route passes the ring"
+            v["n_bad"] = len(bad); v["worst"] = min(bad, key=lambda t: t[3]) if bad else None; v["ok"] = not bad
+            v["why"] = None if not bad else ("route passes a keep-out (a frog?)" if any(len(t) > 4 for t in bad) else "route passes the ring")
         except SystemExit as e: v["why"] = str(e)[:90]; v["ok"] = False
         return v
 
@@ -348,8 +368,8 @@ class Tidy:
         import cv2
         img = cv2.imdecode(np.frombuffer(self.fetch_top(), np.uint8), cv2.IMREAD_COLOR)
         if img is None: return None, None
-        ys, xs = blue_pixels(img)
-        return (cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), fit_circle(xs, ys)) if len(xs) >= 150 else (None, None)
+        band = ring_band(img, self.cc, self.table)
+        return (cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), band[2]) if band is not None else (None, None)
 
     def ppm(self, o):
         u, v = self.cc.table_to_pixel(self.table, o["x_in"] * IN, o["y_in"] * IN); return abs(self.cc.table_to_pixel(self.table, o["x_in"] * IN + 10, o["y_in"] * IN)[0] - u) / 10.0
@@ -366,7 +386,16 @@ class Tidy:
         if r is None: raise SystemExit("tape ring not found in the top frame")
         self.rig.set_ring(r); return r
 
-    def toys(self, objs=None): return [o for o in (self.objects() if objs is None else objs) if is_toy(o, ring=self.rig.ring)]
+    def toys(self, objs=None): return [o for o in (self.objects() if objs is None else objs) if is_toy(o, ring=self.rig.ring) and not ko.is_keepout_object(o, self.rig.keepouts)]
+
+    def refresh_keepouts(self, objs=None):
+        """Keep-outs from the scene map + the top frame -> rig.keepouts (the obstacle check), logged when they change. -> the list."""
+        import cv2
+        objs = self.objects() if objs is None else objs; img = cv2.imdecode(np.frombuffer(self.fetch_top(), np.uint8), cv2.IMREAD_COLOR)
+        k = ko.find_keepouts(objs, img, self.cc, self.table, self.rig.ring, RING_R_MM, RING_WALL_IN_MM, RING_WALL_OUT_MM); self.rig.keepouts = k
+        key = tuple((round(x["x_in"], 1), round(x["y_in"], 1)) for x in k)
+        if key != getattr(self, "_ko_key", None): self._ko_key = key; self.say({"event": "keepouts", "keepouts": [{kk: (round(v, 2) if isinstance(v, float) else v) for kk, v in x.items()} for x in k]})
+        return k
 
     # -- guarded motion
     @contextlib.contextmanager
@@ -497,7 +526,9 @@ class Tidy:
         while True:
             if max_n is not None and s["picked"] >= max_n: s["stop"] = "max"; break
             if t := self.before(): s["stop"] = t.reason; s["trip"] = t.as_json(); self.say({"event": "stop", **t.as_json()}); break
-            self.refit_ring(); toys = [o for o in self.toys() if not inside_ring(o, self.rig.ring)]
+            self.refit_ring(); objs = self.objects(); self.refresh_keepouts(objs)
+            if bad := ko.inside_ring(self.rig.keepouts, self.rig.ring, RING_R_MM): s["stop"] = "keep-out inside the ring"; self.say({"event": "stop", "reason": s["stop"], "keepouts": bad}); break   # never drop a toy on a frog
+            toys = [o for o in self.toys(objs) if not inside_ring(o, self.rig.ring)]
             if not toys: s["stop"] = "all_tidy"; break
             verdicts = [self.rig.check((o["x_in"], o["y_in"])) for o in toys]; order = order_toys(toys, verdicts, self.rig.base, self.rig.ring, self.a.order)
             s["refused"] = [{"toy_in": [round(o["x_in"], 2), round(o["y_in"], 2)], "why": v["why"]} for o, v in zip(toys, verdicts) if not v["ok"]]
@@ -587,6 +618,9 @@ class RingMover:
     def lift_ring(self, dest):
         """The whole move; returns {"ok", "why", "plan", "measured_in", "err_mm"}. The caller holds the guard."""
         t, pl, rig = self.t, self.pl, self.rig; c = rig.ring; P = self.plan(c, dest); a, b, roll, cmd = P["aim_in"], P["drop_aim_in"], P["roll"], P["lift_mm"]; out = {"ok": False, "why": None, "plan": {k: (round(v, 3) if isinstance(v, float) else v) for k, v in P.items() if k != "jaw_dir"}}
+        if rig.keepouts:   # the arm's own path (nominal poses) vs the keep-outs, before anything moves; the ring itself is what it grips, so only keep-outs count
+            seq = [dict(pl.REST), self.ik(*a, RING_HOVER_H_MM, roll), self.ik(*a, RING_PRE_H_MM, roll), self.ik(*a, RING_GRIP_H_MM, roll), rig.ik_free(*a, cmd, roll), rig.ik_free(*b, cmd, roll), self.ik(*b, RING_GRIP_H_MM + 1.0, roll), rig.ik_free(*b, cmd, roll), dict(pl.REST)]
+            if any(rig.hits(rig.lerp(u, v, f), ring=False) for u, v in zip(seq, seq[1:]) for f in np.linspace(0, 1, 12)): out["why"] = "ring move passes a keep-out"; return out
         with t.guarded():
             r1 = pl.run_plan({"waypoints": [self.W("hover", self.ik(*a, RING_HOVER_H_MM, roll), RING_JAW, 1.6, 0.4)]}, 50.0); x, y, _ = pl.fk_mat(self.cc, self.table, pl.reached_joints(r1, "hover"))
             a2 = (a[0] + (a[0] - x), a[1] + (a[1] - y)); out["corr_mm"] = [round((a2[0] - a[0]) * IN, 1), round((a2[1] - a[1]) * IN, 1)]   # one readback correction at the hover
@@ -690,18 +724,19 @@ def spread_pile(t, pile_in, box_in, nudge=True, max_attempts=None):
     cap = max_attempts or 3 * max(n_toys, 1) + 6; mask_fn = make_blob_mask_fn(t) if t.a.blob_mask else None
     while s["attempts"] < cap:
         if tr := t.before(): s["stop"] = tr.reason; break
-        objs = t.settled_objects(); pile = [o for o in t.toys(objs) if dist_mm((o["x_in"], o["y_in"]), pile_in) < PILE_R_MM]
+        objs = t.settled_objects(); t.refresh_keepouts(objs); pile = [o for o in t.toys(objs) if dist_mm((o["x_in"], o["y_in"]), pile_in) < PILE_R_MM]
         if not pile: break
         blob = max(pile, key=lambda o: (blob_count(o), -dist_mm((o["x_in"], o["y_in"]), pile_in))); key = (round(blob["x_in"], 1), round(blob["y_in"], 1))
-        if fails.get(key, 0) >= 2 and nudge and key not in nudged and dist_mm((blob["x_in"], blob["y_in"]), rig.ring) > RING_R_MM + 90.0:
+        if fails.get(key, 0) >= 2 and nudge and key not in nudged and dist_mm((blob["x_in"], blob["y_in"]), rig.ring) > RING_R_MM + 90.0 and all(dist_mm((blob["x_in"], blob["y_in"]), (k["x_in"], k["y_in"])) > k["r_mm"] + 90.0 for k in rig.keepouts):
             nudged.add(key); s["nudged"] += 1; do_nudge(t, blob); continue
         others = [[o["x_in"], o["y_in"]] for o in t.toys(objs) if o is not blob]
-        spot = sample_spread_spot(t.rng, box_in, others + list(s["spots"]), t.markers_mm, rig.ring, (blob["x_in"], blob["y_in"]), avoid=[(pile_in, PILE_R_MM + 15.0)])
+        avoid = [(pile_in, PILE_R_MM + 15.0)] + [((k["x_in"], k["y_in"]), k["r_mm"] + 40.0) for k in rig.keepouts]
+        spot = sample_spread_spot(t.rng, box_in, others + list(s["spots"]), t.markers_mm, rig.ring, (blob["x_in"], blob["y_in"]), avoid=avoid)
         if spot is None: s["stop"] = "no free spot in the spread box"; break
         for _try in range(12):   # a spot whose carry passes the ring is not used: draw another
             cand = next((c for c in pile_candidates(blob, mask_fn) if rig.check(c, dest=spot)["ok"]), None)
             if cand is not None: break
-            spot = sample_spread_spot(t.rng, box_in, others + list(s["spots"]), t.markers_mm, rig.ring, (blob["x_in"], blob["y_in"]), avoid=[(pile_in, PILE_R_MM + 15.0)])
+            spot = sample_spread_spot(t.rng, box_in, others + list(s["spots"]), t.markers_mm, rig.ring, (blob["x_in"], blob["y_in"]), avoid=avoid)
             if spot is None: break
         if cand is None or spot is None: s["stop"] = "refused: no clean route for the pile"; break
         s["attempts"] += 1; t.guard.count_try(); res = spread_pick(t, blob, cand, spot); t.say({"event": "spread", **res})
@@ -743,13 +778,17 @@ def do_nudge(t, blob):
 
 def reset_mat(t, dest=None):
     """Lift the ring off the pile, set it down at a random clear spot (or `dest`), re-fit it, spread the pile. -> summary."""
-    rig = t.rig; objs = t.settled_objects(); toys = t.toys(objs); pile = [(o["x_in"], o["y_in"]) for o in toys if inside_ring(o, rig.ring, RING_R_MM)]; pile_c = rig.ring; others = [(o["x_in"], o["y_in"]) for o in toys if (o["x_in"], o["y_in"]) not in pile]
+    rig = t.rig; objs = t.settled_objects(); kos = t.refresh_keepouts(objs); toys = t.toys(objs); pile = [(o["x_in"], o["y_in"]) for o in toys if inside_ring(o, rig.ring, RING_R_MM)]; pile_c = rig.ring; others = [(o["x_in"], o["y_in"]) for o in toys if (o["x_in"], o["y_in"]) not in pile]
+    if ko.inside_ring(kos, rig.ring, RING_R_MM): return {"ok": False, "stop": "keep-out inside the ring"}   # lifting the ring would drag its wall over it
     mover = RingMover(t)
-    def feasible(p):
+    def feasible(p):   # the set-down clear of every keep-out, and the carried ring's path (its full width) passing none
+        if any(dist_mm(p, (k["x_in"], k["y_in"])) < RING_R_MM + k["r_mm"] + 10.0 for k in kos) or not ko.segment_clear(rig.ring, p, kos, RING_R_MM + 10.0): return False
         try: mover.plan(rig.ring, p); return True
         except (SystemExit, Exception): return False
     spot = dest or sample_ring_spot(t.rng, t.a.ring_box, rig.ring, pile, others, t.markers_mm, feasible)
     if spot is None: return {"ok": False, "stop": "no free spot for the ring"}
+    if dest is not None and not (all(dist_mm(dest, (k["x_in"], k["y_in"])) >= RING_R_MM + k["r_mm"] + 10.0 for k in kos) and ko.segment_clear(rig.ring, dest, kos, RING_R_MM + 10.0)):
+        return {"ok": False, "stop": "--ring-to spot or path too close to a keep-out"}
     t.say({"event": "ring_dest", "from_in": [round(v, 3) for v in rig.ring], "to_in": spot})
     with_trip = None
     try: mv = mover.lift_ring(spot)
@@ -824,7 +863,10 @@ def main(argv=None):
     if ring is None: raise SystemExit("tape ring not found in the top frame (fewer than 150 blue pixels)")
     rig = Rig(pl, cc, table, ring)
     if a.cmd == "plan":
-        print(json.dumps(plan_report(pl, rig, [o for o in pl.fetch_scene_objects() if is_toy(o, ring=ring)], ring, a.order), indent=1)); return 0
+        import cv2
+        objs = pl.fetch_scene_objects(); rig.keepouts = ko.find_keepouts(objs, cv2.imdecode(np.frombuffer(pl.fetch_top(), np.uint8), cv2.IMREAD_COLOR), cc, table, ring, RING_R_MM, RING_WALL_IN_MM, RING_WALL_OUT_MM)
+        rep = plan_report(pl, rig, [o for o in objs if is_toy(o, ring=ring) and not ko.is_keepout_object(o, rig.keepouts)], ring, a.order); rep["keepouts"] = rig.keepouts; rep["keepout_inside_ring"] = bool(ko.inside_ring(rig.keepouts, ring, RING_R_MM))
+        print(json.dumps(rep, indent=1)); return 0
     get = lambda path, t: json.load(urllib.request.urlopen(pl.DASH + path, timeout=t))
     ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True), arm_jobs=al.jetson_arm_jobs, fetch_tele=lambda: get("/api/tele", 3))
     lim = gr.Limits(ceiling_in=4.6, stop_file=os.path.join(ROOT, "outputs", "run", "autoloop.stop"), temp_limit_c=a.temp_limit, max_tries=a.max_tries, max_minutes=a.max_minutes, require_health=a.require_health or a.unattended)
