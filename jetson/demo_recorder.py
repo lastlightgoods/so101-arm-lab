@@ -177,6 +177,21 @@ def append_jsonl(path, row):
     with open(path, "a") as f: f.write(json.dumps(row, default=str) + "\n"); f.flush(); os.fsync(f.fileno())
 
 
+def move_aside(root):
+    """A folder at root with no meta/info.json is not a dataset (create() writes info.json first), but create() refuses any existing folder.
+    Rename it to root.stray-<time> and return that path (None when root is absent). why: 2026-11-11 a stray meta/episodes tree lost a commit to FileExistsError."""
+    if not os.path.exists(root): return None
+    stray = f"{root}.stray-{time.strftime('%Y%m%d-%H%M%S')}"; os.rename(root, stray); return stray
+
+
+def restore_sidecar(stray, root):
+    """Move the lab sidecar (meta/lab: links written before the first episode of this kind) from the moved-aside folder into the new dataset; drop the stray folder if nothing else is left."""
+    src = sidecar_dir(stray)
+    if os.path.isdir(src): shutil.move(src, sidecar_dir(root))
+    left = [os.path.join(dp, f) for dp, _, fn in os.walk(stray) for f in fn]
+    if not left: shutil.rmtree(stray, ignore_errors=True)
+
+
 def reconcile_sidecar(root, total_episodes):
     """Make meta/lab/episodes.jsonl agree with the dataset's episode count after a crash. A crash between save_episode and the sidecar write leaves an episode
     with no row: add a placeholder row for it. Rows beyond the count (cannot happen with this write order, but a hand-edit could) are dropped.
@@ -234,7 +249,9 @@ class DemoRecorder:
             if have != want: raise ValueError(f"{root}: existing dataset features {have} differ from this recorder's {want}")
             if ds.fps != self.fps: raise ValueError(f"{root}: existing dataset is {ds.fps} fps, recorder is {self.fps}")
         else:
+            stray = move_aside(root)
             ds = LeRobotDataset.create(repo, self.fps, self.features, root=root, robot_type=ROBOT_TYPE, use_videos=True, rgb_encoder=self._encoder())
+            if stray: restore_sidecar(stray, root)
         self.reconciled[kind] = reconcile_sidecar(root, ds.meta.total_episodes); self._ds[kind] = ds; return ds
 
     def alive(self): return True   # phase 2: the resident process answers on its control socket
@@ -349,7 +366,11 @@ class DemoRecorder:
     def close(self):
         """Finalize both datasets (required, or the parquet footers are missing) and drop the spool. Idempotent."""
         if self.ep is not None and self.ep.state in ("open", "ended"): self.abort("closed")
-        for ds in self._ds.values(): ds.finalize()
+        for kind, ds in self._ds.items():
+            if not os.path.exists(os.path.join(self.root if kind == "main" else self.rejects_root, "meta", "info.json")):   # why: 2026-11-11 a dataset moved away while held: flushing its buffered episode metadata re-created a stray meta/episodes tree at the old path (lerobot's __del__ flushes too, so skipping finalize is not enough)
+                buf = getattr(ds.meta, "_metadata_buffer", None)
+                if isinstance(buf, list): buf.clear()
+            ds.finalize()
         self._ds.clear()
         if self._own_spool: shutil.rmtree(self.spool_root, ignore_errors=True)
 

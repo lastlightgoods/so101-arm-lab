@@ -214,3 +214,30 @@ def test_the_recorder_encodes_with_its_configured_codec_and_defaults_to_svtav1(r
     rec, buf, cams = rig(); assert rec.vcodec == "h264" and rec._encoder().vcodec == "h264"   # the rig fixture passes h264 (SVT-AV1 crashes Python at teardown on macOS)
     record_episode(rec, buf); rec.close(); info = load_back(rec.root).meta.info   # why read back: meta/info.json records the codec the video was really encoded with
     assert {f["info"]["video.codec"] for f in info.features.values() if f["dtype"] == "video"} == {"h264"}
+
+
+def test_a_dataset_moved_away_while_open_is_not_rebuilt_by_close_and_the_next_commit_still_lands(rig, tmp_path):
+    """2026-11-11 21:35: pilot 1's dataset was moved aside while the recorder still held it; configure (close -> finalize) wrote a stray
+    meta/episodes tree at the old path and pilot 2's commit then died in LeRobotDataset.create with FileExistsError."""
+    rec, buf, _ = rig(); record_episode(rec, buf); os.rename(rec.root, str(tmp_path / "junk"))
+    rec.close(); import gc; gc.collect()
+    assert not os.path.exists(rec.root), "finalize must not re-create a dataset folder that was moved away"
+    rec2, buf2, _ = rig(); res = record_episode(rec2, buf2); assert res["dataset"] == "main" and res["episode_index"] == 0
+    rec2.close(); assert load_back(rec2.root).num_episodes == 1
+
+
+def test_a_stray_non_dataset_folder_is_moved_aside_not_deleted_and_the_sidecar_links_carry_over(rig, dr, tmp_path):
+    rec, buf, _ = rig(); stray = os.path.join(rec.root, "meta", "episodes", "chunk-000"); os.makedirs(stray); open(os.path.join(stray, "file-000.parquet"), "wb").write(b"x")
+    rec.append_link("main", {"episode_index": 0, "mlflow_cycle_run_id": "r1"})
+    res = record_episode(rec, buf); assert res["dataset"] == "main" and res["episode_index"] == 0
+    aside = [p for p in os.listdir(tmp_path / "data") if p.startswith("demo.stray-")]; assert len(aside) == 1
+    assert os.path.exists(tmp_path / "data" / aside[0] / "meta" / "episodes" / "chunk-000" / "file-000.parquet"), "moved aside, not deleted"
+    assert [json.loads(l)["mlflow_cycle_run_id"] for l in open(os.path.join(dr.sidecar_dir(rec.root), "links.jsonl"))] == ["r1"]
+    rec.close(); assert load_back(rec.root).num_episodes == 1
+
+
+def test_a_stray_folder_holding_only_the_sidecar_is_removed_after_the_sidecar_moves(dr, tmp_path):
+    root = str(tmp_path / "ds"); dr.append_jsonl(os.path.join(dr.sidecar_dir(root), "links.jsonl"), {"a": 1})
+    stray = dr.move_aside(root); assert stray and not os.path.exists(root); os.makedirs(os.path.join(root, "meta"))
+    dr.restore_sidecar(stray, root); assert not os.path.exists(stray) and os.path.exists(os.path.join(dr.sidecar_dir(root), "links.jsonl"))
+    assert dr.move_aside(str(tmp_path / "absent")) is None
