@@ -552,8 +552,18 @@ class RingMover:
         if not r.get("ok"): raise SystemExit(f"ik failed ({x:.2f},{y:.2f},{h_mm:.0f} mm): {r.get('err')}")
         return r["joints_deg"]
 
-    def grip_point(self, c):
-        u = (self.rig.base[0] - c[0], self.rig.base[1] - c[1]); n = math.hypot(*u); u = (u[0] / n, u[1] / n); r = WALL_MID_MM / IN; return (c[0] + r * u[0], c[1] + r * u[1]), u
+    def grip_point(self, c, rot_deg=0.0):
+        """A point on the wall midline and the unit vector to it from the centre: the side facing the arm's base, turned by rot_deg (another side when that one is out of reach)."""
+        u = (self.rig.base[0] - c[0], self.rig.base[1] - c[1]); n = math.hypot(*u); a = math.radians(rot_deg); u = (u[0] / n, u[1] / n); u = (u[0] * math.cos(a) - u[1] * math.sin(a), u[0] * math.sin(a) + u[1] * math.cos(a))
+        r = WALL_MID_MM / IN; return (c[0] + r * u[0], c[1] + r * u[1]), u
+
+    def vertical_h(self, x, y, want_mm, floor_mm, roll=None):
+        """The highest vertical-gripper height <= want_mm (3 mm steps) the IK reaches at (x, y), or None below floor_mm."""
+        h = want_mm
+        while h >= floor_mm:
+            try: self.ik(x, y, h, roll); return h
+            except SystemExit: h -= 3.0
+        return None
 
     def radial_roll(self, p, u):
         pl = self.pl; j0 = self.ik(p[0], p[1], RING_GRIP_H_MM); d0 = pl.jaw_dir_mat(self.cc, self.table, j0); a0 = math.atan2(d0[1], d0[0]); best = None
@@ -571,15 +581,29 @@ class RingMover:
 
     def reach_mm(self, x, y): return math.hypot(x - self.rig.base[0], y - self.rig.base[1]) * IN
 
+    GRIP_SIDES_DEG = (0.0, 30.0, -30.0, 60.0, -60.0, 90.0, -90.0)
+
     def plan(self, c, dest):
-        """Everything the move needs at nominal positions: grip point, roll, aim, lift height and the predicted ring bottom. SystemExit when it cannot be done."""
-        p, u = self.grip_point(c); roll, jd = self.radial_roll(p, u); a = (p[0] - RING_AIM_MM / IN * jd[0], p[1] - RING_AIM_MM / IN * jd[1])
-        q, _ = self.grip_point(dest); b = (a[0] + q[0] - p[0], a[1] + q[1] - p[1])
-        ha, ja = self.max_free_h(a[0], a[1], roll); hb, jb = self.max_free_h(b[0], b[1], roll)
-        if ja is None or jb is None: raise SystemExit("ring lift: no tipped lift pose at the grip or the set-down")
-        cmd = min(ha, hb); reach = max(self.reach_mm(*a), self.reach_mm(*b)); cmd, bottom = lift_height_mm(reach, cmd)
-        if bottom < HARD_MIN_BOTTOM_MM: raise SystemExit(f"ring lift: predicted ring bottom {bottom:.0f} mm after the sag is under {HARD_MIN_BOTTOM_MM:.0f} mm at reach {reach:.0f} mm")
-        return {"grip_in": p, "aim_in": a, "drop_aim_in": b, "roll": roll, "jaw_dir": jd, "lift_mm": cmd, "bottom_mm": bottom, "reach_mm": reach, "min_bottom_wanted": MIN_BOTTOM_MM}
+        """Everything the move needs at nominal positions: grip side and point, roll, aim, hover height, lift height and the predicted ring bottom.
+        Every pose the move uses is checked here (12 Nov 2026: a vertical hover 133 mm from the base had no IK and the move stopped after the spot was chosen);
+        the side facing the base first, then the wall turned by GRIP_SIDES_DEG. The ring hangs rigidly from the jaws, so the set-down aim is the grip aim moved
+        by exactly the ring's displacement (12 Nov: re-picking the base-facing side at the destination shifted the set-down 13 mm and the ring covered a marker).
+        SystemExit when no side works."""
+        why = []
+        for rot in self.GRIP_SIDES_DEG:
+            try:
+                p, u = self.grip_point(c, rot); roll, jd = self.radial_roll(p, u); a = (p[0] - RING_AIM_MM / IN * jd[0], p[1] - RING_AIM_MM / IN * jd[1])
+                b = (a[0] + dest[0] - c[0], a[1] + dest[1] - c[1])
+                hov = self.vertical_h(a[0], a[1], RING_HOVER_H_MM, RING_PRE_H_MM + 3.0, roll)
+                if hov is None: why.append(f"{rot:+.0f}: no hover"); continue
+                self.ik(*a, RING_PRE_H_MM, roll); self.ik(*a, RING_GRIP_H_MM, roll); self.ik(*b, RING_GRIP_H_MM + 1.0, roll)
+                ha, ja = self.max_free_h(a[0], a[1], roll); hb, jb = self.max_free_h(b[0], b[1], roll)
+                if ja is None or jb is None: why.append(f"{rot:+.0f}: no tipped lift"); continue
+                cmd = min(ha, hb); reach = max(self.reach_mm(*a), self.reach_mm(*b)); cmd, bottom = lift_height_mm(reach, cmd)
+                if bottom < HARD_MIN_BOTTOM_MM: why.append(f"{rot:+.0f}: ring bottom {bottom:.0f} mm after the sag at reach {reach:.0f} mm"); continue
+                return {"grip_in": p, "aim_in": a, "drop_aim_in": b, "roll": roll, "jaw_dir": jd, "hover_mm": hov, "grip_side_deg": rot, "lift_mm": cmd, "bottom_mm": bottom, "reach_mm": reach, "min_bottom_wanted": MIN_BOTTOM_MM}
+            except SystemExit as e: why.append(f"{rot:+.0f}: {str(e)[:60]}")
+        raise SystemExit("ring lift: no grip side works (" + "; ".join(why)[:300] + ")")
 
     def W(self, n, j, g, s=1.0, st=0.2): return {"name": n, "joints": j, "desired": j, "gripper": g, "seconds": s, "settle": st, "gripper_only": False}
 
@@ -587,10 +611,10 @@ class RingMover:
         """The whole move; returns {"ok", "why", "plan", "measured_in", "err_mm"}. The caller holds the guard."""
         t, pl, rig = self.t, self.pl, self.rig; c = rig.ring; P = self.plan(c, dest); a, b, roll, cmd = P["aim_in"], P["drop_aim_in"], P["roll"], P["lift_mm"]; out = {"ok": False, "why": None, "plan": {k: (round(v, 3) if isinstance(v, float) else v) for k, v in P.items() if k != "jaw_dir"}}
         if rig.keepouts:   # the arm's own path (nominal poses) vs the keep-outs, before anything moves; the ring itself is what it grips, so only keep-outs count
-            seq = [dict(pl.REST), self.ik(*a, RING_HOVER_H_MM, roll), self.ik(*a, RING_PRE_H_MM, roll), self.ik(*a, RING_GRIP_H_MM, roll), rig.ik_free(*a, cmd, roll), rig.ik_free(*b, cmd, roll), self.ik(*b, RING_GRIP_H_MM + 1.0, roll), rig.ik_free(*b, cmd, roll), dict(pl.REST)]
+            seq = [dict(pl.REST), self.ik(*a, P["hover_mm"], roll), self.ik(*a, RING_PRE_H_MM, roll), self.ik(*a, RING_GRIP_H_MM, roll), rig.ik_free(*a, cmd, roll), rig.ik_free(*b, cmd, roll), self.ik(*b, RING_GRIP_H_MM + 1.0, roll), rig.ik_free(*b, cmd, roll), dict(pl.REST)]
             if any(rig.hits(rig.lerp(u, v, f), ring=False) for u, v in zip(seq, seq[1:]) for f in np.linspace(0, 1, 12)): out["why"] = "ring move passes a keep-out"; return out
         with t.guarded():
-            r1 = pl.run_plan({"waypoints": [self.W("hover", self.ik(*a, RING_HOVER_H_MM, roll), RING_JAW, 1.6, 0.4)]}, 50.0); x, y, _ = pl.fk_mat(self.cc, self.table, pl.reached_joints(r1, "hover"))
+            r1 = pl.run_plan({"waypoints": [self.W("hover", self.ik(*a, P["hover_mm"], roll), RING_JAW, 1.6, 0.4)]}, 50.0); x, y, _ = pl.fk_mat(self.cc, self.table, pl.reached_joints(r1, "hover"))
             a2 = (a[0] + (a[0] - x), a[1] + (a[1] - y)); out["corr_mm"] = [round((a2[0] - a[0]) * IN, 1), round((a2[1] - a[1]) * IN, 1)]   # one readback correction at the hover
             lift_j = rig.ik_free(*a2, cmd, roll)
             rows = pl.run_plan({"waypoints": [self.W("pregrasp", self.ik(*a2, RING_PRE_H_MM, roll), RING_JAW, 0.8), self.W("grip", self.ik(*a2, RING_GRIP_H_MM, roll), RING_JAW, 1.0, 0.4), self.W("close", self.ik(*a2, RING_GRIP_H_MM, roll), 0, 0.8, 0.6),

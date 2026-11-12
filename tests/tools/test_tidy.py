@@ -556,3 +556,18 @@ def test_small_colourful_bits_inside_the_ring_are_the_ring_but_a_frog_inside_is_
     ring = (9.0, 6.0); img = cv2.imdecode(np.frombuffer(World(cc, table, None, None, [], frogs=[(9.0, 6.0 + 28 / 25.4)]).frame(ring), np.uint8), cv2.IMREAD_COLOR)
     core = toy(9.0, 6.0 + 28 / 25.4, 8, 5, 40); assert td.ko.find_keepouts([core], img, cc, table, ring) == [], "a small colourful blob inside the ring is part of the ring"
     k = td.ko.find_keepouts([frog(9.0, 6.0 + 10 / 25.4)], img, cc, table, ring); assert len(k) == 1 and k[0]["why"] in ("big", "colourful"), "a frog-sized blob inside the ring still is one"
+
+
+def test_the_ring_set_down_moves_rigidly_with_the_ring_and_another_side_is_tried_when_the_base_side_has_no_hover(td, mk):
+    """12 Nov 2026: (1) the set-down re-picked the base-facing side at the destination and landed 13 mm off, onto a marker; (2) a vertical hover 133 mm from
+    the base had no IK, which the plan did not check, so the move stopped after the spot was chosen."""
+    m = mk([]); mover = td.RingMover(m.t); c, dest = RING, (7.5, 4.8); P = mover.plan(c, dest)
+    assert np.allclose(np.subtract(P["drop_aim_in"], P["aim_in"]), np.subtract(dest, c), atol=1e-9), "the jaws move by exactly the ring's displacement"
+    assert P["grip_side_deg"] == 0.0 and P["hover_mm"] <= td.RING_HOVER_H_MM
+    real_ik = mover.ik
+    def ik(x, y, h_mm, roll=None):   # the base-facing side's hover and pregrasp are out of reach (too close to the base), every other pose is fine
+        if h_mm > td.RING_GRIP_H_MM + 5 and abs(x - P["aim_in"][0]) < 1e-6 and abs(y - P["aim_in"][1]) < 1e-6: raise SystemExit("ik failed: too close to the base")
+        return real_ik(x, y, h_mm, roll)
+    mover.ik = ik; P2 = mover.plan(c, dest); assert P2["grip_side_deg"] != 0.0 and np.allclose(np.subtract(P2["drop_aim_in"], P2["aim_in"]), np.subtract(dest, c))
+    mover.ik = lambda x, y, h_mm, roll=None: (_ for _ in ()).throw(SystemExit("ik failed"))
+    with pytest.raises(SystemExit, match="no grip side works"): mover.plan(c, dest)
