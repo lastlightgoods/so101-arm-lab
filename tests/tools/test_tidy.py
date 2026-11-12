@@ -1,6 +1,6 @@
 """tools/tidy.py on fakes: the ring fit, the obstacle check, the route, the trims, the grip check, the miss path, keep/reject routing, the guardrails, the reset (lift height, set-down rules,
 re-fit, spot sampling, the pile split) and the loop. No dashboard, no ssh, no arm: ShortArm (real kinematics) plus a small World that moves toys when the fake arm releases them."""
-import argparse, json, os, random, types
+import argparse, json, math, os, random, types
 import numpy as np, pytest
 from pickhelpers import ShortArm, Recorder, solve_joints, mat_to_base, SEED, load, TOOLS
 from autohelpers import Clock
@@ -23,6 +23,7 @@ def tipped(cc, table):   # a fake tipped IK: the same vertical solve, at the ask
 
 
 def toy(x, y, w=12, h=10, area=88, angle=0.0): return {"x_in": x, "y_in": y, "w_mm": w, "h_mm": h, "area_mm2": area, "angle_deg": angle}
+def frog(x, y): return {"x_in": x, "y_in": y, "w_mm": 59.0, "h_mm": 57.0, "area_mm2": 2100.0, "angle_deg": 0.0}   # the live frogs: 59 x 57 / 67 x 57 mm, 2056-2444 mm2
 
 
 class FakeRec:
@@ -37,9 +38,9 @@ class FakeRec:
 
 class World:
     """Toys on the mat. The fake arm 'holds' (gripper reads 5 after the lift) or not; a held toy follows the tip to the waypoint that opens the jaws."""
-    def __init__(self, cc, table, pl, arm, toys, hold=True):
+    def __init__(self, cc, table, pl, arm, toys, hold=True, frogs=()):
         self.cc, self.table, self.pl, self.arm, self.toys, self.hold, self.holding, self.at, self.names, self.rows = cc, table, pl, arm, [dict(t) for t in toys], hold, None, None, [], []
-        self.clock = Clock()
+        self.frogs = [frog(*f) for f in frogs]; self.clock = Clock()
 
     def frame(self, ring):   # the top camera: a light mat, the blue rim, and a dark disc for every toy
         import cv2
@@ -47,9 +48,11 @@ class World:
         ppm = abs(self.cc.table_to_pixel(self.table, ring[0] * 25.4 + 10, ring[1] * 25.4)[0] - u) / 10.0; cv2.circle(img, (int(round(u)), int(round(v))), int(46 * ppm), (200, 60, 40), 5)
         for t in self.toys:
             a, b = self.cc.table_to_pixel(self.table, t["x_in"] * 25.4, t["y_in"] * 25.4); cv2.circle(img, (int(round(a)), int(round(b))), 4, (40, 40, 40), -1)
+        for f in self.frogs:   # an orange frog with blue legs: colourful, and its blue must not pull the ring fit
+            a, b = self.cc.table_to_pixel(self.table, f["x_in"] * 25.4, f["y_in"] * 25.4); cv2.circle(img, (int(round(a)), int(round(b))), int(28 * ppm), (30, 120, 240), -1); cv2.circle(img, (int(round(a)) + int(20 * ppm), int(round(b))), int(8 * ppm), (200, 60, 40), -1)
         return cv2.imencode(".png", img)[1].tobytes()
 
-    def scene(self): return {"ok": True, "objects": [dict(t, id=i) for i, t in enumerate(self.toys)], "pending": 0, "n_markers_seen": 4, "calib_ok": True, "holding": False}
+    def scene(self): return {"ok": True, "objects": [dict(t, id=i) for i, t in enumerate(self.toys + self.frogs)], "pending": 0, "n_markers_seen": 4, "calib_ok": True, "holding": False}
     def state(self): return {"jetson": {"online": True}, "arms": {"follower": {"pos": {"shoulder_pan": 0}}}}
 
     def run_plan(self, plan, max_deg_s):
@@ -66,8 +69,8 @@ class World:
 
 @pytest.fixture
 def mk(td, gr, pl, cc, table, tmp_path, monkeypatch):
-    def build(toys, hold=True, ring=RING, rec=None, spread_rec=None, **kw):
-        arm = ShortArm(cc, table, shortfall_mm=2.0); w = World(cc, table, pl, arm, toys, hold)
+    def build(toys, hold=True, ring=RING, rec=None, spread_rec=None, frogs=(), **kw):
+        arm = ShortArm(cc, table, shortfall_mm=2.0); w = World(cc, table, pl, arm, toys, hold, frogs)
         monkeypatch.setattr(pl, "api", arm.api); monkeypatch.setattr(pl, "run_plan", w.run_plan); monkeypatch.setattr(pl, "fetch_scene_objects", lambda: w.scene()["objects"]); monkeypatch.setattr(pl, "fetch_wrist", lambda: None)
         rig = td.Rig(pl, cc, table, ring, ik_free=tipped(cc, table)); notes = []; ctx = gr.Ctx(w.state, w.scene, w.clock.now, w.clock.sleep, notes.append)
         guard = gr.Guard(cc, table, gr.Limits(ceiling_in=4.6, stop_file=str(tmp_path / "stop")), ctx); out = []
@@ -418,3 +421,57 @@ def test_a_wing_nut_may_pass_on_the_camera_but_still_has_to_be_placed(td, mk, pl
     m = mk([toy(5.0, 3.5, 20, 12)], hold=False, rec=FakeRec())   # wing nut: readback 0 (the thin wing), camera True
     monkeypatch.setattr(pl, "jaw_check", lambda jpeg=None, window=None, out_path=None, min_score=None: {"in_jaws": True, "ring": {"uv": [340, 330], "r_px": 15, "score": 0.7}, "frame": None, "window": [], "note": None})
     res = m.t.ring_pick(m.w.toys[0]); assert res["held"] is True and res["placed"] is False and not res["keep"] and "not_in_ring" in res["keep_reasons"]
+
+
+# ---------------------------------------------------------------- keep-outs: "be careful not to hurt the frogs" (TC, 11 Nov 2026)
+def frog_frame(cc, table, ring_in, frogs_in):
+    import cv2
+    img = cv2.imdecode(np.frombuffer(synth_frame(cc, table, ring_in), np.uint8), cv2.IMREAD_COLOR)
+    for f in frogs_in:
+        u, v = cc.table_to_pixel(table, f[0] * 25.4, f[1] * 25.4); ppm = abs(cc.table_to_pixel(table, f[0] * 25.4 + 10, f[1] * 25.4)[0] - u) / 10.0
+        cv2.circle(img, (int(round(u)), int(round(v))), int(28 * ppm), (200, 60, 40), -1)   # an all-blue frog: the worst case for the ring fit
+    return img
+
+
+def test_the_ring_fit_ignores_blue_frogs_and_a_lone_blue_blob_is_not_a_ring(td, cc, table):
+    import cv2
+    img = frog_frame(cc, table, (9.0, 6.0), [(13.0, 2.5), (11.0, 9.3)]); got = td.fit_ring(cv2.imencode(".png", img)[1].tobytes(), cc, table)
+    assert got is not None and np.hypot(got[0] - 9.0, got[1] - 6.0) * 25.4 < 3.0, got   # 11 Nov 22:4x: the old all-blue fit landed 4 in off
+    blank = np.full_like(img, 190); u, v = cc.table_to_pixel(table, 13.0 * 25.4, 2.5 * 25.4); ppm = abs(cc.table_to_pixel(table, 13.0 * 25.4 + 10, 2.5 * 25.4)[0] - u) / 10.0
+    cv2.circle(blank, (int(u), int(v)), int(28 * ppm), (200, 60, 40), -1); assert td.fit_ring(cv2.imencode(".png", blank)[1].tobytes(), cc, table) is None
+
+
+def test_keepouts_are_colourful_or_big_blobs_never_toys_or_pieces_of_the_ring(td, cc, table):
+    import cv2
+    ko = td.ko; ring = (9.0, 6.0); img = cv2.imdecode(np.frombuffer(World(cc, table, None, None, [], frogs=[(13.0, 2.5)]).frame(ring), np.uint8), cv2.IMREAD_COLOR)
+    objs = [frog(13.0, 2.5), toy(7.0, 8.0), toy(12.0, 8.0, 50, 40, 1500), toy(9.0, 6.0 + 50 / 25.4, 30, 30, 620), toy(9.0, 6.0, 113, 106, 6100), dict(frog(9.0 - 45 / 25.4, 6.0))]
+    k = ko.find_keepouts(objs, img, cc, table, ring); got = {(round(x["x_in"], 2), round(x["y_in"], 2)): x["why"] for x in k}
+    assert got[(13.0, 2.5)] == "colourful" and got[(12.0, 8.0)] == "big" and (round(9.0 - 45 / 25.4, 2), 6.0) in got, got   # a frog against the ring's wall is still a keep-out
+    assert (7.0, 8.0) not in got and (9.0, round(6.0 + 50 / 25.4, 2)) not in got and (9.0, 6.0) not in got, "a steel toy, a piece of the ring's wall and the ring itself are not keep-outs"
+    assert all(x["r_mm"] > 0.5 * math.hypot(59, 57) and x["h_mm"] >= 51.0 for x in k if x["why"] == "colourful")
+
+
+def test_the_obstacle_check_avoids_a_keepout_low_but_passes_over_it_high(td, pl, cc, table, mk):
+    m = mk([]); r = m.rig; r.keepouts = [{"x_in": 6.0, "y_in": 4.0, "r_mm": 45.0, "h_mm": 60.0, "why": "colourful"}]
+    low = r.above((6.0, 4.0), 0.4); hits = r.hits(low); assert hits and all(len(h) == 5 and h[4] == "keep-out" for h in hits if len(h) > 4) and any(len(h) > 4 for h in hits)
+    assert not r.hits(r.ik_free(6.0, 4.0, 110.0)), "110 mm over a 60 mm keep-out is clear"
+    assert not [h for h in r.hits(low, ring=False) if len(h) == 4], "ring=False checks keep-outs only"
+
+
+def test_a_frog_is_never_picked_and_a_toy_beside_it_is_refused_while_a_far_one_is_tidied(mk):
+    m = mk([toy(5.0, 3.5), toy(11.2, 3.3)], frogs=[(12.6, 3.0)]); s = m.t.round()
+    picked_at = [m.w.at] if m.w.at else []; assert s["picked"] == 1 and s["ok"] == 1, s
+    assert any(r["why"].startswith("route passes a keep-out") for r in s["refused"]), s["refused"]
+    assert all(np.hypot(a[0] - 12.6, a[1] - 3.0) * 25.4 > 60 for a in picked_at), "the arm never went down at the frog"
+    assert any(e.get("event") == "keepouts" and len(e["keepouts"]) == 1 for e in m.out)
+
+
+def test_a_frog_inside_the_ring_stops_the_round_before_any_motion(mk):
+    m = mk([toy(5.0, 3.5)], frogs=[(RING[0], RING[1])]); s = m.t.round(); assert s["stop"] == "keep-out inside the ring" and s["picked"] == 0 and m.w.names == []
+
+
+def test_carries_and_spots_keep_clear_of_keepouts(td):
+    ko = td.ko; k = [{"x_in": 8.0, "y_in": 6.0, "r_mm": 50.0, "h_mm": 60.0}]
+    assert not ko.segment_clear((5.0, 6.0), (11.0, 6.0), k, 62.0) and ko.segment_clear((5.0, 1.0), (11.0, 1.0), k, 62.0) and ko.inside_ring(k, (8.2, 6.0)) and not ko.inside_ring(k, (12.0, 6.0))
+    rng = random.Random(3); spots = [td.sample_spread_spot(rng, (5.5, 3.0, 12.5, 9.0), [], [], (3.0, 3.0), None, avoid=[((8.0, 6.0), 90.0)]) for _ in range(50)]
+    assert all(s is None or np.hypot(s[0] - 8.0, s[1] - 6.0) * 25.4 >= 90.0 for s in spots) and any(s is not None for s in spots)
