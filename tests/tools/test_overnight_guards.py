@@ -160,11 +160,22 @@ def test_budget_is_checked_in_order_and_counts_every_kind_of_try(gr):
     assert gr.Guard(None, None, lim(gr), ctx).check_budget(ctx) is None, "no caps set: never"
 
 
-def test_unattended_refuses_to_start_without_both_caps(gr, al):
-    l = lambda **kw: gr.Limits(**kw)
-    assert len(gr.unattended_problems(l())) == 2 and len(gr.unattended_problems(l(max_tries=5))) == 1 and gr.unattended_problems(l(max_tries=5, max_minutes=60)) == []
-    with pytest.raises(SystemExit, match="--max-minutes.*--max-tries"): al.main(["--dry-run", "--unattended"])
-    with pytest.raises(SystemExit, match="--max-tries"): al.main(["--dry-run", "--unattended", "--max-minutes", "60"])
+def test_unattended_defaults_to_60_tries_and_240_minutes_and_stays_overridable(gr, tmp_path):
+    none = str(tmp_path / "none.stop")
+    assert gr.unattended_gate(None, None, none) == (60, 240) and gr.unattended_gate(10, None, none) == (10, 240) and gr.unattended_gate(None, 30.0, none) == (60, 30.0)
+    assert len(gr.unattended_problems(gr.Limits())) == 2 and gr.unattended_problems(gr.Limits(max_tries=5, max_minutes=60)) == []
+
+
+def test_unattended_refuses_to_start_while_the_stop_file_exists_and_never_deletes_it(gr, al, tmp_path, capsys):
+    f = tmp_path / "autoloop.stop"; f.write_text("x")
+    with pytest.raises(SystemExit, match=f"rm {f}"): gr.unattended_gate(None, None, str(f))
+    with pytest.raises(SystemExit, match="rm "): al.main(["--dry-run", "--unattended", "--stop-file", str(f)])
+    assert f.exists()
+
+
+def test_unattended_dry_run_main_takes_the_default_caps(al, tmp_path, capsys):
+    rc = al.main(["--dry-run", "--unattended", "--cycles", "2", "--seed", "2", "--session", "u", "--out-dir", str(tmp_path / "o"), "--dry-miss", "0", "--settle", "0", "--stop-file", str(tmp_path / "none.stop")])
+    lines = [json.loads(x) for x in capsys.readouterr().out.strip().splitlines()]; assert rc == 0 and [x for x in lines if x.get("event") == "summary"][0]["cycles"] == 2
 
 
 def test_consecutive_failures_still_end_the_session_after_n(autorig, capsys):
@@ -222,10 +233,11 @@ def test_park_on_exit_decides_in_one_place(gr):
 
 
 # ---------------------------------------------------------------- the tidy loop
-def test_tidy_unattended_refuses_without_caps_before_touching_anything():
+def test_tidy_unattended_refuses_a_leftover_stop_file_before_touching_anything(monkeypatch):
     import importlib.util
     spec = importlib.util.spec_from_file_location("tidy_cli_guard", os.path.join(ROOT, "tools", "tidy.py")); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-    with pytest.raises(SystemExit, match="--max-minutes.*--max-tries"): m.main(["run", "--unattended"])
+    stop = os.path.join(m.ROOT, "outputs", "run", "autoloop.stop"); monkeypatch.setattr(os.path, "exists", lambda p, _e=os.path.exists: True if p == stop else _e(p))
+    with pytest.raises(SystemExit, match="rm "): m.main(["run", "--unattended"])
     a = m.build_parser().parse_args(["loop", "--max-tries", "9", "--max-minutes", "120", "--unattended", "--temp-limit", "58"])
     assert (a.max_tries, a.max_minutes, a.unattended, a.temp_limit) == (9, 120.0, True, 58.0)
     assert m.CLEAN_ENDS == ("all_tidy", "max", "max_tries", "max_minutes")
@@ -308,3 +320,92 @@ def test_unattended_fails_closed_without_a_top_frame_attended_does_not(autorig, 
     r = autorig(); r.pl.fetch_top = lambda: (_ for _ in ()).throw(OSError("404")); s, out = r.run(capsys, cycles=2, dry_run=False, unattended=True)
     t, = events(out, "trip"); assert t["reason"] == "keepout_unknown" and r.arm.calls == [] and s["end"] == "keepout_unknown"
     r2 = autorig(); r2.pl.fetch_top = lambda: b""; s2, out2 = r2.run(capsys, cycles=1, dry_run=False); assert s2["end"] == "cycles" and any("size rule only" in o.get("note", "") for o in out2)
+
+
+# ---------------------------------------------------------------- caffeinate
+def test_caffeinate_is_spawned_waiting_on_our_pid_and_a_failure_refuses_the_start(gr):
+    class P:
+        def __init__(self, dead=False): self.dead = dead
+        def poll(self): return 1 if self.dead else None
+    calls = []; ok = gr.start_caffeinate(pid=4242, popen=lambda argv: calls.append(argv) or P(), platform="darwin", sleep=lambda s: None)
+    assert calls == [["caffeinate", "-dims", "-w", "4242"]] and ok is not None
+    with pytest.raises(SystemExit, match="exited at once"): gr.start_caffeinate(popen=lambda argv: P(dead=True), platform="darwin", sleep=lambda s: None)
+    with pytest.raises(SystemExit, match="failed to start"): gr.start_caffeinate(popen=lambda argv: (_ for _ in ()).throw(FileNotFoundError("caffeinate")), platform="darwin", sleep=lambda s: None)
+    assert gr.start_caffeinate(popen=lambda argv: 1 / 0, platform="linux") is None, "only macOS has caffeinate"
+
+
+# ---------------------------------------------------------------- torque off at the very end, only at rest with a fresh readback
+REST = {"shoulder_pan": 0.0, "shoulder_lift": -100.0, "elbow_flex": 95.0, "wrist_flex": 72.0, "wrist_roll": 0.0, "gripper": 0.0}
+
+
+def torque_ctx(gr, pos=None, src="idle-poll", age=0.5, state_raises=False, now=1000.0):
+    ev = []; fol = {"pos": pos if pos is not None else dict(REST), "src": src, "rx": now - age}
+    def fetch():
+        if state_raises: raise OSError("down")
+        return {"jetson": {"online": True}, "arms": {"follower": fol}}
+    ctx = gr.Ctx(fetch, lambda: {}, lambda: now, lambda s: ev.append(("sleep", s)), lambda d: None)
+    return ctx, ev
+
+
+def release(gr, ctx, off=lambda: True):
+    log = []; closed = []
+    r = gr.release_torque_at_rest(ctx, REST, lambda: closed.append(1), lambda: log.append("off") or off(), say=log.append, settle_s=2.5)
+    return r, log, closed
+
+
+def test_torque_is_released_after_a_clean_end_when_the_readback_says_rest(gr):
+    ctx, ev = torque_ctx(gr, pos={**REST, "shoulder_lift": -96.0}); r, log, closed = release(gr, ctx)   # 4 deg off, inside the 5 deg tolerance
+    assert r["released"] is True and "off" in log and closed == [1] and ev == [("sleep", 2.5)], "pick_seq is ended first, then the dashboard gets time to resume its poll"
+    assert any(isinstance(x, dict) and x["event"] == "torque_released" for x in log)
+
+
+def test_torque_stays_on_when_the_arm_is_not_at_rest_because_the_park_failed(gr):
+    ctx, _ = torque_ctx(gr, pos={**REST, "shoulder_lift": -94.9}); r, log, _ = release(gr, ctx)   # 5.1 deg off
+    assert r["released"] is False and "off" not in log and "not at rest" in r["why"]
+    warn = [x for x in log if isinstance(x, dict)][0]; assert warn["event"] == "torque_left_on" and "still ON" in warn["warning"]
+    ctx2, _ = torque_ctx(gr, pos={**REST, "elbow_flex": 40.0}); r2, log2, _ = release(gr, ctx2); assert r2["released"] is False and "off" not in log2, "frozen mid-air after a STOP"
+
+
+def test_torque_stays_on_for_a_stale_or_missing_readback(gr):
+    for kw in ({"age": 3.01}, {"src": "busy"}, {"pos": {}}, {"state_raises": True}):
+        ctx, _ = torque_ctx(gr, **kw); r, log, _ = release(gr, ctx); assert r["released"] is False and "off" not in log, kw
+    ctx, _ = torque_ctx(gr, age=3.0); assert release(gr, ctx)[0]["released"] is True, "3 s old is still fresh"
+    ctx, _ = torque_ctx(gr, pos={k: v for k, v in REST.items() if k != "wrist_flex"}); r, log, _ = release(gr, ctx); assert r["released"] is False and "off" not in log
+
+
+def test_torque_stays_on_when_free_arm_does_not_confirm_and_nothing_raises(gr):
+    ctx, _ = torque_ctx(gr); r, log, _ = release(gr, ctx, off=lambda: False); assert r["released"] is False and "free_arm.py" in r["why"]
+    ctx, _ = torque_ctx(gr); r, _, _ = release(gr, ctx, off=lambda: 1 / 0); assert r["released"] is False
+
+
+def test_torque_off_goes_over_ssh_with_the_labs_own_free_arm_script(gr):
+    seen = []
+    class R: returncode = 0; stdout = "follower: torque OFF, arm is free to move by hand\n"
+    assert gr.ssh_torque_off("jetson", run=lambda argv, **k: seen.append(argv) or R()) is True
+    assert seen[0][0] == "ssh" and "free_arm.py" in seen[0][-1] and "so101-arms-take" in seen[0][-1] and "so101-arms-release" in seen[0][-1] and "pkill" not in seen[0][-1]
+    class Bad: returncode = 255; stdout = ""
+    assert gr.ssh_torque_off("jetson", run=lambda argv, **k: Bad()) is False
+
+
+def live_follower(r, pos):
+    """/api/state whose follower line is always fresh (idle-poll, 0.2 s old on the fake clock) and reads `pos`."""
+    st = r.world.api_state; r.ctx.fetch_state = lambda: {**st(), "arms": {"follower": {"pos": dict(pos), "src": "idle-poll", "rx": r.clock.now() - 0.2}}}
+
+
+def test_autoloop_unattended_session_ends_with_park_then_torque_off(autorig, capsys):
+    off = []; r = autorig(); live_follower(r, dict(r.pl.REST))
+    s, out = r.run(capsys, cycles=1, unattended=True, torque_off=lambda: off.append(1) or True)
+    assert s["end"] == "cycles" and off == [1] and any(o.get("event") == "torque_released" for o in out)
+
+
+def test_autoloop_after_a_stop_mid_air_leaves_the_torque_on(autorig, capsys):
+    off = []; r = autorig(); live_follower(r, {**r.pl.REST, "elbow_flex": 10.0})
+    open(r.stop_file, "w").write("x"); s, out = r.run(capsys, cycles=2, unattended=True, torque_off=lambda: off.append(1) or True)
+    assert off == [] and any(o.get("event") == "torque_left_on" for o in out)
+    r2 = autorig(); s2, out2 = r2.run(capsys, cycles=1, unattended=False, torque_off=lambda: off.append(1) or True); assert off == [], "attended runs never release torque"
+
+
+def test_autoloop_after_a_trip_that_parked_the_torque_is_released(autorig, capsys):
+    off = []; r = autorig(); live_follower(r, dict(r.pl.REST)); inject(r, summ(shoulder_lift={"temp_max_c": 65}))
+    s, out = r.run(capsys, cycles=5, unattended=True, torque_off=lambda: off.append(1) or True)
+    assert s["end"] == "servo_hot" and r.arm.calls[-1][0] == ["rest"] and off == [1], "parked first, then the torque"

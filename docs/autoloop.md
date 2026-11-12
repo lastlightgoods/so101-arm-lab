@@ -93,7 +93,7 @@ frame rate. So:
 
 ## Overnight guards (tools/guardrails.py, shared with tools/tidy.py)
 
-`--unattended` refuses to start without `--max-minutes` and `--max-tries`, and turns on `--require-health`. Trips and their sources:
+`--unattended` (TC's decisions, 11 Nov): caps default to `--max-tries 60` and `--max-minutes 240` (overridable); turns on `--require-health`; refuses to start while `outputs/run/autoloop.stop` exists (it prints the `rm` command, never deletes the file); keeps the Mac awake with `caffeinate -dims -w <own pid>` and refuses to start if that fails (you may also wrap the command in `caffeinate -dims`); and at the end, for any exit reason, after the park, releases the servo torque (`jetson/free_arm.py` over ssh, the lab's own so101-free path without its pkill) ONLY if a fresh `/api/state` readback (src idle-poll, under 3 s old) shows every arm joint within 5 deg of rest. 5 deg: above the 1 to 3.5 deg sag measured 9 Nov and the 4.7 deg worst loaded sag, under the 8 deg motion trip. Otherwise the torque stays ON and a `torque_left_on` line says so. Trips and their sources:
 
 | trip | when | source of the number |
 |---|---|---|

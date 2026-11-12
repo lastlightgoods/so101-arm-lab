@@ -836,7 +836,7 @@ def build_parser():
     ap.add_argument("--no-roll", action="store_true"); ap.add_argument("--jaw-open", type=int, default=None); ap.add_argument("--seed", type=int, default=None); ap.add_argument("--session", default=time.strftime("%Y%m%d-%H%M%S"))
     ap.add_argument("--temp-limit", type=float, default=65.0, help="servo temperature (C) at which the run stops (plan rows and /api/tele; the servos' own cut is 70, idle after a long day is 52 to 57)"); ap.add_argument("--out-dir", default=None)
     ap.add_argument("--max-minutes", type=float, default=None, help="wall-clock cap for the whole session, checked between picks (a clean stop)"); ap.add_argument("--max-tries", type=int, default=None, help="cap on picks attempted (ring and spread), whatever their outcome (a clean stop)")
-    ap.add_argument("--require-health", action="store_true", help="a plan whose rows carry no servo telemetry is a trip"); ap.add_argument("--unattended", action="store_true", help="overnight mode: refuses to start without --max-minutes AND --max-tries, and implies --require-health")
+    ap.add_argument("--require-health", action="store_true", help="a plan whose rows carry no servo telemetry is a trip"); ap.add_argument("--unattended", action="store_true", help="overnight mode: caps default to --max-tries 60 and --max-minutes 240, implies --require-health, refuses to start while the stop file exists, keeps the Mac awake (caffeinate), and after parking at rest lets go of the servo torque if the readback confirms rest")
     ap.add_argument("--ring-box", type=float, nargs=4, default=list(RING_BOX_IN)); ap.add_argument("--spread-box", type=float, nargs=4, default=list(SPREAD_BOX_IN)); ap.add_argument("--no-nudge", dest="nudge", action="store_false"); ap.add_argument("--no-blob-mask", dest="blob_mask", action="store_false")
     ap.add_argument("--ring-to", type=float, nargs=2, default=None, help="reset: set the ring down at this centre (mat inches) instead of a random one")
     ap.add_argument("--demo-host", default="jetson"); ap.add_argument("--demo-root", default=None); ap.add_argument("--demo-vcodec", default=None); ap.add_argument("--demo-tick-sink", default="/dev/shm/so101_ticks.jsonl"); ap.add_argument("--lab-config", default=None)
@@ -856,7 +856,9 @@ def plan_report(pl, rig, toys, ring, order):
 
 def main(argv=None):
     a = build_parser().parse_args(argv); gr = load_gr()
-    if a.unattended and (missing := gr.unattended_problems(gr.Limits(max_tries=a.max_tries, max_minutes=a.max_minutes))): raise SystemExit("--unattended needs " + " and ".join(missing))   # before anything is loaded or fetched
+    if a.unattended:   # before anything is loaded or fetched: caps default to 60 tries / 240 min, a leftover stop file refuses the start, the Mac is kept awake
+        a.max_tries, a.max_minutes = gr.unattended_gate(a.max_tries, a.max_minutes, os.path.join(ROOT, "outputs", "run", "autoloop.stop"))
+        gr.start_caffeinate()
     al = load_al(); pl = load_pl(); cc = pl.cam_calib(); table = json.load(open(os.path.join(ROOT, "jetson", "calib", "top_table.json")))
     if not (table.get("arm_fit") and table.get("arm_base_mm")): raise SystemExit("tidy needs the arm fit in jetson/calib/top_table.json")
     ring = fit_ring(pl.fetch_top(), cc, table)
@@ -888,7 +890,9 @@ def main(argv=None):
         if s.get("stop") and s["stop"].split(": ")[-1] not in ("all_tidy", "max") and t.in_motion: t.park(s["stop"])   # any stop that left the arm out of rest (a trip's go_home failed, a cap hit mid-motion)
         print(json.dumps({"event": "summary", **{k: v for k, v in s.items() if k != "results"}}), flush=True)
         return 0 if not s.get("stop") or s["stop"].split(": ")[-1] in CLEAN_ENDS else 2
-    finally: pl.close_session()
+    finally:
+        if a.unattended and t is not None: guard.release_torque(ctx, dict(pl.REST), pl.close_session, gr.ssh_torque_off, t.say)   # after the park, whatever ended the run
+        pl.close_session()
 
 
 if __name__ == "__main__":

@@ -81,8 +81,9 @@ def load_biases(path):
 class Runner:
     """One session. `pl` is the pick_loop module, `guard` a Guard, `ctx` its Ctx (fetch_state / fetch_scene / now / sleep), `track` a LabTrack,
     `rng` a random.Random. Everything that moves the arm goes through pl.run_plan, wrapped so the guard sees every plan and every row."""
-    def __init__(self, pl, cc, table, guard, ctx, cfg, track, rng, out=print, demo=None):
+    def __init__(self, pl, cc, table, guard, ctx, cfg, track, rng, out=print, demo=None, torque_off=None):
         self.pl, self.cc, self.table, self.guard, self.ctx, self.cfg, self.track, self.rng, self.out = pl, cc, table, guard, ctx, cfg, track, rng, out
+        self.torque_off = torque_off   # () -> bool: let go of the servos' torque at the very end of an UNATTENDED session, when the readback says the arm is at rest; None = never
         self.demo = demo   # a tools/demo_session.DemoSession, or None (the default: nothing below changes)
         self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0; self.tele_rows = []; self.session_tele = []; self.keepouts = []; self._ko_key = (); self.noted = set()
         self.markers_mm = list((table.get("layout_markers") or {}).values())
@@ -363,7 +364,10 @@ class Runner:
 
     def run(self):
         try: return self._run()
-        finally: getattr(self.pl, "close_session", lambda: None)()   # why: 12 Nov 2026 the persistent pick_seq ssh (pick_loop.PickSession) ends with the session, on any exit
+        finally:
+            if self.opt("unattended", False) and self.torque_off is not None:   # after the park, whatever ended the session
+                self.guard.release_torque(self.ctx, dict(self.pl.REST), getattr(self.pl, "close_session", lambda: None), self.torque_off, self.say)
+            getattr(self.pl, "close_session", lambda: None)()   # why: 12 Nov 2026 the persistent pick_seq ssh (pick_loop.PickSession) ends with the session, on any exit
 
     def _run(self):
         cfg, t0, end = self.cfg, self.ctx.now(), "cycles"; crashed = None
@@ -543,7 +547,7 @@ def build_parser():
     ap.add_argument("--max-consecutive-failures", type=int, default=3); ap.add_argument("--max-retries", type=int, default=1); ap.add_argument("--lost-after", type=int, default=3)
     ap.add_argument("--max-minutes", type=float, default=None, help="wall-clock cap for the whole session, checked between cycles (a clean stop); like --minutes, but reported as a guard stop"); ap.add_argument("--max-tries", type=int, default=None, help="cap on cycles attempted, whatever their outcome (a clean stop)")
     ap.add_argument("--temp-limit", type=float, default=65.0, help="stop when any servo reaches this temperature (C); the servo's own cut is 70"); ap.add_argument("--require-health", action="store_true", help="a plan whose rows carry no servo telemetry is a trip")
-    ap.add_argument("--unattended", action="store_true", help="overnight mode: refuses to start without --max-minutes AND --max-tries, and implies --require-health")
+    ap.add_argument("--unattended", action="store_true", help="overnight mode: caps default to --max-tries 60 and --max-minutes 240, implies --require-health, refuses to start while the stop file exists, keeps the Mac awake (caffeinate), and after parking at rest lets go of the servo torque if the readback confirms rest")
     ap.add_argument("--stop-file", default=None, help="while this file exists the session stops cleanly (default ~/so101/outputs/run/autoloop.stop)")
     ap.add_argument("--max-err-deg", type=float, default=8.0); ap.add_argument("--margin-mm", type=float, default=20.0); ap.add_argument("--ceiling-in", type=float, default=4.0)
     ap.add_argument("--grasp-roll", default="off", metavar="auto|off|DEG", help="pick_loop --grasp-roll: turn the wrist so the jaws close across the object's long axis (auto = from the scene map; default off)")
@@ -564,7 +568,9 @@ def build_parser():
 def main(argv=None, demo_transport=None):
     a = build_parser().parse_args(argv)
     gr = load_guardrails()
-    if a.unattended and (missing := gr.unattended_problems(gr.Limits(max_tries=a.max_tries, max_minutes=a.max_minutes))): raise SystemExit("--unattended needs " + " and ".join(missing))   # before anything is loaded
+    if a.unattended:   # before anything is loaded: caps default to 60 tries / 240 min, a leftover stop file refuses the start, the Mac is kept awake
+        a.max_tries, a.max_minutes = gr.unattended_gate(a.max_tries, a.max_minutes, a.stop_file or gr.STOP_FILE)
+        if not a.dry_run: gr.start_caffeinate()
     pl = load_pick_loop(); cc = pl.cam_calib(); out_dir = a.out_dir or os.path.join(ROOT, "outputs", "run")
     tpath = a.table or os.path.join(ROOT, "jetson", "calib", "top_table.json")
     if a.dry_run and not os.path.exists(tpath): tpath = os.path.join(ROOT, "tests", "calib", "fixtures", "top_table_real.json")
@@ -584,7 +590,7 @@ def main(argv=None, demo_transport=None):
         ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True), arm_jobs=jetson_arm_jobs, fetch_tele=lambda: get("/api/tele", 3)); track = lt.LabTrack(EXPERIMENT)
         if a.record_demos: demo = make_real_demo(a, cfg, lt, pl, demo_transport)   # why: before open_session, so the persistent pick_seq is started with --tick-sink
     if not a.dry_run and a.pick_session: pl.open_session(True)   # why: lazy, nothing connects until the first plan; the guarded run_plan wraps pl.run_plan, which uses it, so the guard still sees every plan and row
-    guard = gr.Guard(cc, table, lim, ctx); s = Runner(pl, cc, table, guard, ctx, cfg, track, rng, out=lambda l: print(l, flush=True), demo=demo).run()
+    guard = gr.Guard(cc, table, lim, ctx); s = Runner(pl, cc, table, guard, ctx, cfg, track, rng, out=lambda l: print(l, flush=True), demo=demo, torque_off=(gr.ssh_torque_off if a.unattended and not a.dry_run else None)).run()
     return 0 if all(x["clean"] for x in s["stops"]) else 2
 
 

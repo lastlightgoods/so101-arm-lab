@@ -5,7 +5,7 @@ Pure functions (box_check, fk_mat_mm, plan_tips, motion_check, stopfile_present)
 counters that live across cycles. Every check returns a Trip(reason, detail) or None; a Trip ends the session. Nothing here moves the arm
 or talks to the arm: the dashboard is reached through the callables of a Ctx, so a test (or --dry-run) hands in fakes and a fake clock.
 """
-import dataclasses, importlib.util, math, os, time
+import dataclasses, importlib.util, math, os, subprocess, sys, time
 
 MAT_MM = (457.2, 304.8)   # the Fiskars mat, 18 x 12 in (docs/mat-scene.md)
 IN = 25.4
@@ -183,8 +183,67 @@ def summary_of_tele_api(api, lim=None):
     return {"j": j, "total_a_max": row[1], "volt_min": row[2], "flags": flags}
 
 
+UNATTENDED_TRIES, UNATTENDED_MINUTES = 60, 240   # TC's decision for the overnight run (doc 84, 11 Nov 2026): 60 tries, 240 minutes; both stay overridable
+
+
+def unattended_gate(max_tries, max_minutes, stop_file):
+    """-> (max_tries, max_minutes) for an --unattended start: the caps default to 60 / 240. SystemExit while the stop file exists (the rm command is printed; it is never deleted for you)."""
+    if stopfile_present(stop_file): raise SystemExit(f"--unattended refuses to start while the stop file exists (an earlier STOP): rm {stop_file}")
+    return max_tries or UNATTENDED_TRIES, max_minutes or UNATTENDED_MINUTES
+
+
+def start_caffeinate(pid=None, popen=subprocess.Popen, platform=None, wait=0.3, sleep=time.sleep):
+    """Keep the Mac awake for the life of this process: `caffeinate -dims -w <pid>` (display, idle, disk, system sleep; ends by itself when we do). -> the Popen, or None off macOS.
+    SystemExit when it cannot be started or dies at once: an unattended run on a Mac that may go to sleep mid-pick is refused."""
+    if (platform or sys.platform) != "darwin": return None
+    try: p = popen(["caffeinate", "-dims", "-w", str(pid or os.getpid())])
+    except OSError as e: raise SystemExit(f"--unattended needs the Mac to stay awake and caffeinate failed to start: {e}") from e
+    sleep(wait)
+    if p.poll() is not None: raise SystemExit("--unattended needs the Mac to stay awake and caffeinate exited at once")
+    return p
+
+
+# torque off at the very end (TC: "torque off"): the lab's own path is so101-free = pkill + so101-arms-take + free_arm.py + so101-arms-release (jetson/env.sh). We run the same take / free_arm.py / release
+# without the pkill (our own pick_seq has already left), over the same ssh the pick session uses.
+TORQUE_OFF_CMD = "bash -lc 'source ~/so101/env.sh >/dev/null 2>&1; so101-arms-take; python3 ~/so101/free_arm.py; so101-arms-release'"
+REST_TOL_DEG = 5.0   # each arm joint within this of the rest pose before the torque is let go: above the 1 to 3.5 deg sag measured 9 Nov and the 4.7 deg worst loaded sag (11 Nov), under the 8 deg motion trip
+READBACK_MAX_AGE_S = 3.0
+
+
+def ssh_torque_off(host="jetson", run=subprocess.run, timeout=40):
+    """Run free_arm.py (torque OFF on all six servos) on the Jetson. True only when it printed its confirmation."""
+    r = run(["ssh", "-o", "ConnectTimeout=8", host, TORQUE_OFF_CMD], capture_output=True, text=True, timeout=timeout)
+    return r.returncode == 0 and "torque OFF" in (r.stdout or "")
+
+
+def at_rest(pos, rest, tol_deg=REST_TOL_DEG):
+    """(True, worst error) when every arm joint of `pos` is within tol_deg of `rest`; (False, reason) otherwise. The gripper is not judged (a limp open gripper is harmless)."""
+    try: worst = max(abs(float(pos[k]) - float(rest[k])) for k in ARM)
+    except (KeyError, TypeError, ValueError): return False, "joint positions missing"
+    return (worst <= tol_deg, round(worst, 2))
+
+
+def release_torque_at_rest(ctx, rest, close_session, torque_off, say=print, settle_s=2.5, tol_deg=REST_TOL_DEG, max_age_s=READBACK_MAX_AGE_S):
+    """The end of an unattended session, any exit reason, after the park: let go of the torque ONLY when a fresh readback says the arm is at rest. -> {"released": bool, "why": str}.
+    Steps: end our pick_seq (it leaves torque on and frees the bus), wait for the dashboard's idle poll, read /api/state, check freshness (src idle-poll, younger than max_age_s) and the pose, then torque_off().
+    Anything else (parking failed, arm stopped mid-air, readback missing or stale, torque_off failing) leaves the torque ON and says so loudly: a limp arm away from rest can drop onto the mat or a frog. Never raises."""
+    def keep(why): say({"event": "torque_left_on", "why": why, "warning": "torque is still ON; the arm holds where it is"}); return {"released": False, "why": why}
+    try:
+        close_session(); ctx.sleep(settle_s); st = ctx.fetch_state()
+        fol = ((st or {}).get("arms") or {}).get("follower") or {}; age = ctx.now() - float(fol.get("rx") or 0.0)
+        if not fol.get("pos"): return keep("no position readback")
+        if fol.get("src") != "idle-poll" or age > max_age_s: return keep(f"readback is stale (src {fol.get('src')}, {age:.1f} s old)")
+        ok, how = at_rest(fol["pos"], rest, tol_deg)
+        if not ok: return keep(f"arm is not at rest (worst joint {how} deg off, tolerance {tol_deg:g})" if isinstance(how, float) else f"arm is not at rest ({how})")
+        if not torque_off(): return keep("free_arm.py did not confirm torque off")
+        say({"event": "torque_released", "worst_joint_err_deg": how}); return {"released": True, "why": "at rest"}
+    except BaseException as e:
+        if isinstance(e, (KeyboardInterrupt, GeneratorExit)): raise
+        return keep(f"{type(e).__name__}: {e}"[:200])
+
+
 def unattended_problems(lim):
-    """What an unattended (overnight) start refuses to run without: both session caps. [] when fine."""
+    """What an unattended (overnight) start refuses to run without: both session caps. [] when fine (kept for callers that build Limits by hand; the mains use unattended_gate)."""
     return [m for m, ok in (("--max-minutes (a wall-clock cap)", lim.max_minutes), ("--max-tries (a cap on picks)", lim.max_tries)) if not ok]
 
 
@@ -213,6 +272,8 @@ class Guard:
         if key not in self._noted: self._noted.add(key); ctx.note({"note": msg})
 
     def keepout_mod(self): return keepout_mod()
+
+    def release_torque(self, ctx, rest, close_session, torque_off, say=print, **kw): return release_torque_at_rest(ctx or self.ctx, rest, close_session, torque_off, say, **kw)
 
     def trip(self, reason, detail=None, clean=False): return Trip(reason, detail or {}, clean)   # why: the runner loads this module by path, so it builds trips through the Guard
 
