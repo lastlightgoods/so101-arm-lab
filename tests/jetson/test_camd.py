@@ -120,9 +120,13 @@ def test_a_reader_is_cut_off_when_its_camera_goes_silent(camd, server):
     assert len(got) >= 3 and time.time() - t0 < 6.0   # EOF => the dashboard's loop reconnects instead of showing a frozen picture
 
 
-def run_dash_snippet(camd, sockdir, tap_rc):
+def run_dash_snippet(camd, sockdir, tap_rc, with_file=True):
     """The shell text the dashboard's remote command gains, run with a stub `python3` (exit code tap_rc) and a stub fallback."""
     bin_ = os.path.join(sockdir, "bin"); os.makedirs(bin_, exist_ok=True)
+    os.makedirs(os.path.join(sockdir, "so101"), exist_ok=True)
+    f = os.path.join(sockdir, "so101", "camd.py")
+    if with_file: open(f, "w").close()
+    elif os.path.exists(f): os.unlink(f)
     open(os.path.join(bin_, "python3"), "w").write(f"#!/bin/sh\necho tap-ran\nexit {tap_rc}\n"); os.chmod(os.path.join(bin_, "python3"), 0o755)
     cmd = camd.DASH_PREFIX.format(name="top") + "echo ffmpeg-fallback"
     return subprocess.run(["sh", "-c", cmd], capture_output=True, text=True, env={"PATH": bin_ + ":/usr/bin:/bin", "HOME": sockdir}).stdout.split()
@@ -130,6 +134,7 @@ def run_dash_snippet(camd, sockdir, tap_rc):
 
 def test_dashboard_command_falls_back_to_its_own_ffmpeg_only_when_camd_is_absent(camd, sockdir):
     assert run_dash_snippet(camd, sockdir, 3) == ["tap-ran", "ffmpeg-fallback"]   # no camd: today's behaviour
+    assert run_dash_snippet(camd, sockdir, 2, with_file=False) == ["ffmpeg-fallback"]   # camd.py not even deployed: straight to ffmpeg
     assert run_dash_snippet(camd, sockdir, 1) == ["tap-ran"]                       # camd was there and the stream ended: reconnect, never start a second owner of the device
 
 
@@ -137,3 +142,9 @@ def test_none_of_the_camera_side_code_can_move_the_arm():
     for f in ("camd.py", "demo_cams.py"):
         src = open(os.path.join(JETSON, f)).read()
         assert not any(w in src for w in ("send_action", "import lerobot", "from lerobot", "import serial", "motors", "so101_follower", "FOLLOWER", "ttyACM")), f
+
+
+def test_the_dashboard_source_carries_exactly_the_tested_snippet():
+    src = open(os.path.join(ROOT, "dashboard", "server.py")).read()
+    assert 'f"[ -f ~/so101/camd.py ] && {{ python3 ~/so101/camd.py tap {name}; rc=$?; [ $rc -eq 3 ] || exit $rc; }}; "' in src
+    assert 'f"while [ -f ~/so101/.cams_busy ]; do sleep 1; done; "' in src and "[ -e /dev/v4l/by-id/{dev} ] || exit 3; " in src   # the old command is still there after it

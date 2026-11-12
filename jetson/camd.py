@@ -28,7 +28,7 @@ CAMS = {"top": ("usb-046d_HD_Pro_Webcam_C920_9D46D6AF-video-index0", "mjpeg", "6
         "wrist": ("usb-icSpring_icspring_camera-video-index0", "yuyv422", "640x480")}
 STALE_S = 5.0   # a reader gets disconnected when its camera produced nothing for this long (the dashboard's loop then reconnects, or falls back)
 # why: the line the dashboard command gains in front of its ffmpeg, 2026-11-11. tests/jetson/test_camd.py runs this snippet in sh with stubs for both outcomes.
-DASH_PREFIX = "python3 ~/so101/camd.py tap {name}; rc=$?; [ $rc -eq 3 ] || exit $rc; "
+DASH_PREFIX = "[ -f ~/so101/camd.py ] && {{ python3 ~/so101/camd.py tap {name}; rc=$?; [ $rc -eq 3 ] || exit $rc; }}; "   # braces doubled: this is also an f-string in dashboard/server.py; a Jetson without camd.py falls straight through to ffmpeg
 
 
 def ffmpeg_cmd(dev, fmt, size, fps, q): return ["ffmpeg", "-loglevel", "error", "-fflags", "nobuffer", "-flags", "low_delay", "-f", "v4l2", "-input_format", fmt, "-video_size", size, "-framerate", str(fps),

@@ -19,7 +19,7 @@ It owns a jetson/demo_recorder.DemoRecorder. Inputs: the pick_seq tick sink file
 SAFETY: this process never commands the arm and never opens a serial port (it imports no robot code; tests/jetson/test_demo_recorderd.py greps for it).
 Any exception in a handler or in the 30 Hz loop is answered or logged and the loop goes on; an exception while sampling aborts the open episode (so a crash
 or a bad frame rejects the episode, never the arm). If the process itself dies the Mac sees `alive` false (autoloop trips its `recorder` guard before the next
-cycle) and the next start deletes the half-written spool. It refuses to run an episode while ~/so101/.cams_busy / .arms_busy exists (a lerobot job owns the hardware).
+cycle) and the next start deletes the half-written spool. It refuses to run an episode while ~/so101/.cams_busy exists (a lerobot job owns the cameras).
 """
 import json, os, select, shutil, signal, socket, sys, time
 
@@ -30,7 +30,7 @@ import lab_config as lc  # noqa: E402
 SOCK = os.environ.get("SO101_DEMOREC_SOCK", "/dev/shm/so101_demorec.sock")
 TICKS = os.environ.get("SO101_TICK_SINK") or "/dev/shm/so101_ticks.jsonl"
 SPOOL = os.path.expanduser("~/so101/outputs/run/demo_spool")
-BUSY_FLAGS = tuple(os.path.expanduser(p) for p in ("~/so101/.cams_busy", "~/so101/.arms_busy"))
+BUSY_FLAGS = (os.path.expanduser("~/so101/.cams_busy"),)   # why: not .arms_busy: pick_seq --serve holds that flag for the whole session it records (12 Nov 2026); a lerobot job sets .cams_busy too
 IDLE_KEEP_S = 3.0   # ticks older than this are dropped while no episode is open
 
 

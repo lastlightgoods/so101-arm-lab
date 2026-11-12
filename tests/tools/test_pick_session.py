@@ -306,3 +306,18 @@ def test_autoloop_runner_closes_the_session_at_the_end(monkeypatch):
     with pytest.raises(KeyboardInterrupt): r.run()
     assert closed == [1]
     assert al.build_parser().parse_args([]).pick_session is True and al.build_parser().parse_args(["--no-pick-session"]).pick_session is False
+
+
+# ---------------------------------------------------------------- demo recording through the session (tools/autoloop.py --record-demos)
+def test_a_recorded_try_through_a_pick_session_writes_ticks_for_every_plan(pl, server, tmp_path, monkeypatch):
+    sink = str(tmp_path / "ticks.jsonl"); monkeypatch.setattr(pl, "PICK_SEQ_ARGS", f"--tick-sink {sink}")
+    assert pl.PickSession().argv[-1].endswith(f"--idle-s 60 --tick-sink {sink}") and pl.PickSession().argv[-1].count("--serve") == 1   # what the real ssh command gets
+    monkeypatch.setattr(pl, "PICK_SEQ_ARGS", ""); assert "--tick-sink" not in pl.PickSession().argv[-1]                                  # and nothing when not recording
+    dr = load(os.path.join(ROOT, "jetson", "demo_recorder.py"), "demo_recorder_for_session_tests"); s = pl.PickSession(argv=server("ok", "--tick-sink", sink)); buf = dr.TickBuffer(); per_plan = []
+    try:
+        for p in (PLAN, PLAN2, PLAN):   # three stages of one try, one connection
+            rows = pl.run_plan(p, 80.0, session=s); head = open(sink).readline()
+            n0 = len(buf.ticks); buf.poll_file(sink); per_plan.append((len(rows), len(buf.ticks) - n0, json.loads(head)))
+    finally: s.close()
+    assert server.connects() == 1 and all(n_ticks > 0 and h.get("header") == 1 and h["version"] == 1 for _, n_ticks, h in per_plan)   # each plan's file starts with the header line, like a --plan run
+    t = [x["t_mono"] for x in buf.ticks]; assert t == sorted(t) and all(set(x["action"]) == {f"{j}.pos" for j in ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")} and x["state"] for x in buf.ticks)

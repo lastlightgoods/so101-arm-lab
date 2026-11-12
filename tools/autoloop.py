@@ -460,7 +460,7 @@ def demo_mods():
 
 def make_real_demo(a, cfg, lt, pl, transport=None):
     """--record-demos on the real arm: a DemoSession whose recorder is the resident jetson/demo_recorderd.py (RemoteRecorder over `transport`; ssh unless a test injects one).
-    Preflight BEFORE any arm motion: the daemon answers, takes the dataset configuration, sees all three camera streams and no .cams_busy / .arms_busy.
+    Preflight BEFORE any arm motion: the daemon answers, takes the dataset configuration, sees all three camera streams and no .cams_busy.
     Sets pick_loop.PICK_SEQ_ARGS so every pick_seq run writes its tick sink where the daemon reads (only when recording)."""
     _, lc, ds = demo_mods(); lab = lc.LabConfig.from_file(a.lab_config) if a.lab_config else lc.LabConfig()
     if a.lighting_tag: lab.lighting_tag = a.lighting_tag

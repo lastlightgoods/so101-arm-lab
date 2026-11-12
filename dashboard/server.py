@@ -194,7 +194,9 @@ JETSON_CAMS = {"top": ("usb-046d_HD_Pro_Webcam_C920_9D46D6AF-video-index0", "mjp
                "front": ("usb-046d_HD_Pro_Webcam_C920_B6A1F66F-video-index0", "mjpeg", "640x360"),    # Logitech C920 facing the arm
                "wrist": ("usb-icSpring_icspring_camera-video-index0", "yuyv422", "640x480")}
 def jetson_cam_loop(name, dev, fmt, size):
-    cmd = (f"while [ -f ~/so101/.cams_busy ]; do sleep 1; done; [ -e /dev/v4l/by-id/{dev} ] || exit 3; "
+    cmd = (f"while [ -f ~/so101/.cams_busy ]; do sleep 1; done; "
+           f"[ -f ~/so101/camd.py ] && {{ python3 ~/so101/camd.py tap {name}; rc=$?; [ $rc -eq 3 ] || exit $rc; }}; "   # why: camd (jetson/camd.py) owns the cameras when it runs and serves this same MJPEG; exit 3 = no camd, so the ffmpeg below runs exactly as before (11 Nov 2026, docs/scripted-demos.md)
+           f"[ -e /dev/v4l/by-id/{dev} ] || exit 3; "
            f"ffmpeg -loglevel error -f v4l2 -input_format {fmt} -video_size {size} -framerate 15 -i /dev/v4l/by-id/{dev} -f mjpeg -q:v 6 - & p=$!; "
            "while kill -0 $p 2>/dev/null; do [ -f ~/so101/.cams_busy ] && kill $p; sleep 0.5; done")
     announced = False
