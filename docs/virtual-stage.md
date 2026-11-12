@@ -50,3 +50,12 @@ real follower, the leader and the ghost. The real arm's readings are LeRobot-zer
 
 The old `/tmp/so101_sim_state.json` and `sim_arm` in `/api/state` remain for one release; the page draws them through
 the ghost like any other SIM stream.
+
+## Servo temperature on the real arm
+
+The real follower's six STS3215 bodies are tinted by the live temperature from the telemetry panel's `/api/tele` fetch
+(the motor of each joint is the sts3215 mesh in the joint's parent link). Below 50 C the normal look; 50-60 light amber
+to amber; 60-65 orange (60 = the unattended start gate); 65 and up red (the overnight stop trip); at the firmware cut
+(`temp_cut_c`, 70) red with a slow pulse. Every servo carries a label with the number in C (load and current too on
+hover or while the SERVOS panel is open), and the stage legend shows the 60 / 65 / 70 marks. Telemetry older than 5 s
+(or none) shows the normal look and "no telemetry". The ghost is never tinted. Thresholds come from `TD.marks` / `TD.limits`.
