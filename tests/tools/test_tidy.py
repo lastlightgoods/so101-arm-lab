@@ -423,6 +423,50 @@ def test_a_wing_nut_may_pass_on_the_camera_but_still_has_to_be_placed(td, mk, pl
     res = m.t.ring_pick(m.w.toys[0]); assert res["held"] is True and res["placed"] is False and not res["keep"] and "not_in_ring" in res["keep_reasons"]
 
 
+# ---------------------------------------------------------------- overnight guards (tests/tools/test_overnight_guards.py has the thresholds)
+def hot(mk, **kw):
+    m = mk([toy(5.0, 3.5), toy(5.0, 8.0), toy(6.0, 4.5)], **kw); real = m.t.pl.run_plan; n = [0]
+    def run(plan, max_deg_s):
+        rows = real(plan, max_deg_s); n[0] += 1
+        return [{**r, "tele": {"n": 3, "total_a_max": 1.0, "volt_min": 11.9, "flags": {}, "j": {"shoulder_lift": {"temp_max_c": 65, "load_abs_max_pct": 10.0, "cur_max_a": 0.5, "stall_s_max": 0.0}}}} for r in rows] if n[0] >= 2 else rows
+    m.t.pl.run_plan = run; return m
+
+
+def test_a_hot_servo_in_a_plan_row_stops_the_pick_and_sends_the_arm_home(mk):
+    m = hot(mk); s = m.t.round()
+    assert s["stop"] == "servo_hot" and s["picked"] == 1 and [o for o in m.out if o.get("event") == "trip"][0]["detail"]["temp_c"] == 65 and m.w.names[-1] == "rest" and m.t.in_motion is False
+
+
+def test_max_tries_stops_the_round_cleanly_between_picks(td, mk):
+    m = mk([toy(5.0, 3.5), toy(5.0, 8.0), toy(6.0, 4.5)]); m.guard.lim.max_tries = 2; s = m.t.round()
+    assert s["stop"] == "max_tries" and s["picked"] == 2 and s["trip"]["clean"] is True
+    assert td.loop(types.SimpleNamespace(round=lambda n=None: {"picked": 2, "ok": 2, "failed": 0, "stop": "max_tries"}), 3)["stop"] == "round 1: max_tries"
+
+
+def test_spread_picks_count_as_tries(td, mk):
+    pile = (6.0, 5.0); m = mk([toy(pile[0], pile[1]), toy(pile[0] + 0.35, pile[1] + 0.1)], hold=True, ring=(12.0, 3.5)); m.guard.lim.max_tries = 1
+    s = td.spread_pile(m.t, pile, td.SPREAD_BOX_IN, nudge=False)
+    assert s["stop"] == "max_tries" and s["moved"] == 1 and m.guard.tries == 1
+
+
+def test_max_minutes_stops_between_picks(mk):
+    m = mk([toy(5.0, 3.5), toy(5.0, 8.0)]); m.guard.lim.max_minutes = 1.0; m.guard.check_budget(m.t.ctx); m.w.clock.t += 61
+    s = m.t.round(); assert s["stop"] == "max_minutes" and s["picked"] == 0 and m.w.names == []
+
+
+def test_park_goes_to_rest_only_when_the_arm_is_out_of_rest_and_the_dashboard_reads_back(mk):
+    m = mk([]); assert m.t.park("interrupted")["why"] == "already at rest" and m.w.names == []
+    m.t.in_motion = True; r = m.t.park("exception"); assert r["parked"] is True and m.w.names[-1] == "rest" and m.t.in_motion is False
+    m2 = mk([]); m2.t.in_motion = True; assert m2.t.park("run_plan")["parked"] is False and m2.w.names == [], "after so101-stop no further motion"
+    m3 = mk([]); m3.t.in_motion = True; m3.t.ctx.fetch_state = lambda: (_ for _ in ()).throw(OSError("down")); assert m3.t.park("x")["parked"] is False and m3.w.names == []
+    ev = [o for o in m.out if o.get("event") == "park"]; assert ev and ev[0]["reason"] == "interrupted"
+
+
+def test_in_motion_follows_the_last_waypoint(mk):
+    m = mk([toy(5.0, 3.5)]); m.t.round(max_n=1); assert m.t.in_motion is False, "a finished pick ends at rest"
+    with m.t.guarded(): m.t.pl.run_plan({"waypoints": [dict(name="hover_nut", joints=dict(m.t.pl.REST), desired=dict(m.t.pl.REST), gripper=0, seconds=1.0, settle=0.1, gripper_only=False)]}, 50.0)
+    assert m.t.in_motion is True
+
 # ---------------------------------------------------------------- keep-outs: "be careful not to hurt the frogs" (TC, 11 Nov 2026)
 def frog_frame(cc, table, ring_in, frogs_in):
     import cv2

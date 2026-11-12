@@ -88,7 +88,24 @@ frame rate. So:
   so the session ends within one waypoint stage; if the arm is mid-pick it is sent to rest first. Delete the file before the next session.
 * **The wall STOP** (the panel's emergency button) cuts the arm; the runner finds out at its next `/api/state` poll or when `pick_seq`
   fails, and ends with `panel` or `run_plan`.
-* Ctrl-C ends the session (`end: interrupted`) and still writes the summary; it sends no rest command.
+* Ctrl-C ends the session (`end: interrupted`) and still writes the summary. Since the overnight guards (below) it, SIGTERM (`kill <pid>`) and a crash also send the arm to rest first, under the same rule as a trip.
+* The dashboard STOP (wall, iPad, phone page) now also writes the stop file (`dashboard/server.py write_stop_file`): `so101-stop` only kills what is running that second, and a STOP pressed between two plans used to be missed (the runner restarted `pick_seq`). The file stays until you delete it; the next run then stops at once with `stop_file`.
+
+## Overnight guards (tools/guardrails.py, shared with tools/tidy.py)
+
+`--unattended` (TC's decisions, 11 Nov): caps default to `--max-tries 60` and `--max-minutes 240` (overridable); turns on `--require-health`; refuses to start while `outputs/run/autoloop.stop` exists (it prints the `rm` command, never deletes the file); keeps the Mac awake with `caffeinate -dims -w <own pid>` and refuses to start if that fails (you may also wrap the command in `caffeinate -dims`); and at the end, for any exit reason, after the park, releases the servo torque (`jetson/free_arm.py` over ssh, the lab's own so101-free path without its pkill) ONLY if a fresh `/api/state` readback (src idle-poll, under 3 s old) shows every arm joint within 5 deg of rest. 5 deg: above the 1 to 3.5 deg sag measured 9 Nov and the 4.7 deg worst loaded sag, under the 8 deg motion trip. Otherwise the torque stays ON and a `torque_left_on` line says so. Trips and their sources:
+
+| trip | when | source of the number |
+|---|---|---|
+| `servo_hot` | any servo >= `--temp-limit` (65 C); also no start at 60 C or more (`servo_hot_start`) | servo cut 70 C and idle 52 to 57 C, both read from the real arm on 11 Nov 22:30 |
+| `servo_current` | one arm joint >= 2.7 A, or all servos > 5.0 A | STS3215 stall 2.7 A at 12 V (docs/stronger-arm.md); 5 A supply and board rating. The gripper is exempt |
+| `servo_voltage` | supply < 10.0 V | lab choice (servo_telemetry.VOLT_LOW_V) |
+| `servo_stall` | position error > 6 deg with load >= 50 % for >= 3 s | 6 deg: above the 4.7 deg worst loaded sag, below the 8 deg motion trip; 50 %: assumption, never measured on the arm |
+| `servo_error` | any servo error bit (voltage, sensor, temp, current, overload) | the servo's Status register |
+| `no_servo_telemetry` | `--require-health` and a plan came back without telemetry | |
+| `max_tries`, `max_minutes` | `--max-tries`, `--max-minutes`; clean stops, checked between picks | |
+
+Rows from `pick_seq` carry the servo summary of each waypoint, so heat, current, supply and stall are judged after every plan, not only between cycles; a plan already running is not interrupted. Live `/api/tele` is also read between cycles (only when it has a sample younger than 5 s).
 
 ## What a session leaves behind
 
@@ -119,3 +136,7 @@ and nothing is contacted. `tests/tools/test_autoloop.py` and `test_guardrails.py
    `so101-autoloop --cycles 10 --target 9 6 --session first10`.
 6. **Pass** = at least 9 of the 10 cycles `landed` with `landed_err_mm` <= 15, **and zero trips** (`stops: []`, `end: cycles`). Anything
    else: read the cycle lines and the MLflow runs, fix, and start a new 10.
+
+## Keep-outs (the toy frogs)
+
+Every cycle the runner takes the keep-outs from the scene map and the top frame (`tools/keepout.py`, same rule as tidy). The nut finder never returns a point inside a keep-out and never sees a keep-out object; random targets and reset spots stay at least the keep-out's radius + 40 mm away; a fixed target inside one is refused (`keepout_target`); `guard.check_plan` refuses (`keepout`) any plan whose arm body points (wrist, gripper, tip, with droop) touch a keep-out cylinder on the way between waypoints. `--unattended` stops (`keepout_unknown`) when there is no top frame; attended runs fall back to the size rule and say so once. The keep-out height (60 mm) is an assumption, not measured. The first waypoint's move from wherever the arm currently is (normally rest) is checked only at the waypoint itself.

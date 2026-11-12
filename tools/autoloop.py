@@ -12,7 +12,7 @@ One cycle: guard.before -> TRY (closed-loop pick to the target, tools/pick_loop.
 one MLflow run per cycle in `so101-autoloop`, a parent run and outputs/run/autoloop_<session>.json for the session. Any trip: one JSON line,
 the session ends, the arm goes to rest only if the dashboard still reads back. --dry-run runs the whole loop on a fake arm and a fake dashboard.
 """
-import argparse, contextlib, importlib.util, json, math, os, random, statistics, sys, time, urllib.request
+import argparse, contextlib, importlib.util, json, math, os, random, signal, statistics, sys, time, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXPERIMENT = "so101-autoloop"
@@ -39,14 +39,15 @@ class TripError(Exception):
 def dist_mm(a_in, b_in): return math.hypot(a_in[0] - b_in[0], a_in[1] - b_in[1]) * IN
 
 
-def sample_spot(rng, box_in, others_in, markers_mm, cur_in=None, min_obj=40.0, min_marker=50.0, min_cur=60.0, tries=500):
+def sample_spot(rng, box_in, others_in, markers_mm, cur_in=None, min_obj=40.0, min_marker=50.0, min_cur=60.0, tries=500, avoid=()):
     """A random mat point (inches) inside the safe box, >= min_obj mm from every other object, >= min_marker mm from every marker centre and
-    >= min_cur mm from `cur_in`; None when `tries` draws find none."""
+    >= min_cur mm from `cur_in`, and outside every (centre_in, radius_mm) of `avoid` (the keep-outs); None when `tries` draws find none."""
     x0, y0, x1, y1 = box_in
     for _ in range(tries):
         p = [rng.uniform(x0, x1), rng.uniform(y0, y1)]
         if any(dist_mm(p, o) < min_obj for o in others_in) or any(dist_mm(p, [m[0] / IN, m[1] / IN]) < min_marker for m in markers_mm): continue
         if cur_in is not None and dist_mm(p, cur_in) < min_cur: continue
+        if any(dist_mm(p, c) < r for c, r in avoid): continue
         return [round(p[0], 3), round(p[1], 3)]
     return None
 
@@ -80,15 +81,38 @@ def load_biases(path):
 class Runner:
     """One session. `pl` is the pick_loop module, `guard` a Guard, `ctx` its Ctx (fetch_state / fetch_scene / now / sleep), `track` a LabTrack,
     `rng` a random.Random. Everything that moves the arm goes through pl.run_plan, wrapped so the guard sees every plan and every row."""
-    def __init__(self, pl, cc, table, guard, ctx, cfg, track, rng, out=print, demo=None):
+    def __init__(self, pl, cc, table, guard, ctx, cfg, track, rng, out=print, demo=None, torque_off=None):
         self.pl, self.cc, self.table, self.guard, self.ctx, self.cfg, self.track, self.rng, self.out = pl, cc, table, guard, ctx, cfg, track, rng, out
+        self.torque_off = torque_off   # () -> bool: let go of the servos' torque at the very end of an UNATTENDED session, when the readback says the arm is at rest; None = never
         self.demo = demo   # a tools/demo_session.DemoSession, or None (the default: nothing below changes)
-        self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0; self.tele_rows = []; self.session_tele = []
+        self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0; self.tele_rows = []; self.session_tele = []; self.keepouts = []; self._ko_key = (); self.noted = set()
         self.markers_mm = list((table.get("layout_markers") or {}).values())
         self.pick_args = argparse.Namespace(jaw_open=pl.JAW_OPEN, max_deg_s=pl.SPEED["closed"], wrist_check=False, grasp_aim_mm=pl.GRASP_AIM_MM, grasp_tilt_deg=pl.GRASP_TILT_DEG, grasp_roll=self.opt("grasp_roll", "off"))
         self.biases = load_biases(os.path.join(getattr(pl, "ROOT", "."), "jetson", "calib", "pick_state.json"))   # read only: the pick loop's learned sag biases; the runner never writes that file
 
     def say(self, d): self.out(json.dumps(d))
+
+    # -- keep-outs (the toy frogs: tools/keepout.py; TC 2026-11-11 "be careful not to hurt the frogs")
+    def refresh_keepouts(self):
+        """Keep-outs from the scene map + the top frame -> self.keepouts and guard.keepouts, every cycle. A Trip, or None. Fails closed when the run is unattended and the
+        top frame is not available (keep-outs cannot be computed without it); an attended run falls back to the size rule and says so once."""
+        ko = self.guard.keepout_mod(); objs = (self.scene() or {}).get("objects") or []; img = None
+        try:
+            import cv2, numpy as np
+            raw = self.pl.fetch_top(); img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR) if raw else None
+        except (Exception, SystemExit): img = None
+        if img is None and not self.opt("dry_run", False):   # a dry run has no camera: the fake world has no frogs
+            if self.opt("unattended", False): return self.guard.trip("keepout_unknown", {"why": "no top frame: keep-outs (frogs) cannot be computed"})
+            if "ko" not in self.noted: self.noted.add("ko"); self.say({"note": "keep-outs from the size rule only: no top frame"})
+        self.keepouts = self.guard.keepouts = ko.find_keepouts(objs, img, self.cc, self.table)
+        key = tuple((round(k["x_in"], 1), round(k["y_in"], 1)) for k in self.keepouts)
+        if key != self._ko_key: self._ko_key = key; self.say({"event": "keepouts", "keepouts": [{a: (round(v, 2) if isinstance(v, float) else v) for a, v in k.items()} for k in self.keepouts]})
+        if not self.opt("random_target", False) and self.in_keepout(self.cfg.target, 40.0): return self.guard.trip("keepout_target", {"target_in": list(self.cfg.target)})
+        return None
+
+    def in_keepout(self, xy_in, extra_mm=0.0): return any(dist_mm(xy_in, [k["x_in"], k["y_in"]]) < k["r_mm"] + extra_mm for k in self.keepouts)
+
+    def ko_avoid(self): return [([k["x_in"], k["y_in"]], k["r_mm"] + 40.0) for k in self.keepouts]
 
     def tele_merge(self, summaries):
         """One summary from several waypoint/cycle summaries; None when there are none or pick_loop has no servo_tele (a stub in a test)."""
@@ -137,7 +161,13 @@ class Runner:
     def locate(self, last_in):
         """The nut as (mat_in, pixel, area) or None: pick_loop.find_nut_anywhere when it exists, else the overhead search near the last spot and
         the target, else the scene object nearest the last spot."""
-        pl, cc, tab = self.pl, self.cc, self.table; sc = self.scene(); objs = (sc or {}).get("objects") or []
+        got = self._locate(last_in)
+        if got and self.in_keepout(got[0]):   # the dark-blob fallback and the hints can land on a frog: never pick a keep-out
+            self.locates.append({"rejected_in": [round(v, 3) for v in got[0]], "why": "inside a keep-out"}); return None
+        return got
+
+    def _locate(self, last_in):
+        pl, cc, tab = self.pl, self.cc, self.table; sc = self.scene(); ko = self.guard.keepout_mod(); objs = [o for o in ((sc or {}).get("objects") or []) if not ko.is_keepout_object(o, self.keepouts)]
         try:
             fnn = getattr(pl, "find_nut_near", None); cands = self.nutlike(objs)
             if fnn:   # why: 11 Nov 2026 the dark-blob search took fragments of the printed squares for the nut and missed the real one on a light square; the scene map (polled while objects are pending) answers first, the dark blob is its fallback
@@ -173,8 +203,7 @@ class Runner:
             try: rows = orig(plan, max_deg_s)
             except (Exception, SystemExit) as e: raise TripError(self.guard.trip("run_plan", {"err": f"{type(e).__name__}: {e}"[:300]})) from e   # why: so101-stop kills pick_seq, so the ssh run returns no rows; that is the owner stopping the arm, not a failed try to repeat
             self.tele_rows.extend(r["tele"] for r in rows if r.get("tele"))   # servo health per waypoint, for this cycle's MLflow run
-            for r in rows:
-                if t := self.guard.check_waypoint(r): raise TripError(t)
+            if t := self.guard.check_rows(rows): raise TripError(t)   # motion error, then servo health (heat, current, supply, error bits, stall) of every row
             if self.demo is not None: self.demo.on_plan(plan, rows, max_deg_s)
             return rows
         pl.run_plan = run
@@ -235,7 +264,7 @@ class Runner:
     def reset(self, after_in, objs, nut_obj):
         """Put the nut on a new spot; returns {"spot_in", "error"}."""
         others = [[o["x_in"], o["y_in"]] for o in objs if o is not nut_obj]
-        spot = sample_spot(self.rng, self.cfg.safe_box, others, self.markers_mm, after_in, *self.cfg.spot_mm)
+        spot = sample_spot(self.rng, self.cfg.safe_box, others, self.markers_mm, after_in, *self.cfg.spot_mm, avoid=self.ko_avoid())
         if spot is None: return {"spot_in": None, "error": "no free spot in the safe box"}
         try:   # why: never pl.reset_nut here: it saves its history over the pick loop's own state file and samples its own spot, so spot_in would lie
             nut = self.locate(after_in)
@@ -247,7 +276,7 @@ class Runner:
     def target_for(self, objs):
         if not self.cfg.random_target: return list(self.cfg.target)
         others = [[o["x_in"], o["y_in"]] for o in objs]
-        return sample_spot(self.rng, self.cfg.safe_box, others, self.markers_mm, self.cur_in, *self.cfg.spot_mm) or list(self.cfg.target)
+        return sample_spot(self.rng, self.cfg.safe_box, others, self.markers_mm, self.cur_in, *self.cfg.spot_mm, avoid=self.ko_avoid()) or list(self.cfg.target)
 
     def cycle(self, n):
         """One TRY / JUDGE / RESET; returns (record, Trip or None). A TripError from the guarded run_plan ends the cycle where it stands."""
@@ -306,12 +335,22 @@ class Runner:
             self.frames.clear()
         self.say(rec)
 
+    def send_rest(self, fresh=False):
+        """The rest plan, past the guard's box check (rest is folded on purpose). fresh: the plan that was running when we were interrupted is still on the Jetson, so end that pick_seq first
+        (it finishes the plan, torque stays on) and start a new one for the rest plan; only when a session was open."""
+        if fresh and getattr(self.pl, "SESSION", None) is not None:
+            self.pl.close_session(); self.pl.open_session(True)
+        self.orig_run(self.pl.build_plan(None, None, {}, names=("rest",)), self.pick_args.max_deg_s)
+
+    def park(self, reason, fresh=False):
+        """Every exit path ends here: rest if the arm is not already there (guardrails.park_on_exit says when not). Torque stays on at rest (pick_seq never releases it)."""
+        r = self.guard.park(lambda: self.send_rest(fresh), self.in_motion, reason, self.ctx)
+        if r["parked"]: self.in_motion = False
+        return r
+
     def stop(self, trip, n):
         """Print the trip line; go to rest only if the arm was mid-motion AND the dashboard still reads back (a fresh /api/state poll)."""
-        rest = False
-        if self.in_motion and trip.reason != "run_plan" and self.guard.readback_healthy(self.ctx):   # why: after a dead run_plan (so101-stop, ssh down) no further motion command is sent
-            try: self.orig_run(self.pl.build_plan(None, None, {}, names=("rest",)), self.pick_args.max_deg_s); rest = True
-            except (Exception, SystemExit): rest = False
+        rest = self.park(trip.reason)["parked"]   # why: after a dead run_plan (so101-stop, ssh down) no further motion command is sent
         self.stops.append({**trip.as_json(), "cycle": n}); self.say({"event": "stop" if trip.clean else "trip", "reason": trip.reason, "detail": trip.detail, "cycle": n, "rest": rest})
 
     def summary(self, end, t0):
@@ -325,10 +364,13 @@ class Runner:
 
     def run(self):
         try: return self._run()
-        finally: getattr(self.pl, "close_session", lambda: None)()   # why: 12 Nov 2026 the persistent pick_seq ssh (pick_loop.PickSession) ends with the session, on any exit
+        finally:
+            if getattr(self, "torque_off", None) is not None and self.opt("unattended", False):   # after the park, whatever ended the session
+                self.guard.release_torque(self.ctx, dict(self.pl.REST), getattr(self.pl, "close_session", lambda: None), self.torque_off, self.say)
+            getattr(self.pl, "close_session", lambda: None)()   # why: 12 Nov 2026 the persistent pick_seq ssh (pick_loop.PickSession) ends with the session, on any exit
 
     def _run(self):
-        cfg, t0, end = self.cfg, self.ctx.now(), "cycles"
+        cfg, t0, end = self.cfg, self.ctx.now(), "cycles"; crashed = None
         if self.opt("start_near", None): self.cur_in = [float(v) for v in cfg.start_near]   # the first locate's hint
         with self.track.run(f"autoloop-{cfg.session}", tags={"host": "mac", "session": cfg.session, "kind": "session"}) as parent:
             parent.params({"session": cfg.session, "cycles": cfg.cycles, "minutes": cfg.minutes, "mode": "random" if cfg.random_target else "fixed", "target": f"{cfg.target[0]:g},{cfg.target[1]:g}", "safe_box": ",".join(f"{v:g}" for v in cfg.safe_box),
@@ -337,14 +379,16 @@ class Runner:
             try:
                 for n in range(1, cfg.cycles + 1):
                     if cfg.minutes and self.ctx.now() - t0 >= cfg.minutes * 60: end = "minutes"; break
-                    trip = self.guard.check_before_cycle(self.ctx)
+                    trip = self.guard.check_before_cycle(self.ctx) or self.refresh_keepouts()
                     if not trip and self.demo is not None and not self.demo.alive(): trip = self.guard.trip("recorder", {"err": "the demo recorder does not answer"})   # a recording session without a recorder is a wasted session
                     if trip: self.stop(trip, n); end = trip.reason; break
                     rec, trip = self.cycle(n); self.finish_cycle(rec, trip, getattr(parent, "id", None))
                     if trip: self.stop(trip, n); end = trip.reason; break
             except KeyboardInterrupt:
-                end = "interrupted"; self.say({"event": "interrupted"})
+                end = "interrupted"; self.say({"event": "interrupted", "park": self.park("interrupted", fresh=True)})   # Ctrl-C or SIGTERM: still park
                 if self.demo is not None: self.demo.abort("interrupted")
+            except Exception as e:   # why: any other crash inside the loop (a bug, a full disk) must not leave the arm mid-pick; park, record it, and re-raise after the summary is written
+                crashed = e; end = "error"; self.say({"event": "error", "err": f"{type(e).__name__}: {e}"[:300], "park": self.park("exception", fresh=True)})
             s = self.summary(end, t0)
             if self.demo is not None: s["demos"] = self.demo.finish(s)
             out = os.path.join(cfg.out_dir, f"autoloop_{cfg.session}.json"); os.makedirs(cfg.out_dir, exist_ok=True)
@@ -353,7 +397,9 @@ class Runner:
             if st_all: parent.metrics(self.pl.servo_tele().metrics(st_all))
             parent.metrics({"cycles": s["cycles"], "success_rate": s["success_rate"], "mean_err_mm": s["mean_err_mm"], "median_err_mm": s["median_err_mm"], "duration_s": s["duration_s"], "trips": sum(1 for x in self.stops if not x["clean"])})
             parent.json(s, "summary.json")
-        self.say({"event": "summary", **s}); return s
+        self.say({"event": "summary", **s})
+        if crashed is not None: raise crashed
+        return s
 
 
 # ---------------------------------------------------------------- fakes for --dry-run (and tests/tools/autohelpers.py)
@@ -450,7 +496,7 @@ def make_cfg(a, out_dir):
     box = tuple(a.safe_box) if a.safe_box else SAFE_BOX_IN
     return argparse.Namespace(cycles=a.cycles, minutes=a.minutes, target=tuple(a.target), random_target=a.random_target, safe_box=box, radius_mm=a.radius_mm, session=a.session or time.strftime("%Y%m%d-%H%M%S"),
                               dry_run=a.dry_run, max_retries=a.max_retries, settle_s=a.settle, moved_mm=20.0, spot_mm=(40.0, 50.0, 60.0), out_dir=out_dir,
-                              judge_wait_s=a.judge_wait, save_frames=not a.dry_run, start_near=tuple(a.start_near) if a.start_near else None, grasp_roll=a.grasp_roll)
+                              judge_wait_s=a.judge_wait, save_frames=not a.dry_run, start_near=tuple(a.start_near) if a.start_near else None, grasp_roll=a.grasp_roll, unattended=a.unattended)
 
 
 def demo_mods():
@@ -499,6 +545,9 @@ def build_parser():
     ap.add_argument("--radius-mm", type=float, default=15.0, help="landed = nut within this of the target"); ap.add_argument("--session", default=None)
     ap.add_argument("--dry-run", action="store_true", help="fake arm and fake dashboard: the whole loop, nothing moves"); ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--max-consecutive-failures", type=int, default=3); ap.add_argument("--max-retries", type=int, default=1); ap.add_argument("--lost-after", type=int, default=3)
+    ap.add_argument("--max-minutes", type=float, default=None, help="wall-clock cap for the whole session, checked between cycles (a clean stop); like --minutes, but reported as a guard stop"); ap.add_argument("--max-tries", type=int, default=None, help="cap on cycles attempted, whatever their outcome (a clean stop)")
+    ap.add_argument("--temp-limit", type=float, default=65.0, help="stop when any servo reaches this temperature (C); the servo's own cut is 70"); ap.add_argument("--require-health", action="store_true", help="a plan whose rows carry no servo telemetry is a trip")
+    ap.add_argument("--unattended", action="store_true", help="overnight mode: caps default to --max-tries 60 and --max-minutes 240, implies --require-health, refuses to start while the stop file exists, keeps the Mac awake (caffeinate), and after parking at rest lets go of the servo torque if the readback confirms rest")
     ap.add_argument("--stop-file", default=None, help="while this file exists the session stops cleanly (default ~/so101/outputs/run/autoloop.stop)")
     ap.add_argument("--max-err-deg", type=float, default=8.0); ap.add_argument("--margin-mm", type=float, default=20.0); ap.add_argument("--ceiling-in", type=float, default=4.0)
     ap.add_argument("--grasp-roll", default="off", metavar="auto|off|DEG", help="pick_loop --grasp-roll: turn the wrist so the jaws close across the object's long axis (auto = from the scene map; default off)")
@@ -518,13 +567,17 @@ def build_parser():
 
 def main(argv=None, demo_transport=None):
     a = build_parser().parse_args(argv)
-    gr = load_guardrails(); pl = load_pick_loop(); cc = pl.cam_calib(); out_dir = a.out_dir or os.path.join(ROOT, "outputs", "run")
+    gr = load_guardrails()
+    if a.unattended:   # before anything is loaded: caps default to 60 tries / 240 min, a leftover stop file refuses the start, the Mac is kept awake
+        a.max_tries, a.max_minutes = gr.unattended_gate(a.max_tries, a.max_minutes, a.stop_file or gr.STOP_FILE)
+        if not a.dry_run: gr.start_caffeinate()
+    pl = load_pick_loop(); cc = pl.cam_calib(); out_dir = a.out_dir or os.path.join(ROOT, "outputs", "run")
     tpath = a.table or os.path.join(ROOT, "jetson", "calib", "top_table.json")
     if a.dry_run and not os.path.exists(tpath): tpath = os.path.join(ROOT, "tests", "calib", "fixtures", "top_table_real.json")
     table = json.load(open(tpath))
     if not (table.get("arm_fit") and table.get("arm_base_mm")): raise SystemExit("autoloop needs the arm fit in top_table.json (tools/jog_capture.py --fit)")
     cfg = make_cfg(a, out_dir); rng = random.Random(a.seed)
-    lim = gr.Limits(margin_mm=a.margin_mm, ceiling_in=a.ceiling_in, max_err_deg=a.max_err_deg, lost_after=a.lost_after, max_failures=a.max_consecutive_failures, **({"stop_file": a.stop_file} if a.stop_file else {}))
+    lim = gr.Limits(margin_mm=a.margin_mm, ceiling_in=a.ceiling_in, max_err_deg=a.max_err_deg, lost_after=a.lost_after, max_failures=a.max_consecutive_failures, temp_limit_c=a.temp_limit, max_tries=a.max_tries, max_minutes=a.max_minutes, require_health=a.require_health or a.unattended, **({"stop_file": a.stop_file} if a.stop_file else {}))
     lt = load(os.path.join(ROOT, "jetson", "labtrack.py"), "labtrack_for_autoloop"); demo = None
     if a.dry_run:
         world = FakeWorld(cc, table, gr.fk_mat_mm, nut_in=(6.0, 8.0), rng=rng, miss_p=a.dry_miss); arm = DryArm(cc, table, world)
@@ -534,11 +587,13 @@ def main(argv=None, demo_transport=None):
         if a.record_demos: world.in_jaws = True; demo = make_dry_demo(a, cfg, lt)   # why: the fake wrist camera has no frame, so the jaw check would read "unknown"; the fake world says the nut is held
     else:
         get = lambda path, t: json.load(urllib.request.urlopen(pl.DASH + path, timeout=t))
-        ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True), arm_jobs=jetson_arm_jobs); track = lt.LabTrack(EXPERIMENT)
+        ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True), arm_jobs=jetson_arm_jobs, fetch_tele=lambda: get("/api/tele", 3)); track = lt.LabTrack(EXPERIMENT)
         if a.record_demos: demo = make_real_demo(a, cfg, lt, pl, demo_transport)   # why: before open_session, so the persistent pick_seq is started with --tick-sink
     if not a.dry_run and a.pick_session: pl.open_session(True)   # why: lazy, nothing connects until the first plan; the guarded run_plan wraps pl.run_plan, which uses it, so the guard still sees every plan and row
-    guard = gr.Guard(cc, table, lim, ctx); s = Runner(pl, cc, table, guard, ctx, cfg, track, rng, out=lambda l: print(l, flush=True), demo=demo).run()
+    guard = gr.Guard(cc, table, lim, ctx); s = Runner(pl, cc, table, guard, ctx, cfg, track, rng, out=lambda l: print(l, flush=True), demo=demo, torque_off=(gr.ssh_torque_off if a.unattended and not a.dry_run else None)).run()
     return 0 if all(x["clean"] for x in s["stops"]) else 2
 
 
-if __name__ == "__main__": sys.exit(main())
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))   # why: kill <pid> takes the same clean exit as Ctrl-C (summary written, arm parked)
+    sys.exit(main())

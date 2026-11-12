@@ -49,7 +49,7 @@ class Rig:
     def run(self, capsys, **kw):
         lim = self.gr.Limits(stop_file=self.stop_file, **{**self.limits, **{k: kw.pop(k) for k in list(kw) if k in self.gr.Limits.__dataclass_fields__}})
         guard = self.gr.Guard(self.cc, self.table, lim, self.ctx); track = Recorder(); self.track = track; demo = kw.pop("demo", None)
-        self.runner = self.al.Runner(self.pl, self.cc, self.table, guard, self.ctx, self.cfg(**kw), track, self.rng, out=print, demo=demo); self.guard = guard
+        torque_off = kw.pop("torque_off", None); self.runner = self.al.Runner(self.pl, self.cc, self.table, guard, self.ctx, self.cfg(**kw), track, self.rng, out=print, demo=demo, torque_off=torque_off); self.guard = guard
         summary = self.runner.run()
         out = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
         return summary, out

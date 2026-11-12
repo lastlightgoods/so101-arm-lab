@@ -290,6 +290,7 @@ def test_the_guard_sees_every_plan_and_row_through_a_session(pl, server, monkeyp
     class G:
         def check_plan(self, plan): seen["plans"].append([w["name"] for w in plan["waypoints"]])
         def check_waypoint(self, row): seen["rows"].append(row["wp"])
+        def check_rows(self, rows): [self.check_waypoint(r) for r in rows]
         def trip(self, *a): raise AssertionError(a)
     r = object.__new__(al.Runner); r.pl, r.guard, r.demo, r.tele_rows, r.in_motion = pl, G(), None, [], False
     monkeypatch.setattr(pl, "SESSION", pl.PickSession(argv=server()))

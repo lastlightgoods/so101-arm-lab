@@ -121,3 +121,11 @@ def test_a_failing_health_read_never_stops_the_sequence(seq, capsys, monkeypatch
 def test_arms_busy_flag_is_held_and_released(seq, capsys):
     seq.run()
     assert not (seq.tmp / ".arms_busy").exists() and seq.rob.disconnected
+
+
+def test_rows_carry_the_stall_seconds_and_a_stall_run_survives_the_waypoint_boundary(seq, capsys):
+    """Overnight guard: tools/guardrails.servo_health_trip reads stall_s_max; a stall that spans two waypoints must count as one."""
+    seq.run(); rows = [d for d in lines(capsys) if "wp" in d]
+    assert all("stall_s_max" in e for r in rows for e in r["tele"]["j"].values()) and all(e["stall_s_max"] < 3.0 for r in rows for e in r["tele"]["j"].values()), "the pretend arm's sagging lift is over the stall line for under a second, far under the 3 s trip"
+    tele = seq.mod.Tele(seq.rob); tele.cur.run0 = {"shoulder_lift": 990.0}; tele.sample(force=True); first = tele.cur.run0
+    assert tele.take() is not None and tele.cur.run0 is first, "the new summary keeps the run starts"

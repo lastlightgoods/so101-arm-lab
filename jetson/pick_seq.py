@@ -74,7 +74,8 @@ class Tele:
         except OSError: pass
     def take(self):
         if not self.on: return None
-        out = self.cur.out(); self.cur = servo_telemetry.Summary(); return out if out["n"] else None
+        out = self.cur.out(); nxt = servo_telemetry.Summary(); nxt.run0 = self.cur.run0; self.cur = nxt   # why: a stall that spans two waypoints is one stall; the run start carries over so stall_s_max keeps counting
+        return out if out["n"] else None
 
 
 def read(robot):

@@ -342,12 +342,23 @@ ARM_MODES = {
     "wave":   "so101-demo 1.0",
     "replay": "so101-replay-hub lerobot/svla_so101_pickplace $((RANDOM % 50))",
 }
+def stop_file_path(): return os.environ.get("SO101_STOP_FILE") or os.path.join(os.path.dirname(HERE), "outputs", "run", "autoloop.stop")   # the file tools/guardrails.py checks (STOP_FILE)
+def write_stop_file():
+    """Create the stop file the unattended loops (tools/autoloop.py, tools/tidy.py) check before every cycle and every plan. So101-stop only kills what is running right now;
+    a STOP pressed between two plans never reached a loop that then restarted pick_seq and went on. True when the file exists afterwards. Never raises."""
+    p = stop_file_path()
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f: f.write(time.strftime("%Y-%m-%d %H:%M:%S") + " dashboard STOP\n")
+        return True
+    except OSError as e: log("stop file", repr(e)); return False
 def arm_mode(mode):
     if mode == "stop":
+        stopped = write_stop_file()   # first, so it lands even when the ssh below fails
         r = subprocess.run(["ssh", "-o", "ConnectTimeout=5", JETSON, "bash -lc 'source ~/so101/env.sh; so101-stop' 2>&1 | tail -2"], capture_output=True, text=True, timeout=20)
         subprocess.run(["pkill", "-f", "afplay .*beat_"], capture_output=True)
-        with lock: state["events"].insert(0, {"t": time.time(), "msg": "ARM STOP (dashboard)"})
-        return {"ok": True, "out": r.stdout.strip()[-200:]}
+        with lock: state["events"].insert(0, {"t": time.time(), "msg": "ARM STOP (dashboard)" + ("; stop file written, delete it before the next run" if stopped else "")})
+        return {"ok": True, "out": r.stdout.strip()[-200:], "stop_file": stopped}
     if mode not in ARM_MODES: return {"ok": False, "err": "unknown mode"}
     cmd = ARM_MODES[mode]
     if mode in ("free", "hold") and REC["running"]:

@@ -97,8 +97,23 @@ def test_arm_mode_runs_detached_on_the_edge_host(srv, fake, said, events):
 
 def test_arm_stop_kills_beat_and_logs_event(srv, fake, events):
     fake.on("so101-stop", "stopped\n"); fake.on(lambda a: a[0] == "pkill", "")
-    assert srv.arm_mode("stop") == {"ok": True, "out": "stopped"}
-    assert fake.calls[1][0] == ["pkill", "-f", "afplay .*beat_"] and events() == ["ARM STOP (dashboard)"]
+    assert srv.arm_mode("stop") == {"ok": True, "out": "stopped", "stop_file": True}
+    assert fake.calls[1][0] == ["pkill", "-f", "afplay .*beat_"] and events() == ["ARM STOP (dashboard); stop file written, delete it before the next run"]
+
+
+def test_arm_stop_writes_the_stop_file_the_loops_check_even_when_ssh_fails(srv, fake, tmp_path):
+    """Overnight audit: so101-stop only kills what runs this second; a STOP between two plans must still end tools/autoloop.py and tools/tidy.py (they check this file before every cycle and plan)."""
+    fake.on("so101-stop", "stopped\n"); fake.on(lambda a: a[0] == "pkill", "")
+    path = tmp_path / "run" / "autoloop.stop"; assert not path.exists()
+    srv.arm_mode("stop")
+    assert path.read_text().endswith("dashboard STOP\n")
+    assert srv.stop_file_path() == str(path)
+
+
+def test_stop_file_failure_does_not_break_stop(srv, fake, monkeypatch, logs):
+    fake.on("so101-stop", "stopped\n"); fake.on(lambda a: a[0] == "pkill", "")
+    monkeypatch.setattr(srv.os, "makedirs", lambda *a, **k: (_ for _ in ()).throw(OSError("read-only")))
+    assert srv.arm_mode("stop")["stop_file"] is False
 
 
 def test_spotify_cmd_unknown_makes_no_call(srv, fake):
