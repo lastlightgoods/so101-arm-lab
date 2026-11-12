@@ -84,11 +84,14 @@ def order_toys(toys, verdicts, base_in, ring, how="clean"):
 
 
 # ---------------------------------------------------------------- the grip check
-def grip_decision(g_lift, cam_in_jaws, kind="nut"):
+CAM_ONLY_MIN_SCORE = 0.45   # the wrist camera passes a wing nut on its own only at this ring score or higher: its false positives on empty jaws scored 0.37, 0.388, 0.395 (11-12 Nov 2026)
+
+
+def grip_decision(g_lift, cam_in_jaws, kind="nut", cam_score=None):
     """Held after the lift: the gripper readback > 2.0 (the jaws stopped on something). The wrist camera counts ONLY for a wing nut (its thin wing reads 0.5-1.5, like empty jaws); for a nut or a spacer the
     camera alone never passes. True / False / None (unknown: no readback, and no camera answer that counts)."""
     if g_lift is not None and g_lift > GRIP_EMPTY_MAX: return True
-    if kind == "wing nut" and cam_in_jaws is True: return True
+    if kind == "wing nut" and cam_in_jaws is True and (cam_score is None or cam_score >= CAM_ONLY_MIN_SCORE): return True   # why: 12 Nov a 0.37 false positive sent an empty carry to the ring
     if g_lift is None and not (kind == "wing nut" and cam_in_jaws is not None): return None
     return False   # why: 11 Nov 21:32 pilot: readback 0.54 (empty) but the camera found a false ring (score 0.388) on the mat pattern between the empty jaws, and a mislabelled episode was kept
 
@@ -386,7 +389,7 @@ class Tidy:
             if not (g is not None and g > GRIP_EMPTY_MAX):   # asked for the log (and decisive for a wing nut only)
                 try: cam = orig(None, window or self.pl.JAW_WINDOW, out_path)
                 except Exception: cam = None
-            held = grip_decision(g, (cam or {}).get("in_jaws"), self.cur_kind)
+            held = grip_decision(g, (cam or {}).get("in_jaws"), self.cur_kind, ((cam or {}).get("ring") or {}).get("score"))
             self.grip_log.append({"gripper_after_lift": g, "camera_in_jaws": (cam or {}).get("in_jaws"), "camera_score": ((cam or {}).get("ring") or {}).get("score"), "held": held})
             return {"in_jaws": held, "ring": (cam or {}).get("ring"), "frame": (cam or {}).get("frame"), "window": [], "gripper": g, "camera": (cam or {}).get("in_jaws"), "note": f"gripper after the lift {g}; camera {(cam or {}).get('in_jaws')}"}   # gripper/camera: the keys pick_loop.jaw_check returns since final-correct
         return grip_check

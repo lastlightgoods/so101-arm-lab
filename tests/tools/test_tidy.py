@@ -587,3 +587,9 @@ def test_thin_strips_and_blobs_at_the_mat_border_are_not_toys(td):
     assert not td.is_toy(toy(13.98, 2.16, 18, 4, 72)) and not td.is_toy(toy(13.54, 5.0, 66, 4, 264)), "4 mm-thin strips"
     assert not td.is_toy(toy(11.96, 0.52, 11.8, 11.8, 80)) and not td.is_toy(toy(17.5, 6.0, 14, 8, 84)) and not td.is_toy(toy(0.47, 6.0, 14, 8, 56)), "at the mat's border"
     assert td.is_toy(toy(9.0, 6.0, 12, 10, 88)) and td.is_toy(toy(9.0, 6.0, 7, 7, 40)) and td.is_toy(toy(9.0, 6.0, 24, 10, 180)), "a nut, a standing spacer, a lying spacer"
+
+
+def test_the_camera_alone_needs_a_strong_ring_score_to_pass_a_wing_nut(td):
+    """12 Nov 2026: gripper 0.54 (empty) but the camera said held at score 0.37, and the arm carried nothing to the ring; earlier false positives 0.388, 0.395."""
+    for fp in (0.37, 0.388, 0.395): assert td.grip_decision(0.54, True, "wing nut", fp) is False
+    assert td.grip_decision(0.54, True, "wing nut", 0.6) is True and td.grip_decision(4.5, None, "nut", None) is True and td.grip_decision(0.54, True, "nut", 0.9) is False
