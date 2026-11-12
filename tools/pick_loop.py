@@ -21,7 +21,7 @@ State (biases, place offset, history) persists in --state so later sessions star
 Every pick is also one MLflow run in experiment `so101-picks` (jetson/labtrack.py: params, landing error, per-waypoint sag, the stage
 corrections, the overhead frame at landing, the jaw-check frames, the plan and the state file); with no tracking server the loop runs as before.
 """
-import argparse, json, math, os, random, subprocess, sys, time, urllib.error, urllib.request
+import argparse, json, math, os, random, select, subprocess, sys, time, urllib.error, urllib.request
 import cv2, numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -343,10 +343,95 @@ def build_plan(nut_in, tgt_in, biases, names=None, jaw_open=JAW_OPEN, grasp_h_in
     return {"waypoints": wps}
 
 
-def run_plan(plan, max_deg_s):
+PLAN_TIMEOUT_S = 180
+SERVE_CMD = "cd ~/so101 && source env.sh >/dev/null 2>&1; exec ~/so101/.venv/bin/python pick_seq.py --serve --idle-s 60"
+SESSION = None   # why: 12 Nov 2026 a pick_seq session costs 5.4 s of start-up and a closed-loop pick has 3-5 stages; main() / autoloop set this to a PickSession (--session, default on), run_plan then reuses one connection
+
+
+class SessionDead(Exception):
+    """The persistent pick_seq is gone. `rows` = the waypoint rows of THIS plan already received (non-empty: the arm moved, never replay it silently)."""
+    def __init__(self, msg, rows=()): super().__init__(msg); self.rows = list(rows)
+
+
+class PickSession:
+    """One `ssh jetson ... pick_seq.py --serve` kept for many plans (jetson/pick_seq.py --serve): started lazily on the first plan, plans go in as JSON lines on stdin, rows and
+    {"plan_done": n} come back on stdout. `argv` / `popen` are for tests. A session that never completed a plan (old pick_seq without --serve, arm busy) is `broken`: run_plan uses
+    the scp+ssh path from then on. One that ran plans and then ended (60 s idle timeout, ssh drop) is simply restarted for the next plan."""
+    def __init__(self, argv=None, timeout=PLAN_TIMEOUT_S, popen=subprocess.Popen):
+        self.argv = argv or ["ssh", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3", "jetson", SERVE_CMD]
+        self.timeout, self.popen, self.proc, self.buf, self.served, self.broken, self.starts = timeout, popen, None, b"", 0, False, 0
+
+    def _start(self):
+        self.proc = self.popen(self.argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0); self.buf = b""; self.starts += 1
+
+    def _line(self, deadline):
+        while b"\n" not in self.buf:
+            left = deadline - time.monotonic()
+            if left <= 0: raise subprocess.TimeoutExpired(self.argv, self.timeout)
+            if not select.select([self.proc.stdout], [], [], min(left, 1.0))[0]: continue
+            chunk = os.read(self.proc.stdout.fileno(), 65536)
+            if not chunk: return None
+            self.buf += chunk
+        line, self.buf = self.buf.split(b"\n", 1); return line.decode("utf-8", "replace")
+
+    def _run_once(self, plan, max_deg_s):
+        if self.proc is None or self.proc.poll() is not None: self._start()
+        rows = []; deadline = time.monotonic() + self.timeout
+        try: self.proc.stdin.write((json.dumps({"waypoints": plan["waypoints"], "max_deg_s": max_deg_s, "correct": 0}) + "\n").encode()); self.proc.stdin.flush()
+        except (BrokenPipeError, OSError) as e: raise SessionDead(f"pick_seq session: write failed ({e})") from e
+        while True:
+            try: line = self._line(deadline)
+            except subprocess.TimeoutExpired: self.close(); raise   # why: the arm may still be moving; no replay, the caller trips
+            if line is None: raise SessionDead("pick_seq session ended mid-plan" if rows else "pick_seq session ended before the plan ran", rows)
+            try: d = json.loads(line)
+            except ValueError: continue
+            if not isinstance(d, dict): continue
+            if "wp" in d: rows.append(d)
+            elif "plan_done" in d: self.served += 1; return rows
+            elif d.get("stopped"): self.close(); raise SystemExit("pick_seq was stopped (so101-stop); not retrying")
+            elif d.get("fatal"): raise SessionDead("pick_seq session failed: " + str(d.get("error"))[:200], rows)
+            elif "error" in d: raise SystemExit("pick_seq refused the plan: " + str(d["error"])[:200])
+            elif "bye" in d: raise SessionDead(f"pick_seq session left ({d['bye']})", rows)
+
+    def run(self, plan, max_deg_s):
+        for attempt in (0, 1):
+            try: return self._run_once(plan, max_deg_s)
+            except SessionDead as e:
+                self.close()
+                if e.rows: raise
+                if attempt == 0 and self.served: continue   # why: it served plans and then left (idle timeout): nothing ran, start a new one
+                if not self.served: self.broken = True
+                raise
+
+    def close(self):
+        p, self.proc = self.proc, None
+        if p is None: return
+        try: p.stdin.write(b'{"quit": true}\n'); p.stdin.flush(); p.stdin.close()
+        except (BrokenPipeError, OSError, ValueError): pass
+        try: p.wait(timeout=5)
+        except Exception:
+            try: p.terminate(); p.wait(timeout=3)
+            except Exception:
+                try: p.kill()
+                except Exception: pass
+        try: p.stdout.close()
+        except Exception: pass
+
+
+def run_plan(plan, max_deg_s, session=None):
+    s = session or SESSION
+    if s is not None and not s.broken:
+        try: return s.run(plan, max_deg_s)
+        except SessionDead as e:
+            if e.rows: raise SystemExit(f"{e}; {len(e.rows)} rows of the plan arrived, not replaying it") from e   # why: the arm moved part of the plan; never a silent half-plan
+            print(json.dumps({"note": "pick_seq session unavailable, one attempt on the scp+ssh path", "why": str(e)}), file=sys.stderr, flush=True)
+    return run_plan_ssh(plan, max_deg_s)
+
+
+def run_plan_ssh(plan, max_deg_s):
     p = "/tmp/pick_plan.json"; open("/tmp/pick_plan_local.json", "w").write(json.dumps(plan))
     subprocess.run(["scp", "-q", "/tmp/pick_plan_local.json", f"jetson:{p}"], check=True)
-    out = subprocess.run(["ssh", "-o", "ConnectTimeout=8", "jetson", f"cd ~/so101 && source env.sh >/dev/null 2>&1; ~/so101/.venv/bin/python pick_seq.py --plan {p} --correct 0 --max-deg-s {max_deg_s}"], capture_output=True, text=True, timeout=180)
+    out = subprocess.run(["ssh", "-o", "ConnectTimeout=8", "jetson", f"cd ~/so101 && source env.sh >/dev/null 2>&1; ~/so101/.venv/bin/python pick_seq.py --plan {p} --correct 0 --max-deg-s {max_deg_s}"], capture_output=True, text=True, timeout=PLAN_TIMEOUT_S)
     rows = []
     for line in out.stdout.splitlines():
         try: d = json.loads(line)
@@ -354,6 +439,18 @@ def run_plan(plan, max_deg_s):
         if "wp" in d: rows.append(d)
     if not rows: raise SystemExit("pick_seq produced no waypoint rows:\n" + out.stdout[-800:] + out.stderr[-800:])
     return rows
+
+
+def open_session(on=True):
+    """Install a PickSession as the module's session (lazy: nothing connects until the first plan). Returns it, or None when off."""
+    global SESSION
+    SESSION = PickSession() if on else None; return SESSION
+
+
+def close_session():
+    global SESSION
+    s, SESSION = SESSION, None
+    if s is not None: s.close()
 
 
 def fk_mat(cc, table, joints):
@@ -657,11 +754,19 @@ def parser():
     ap.add_argument("--reset", action="store_true", help="instead of the runs: pick the nut from wherever it is and place it at a random clear spot inside --safe-box")
     ap.add_argument("--safe-box", type=float, nargs=4, default=list(SAFE_BOX), metavar=("X0", "Y0", "X1", "Y1"), help=f"--reset: the box the nut is dropped in, mat inches (default {' '.join(map(str, SAFE_BOX))})")
     ap.add_argument("--seed", type=int, default=None, help="--reset: seed for the target sampling (default: random)")
+    ap.add_argument("--session", dest="session", action="store_true", default=True, help="one persistent pick_seq --serve over ssh for all stages (saves ~5 s of start-up per stage; needs jetson/pick_seq.py with --serve; falls back to scp+ssh per stage) (default)")
+    ap.add_argument("--no-session", dest="session", action="store_false", help="one scp+ssh+pick_seq start per stage, as before 12 Nov 2026")
     return ap
 
 
 def main():
-    a = parser().parse_args(); cc = cam_calib(); table = json.load(open(os.path.join(ROOT, "jetson", "calib", "top_table.json"))); track = labtrack()
+    a = parser().parse_args(); open_session(a.session)
+    try: _main(a)
+    finally: close_session()   # why: the ssh must not outlive the pick, on any exit
+
+
+def _main(a):
+    cc = cam_calib(); table = json.load(open(os.path.join(ROOT, "jetson", "calib", "top_table.json"))); track = labtrack()
     mode = "closed" if a.closed_loop else "open"; a.max_deg_s = a.max_deg_s if a.max_deg_s is not None else SPEED[mode]
     if a.closed_loop and not (table.get("arm_fit") and table.get("arm_base_mm")): raise SystemExit("closed loop needs the arm fit in jetson/calib/top_table.json (tools/jog_capture.py --fit); or run --open-loop")
     wpath = os.path.join(ROOT, "jetson", "calib", "wrist_campose.json"); wpose = json.load(open(wpath)) if a.wrist_check and os.path.exists(wpath) else None

@@ -323,6 +323,10 @@ class Runner:
                 "pre_resets": sum(1 for c in self.cycles if "pre_reset" in c)}
 
     def run(self):
+        try: return self._run()
+        finally: getattr(self.pl, "close_session", lambda: None)()   # why: 12 Nov 2026 the persistent pick_seq ssh (pick_loop.PickSession) ends with the session, on any exit
+
+    def _run(self):
         cfg, t0, end = self.cfg, self.ctx.now(), "cycles"
         if self.opt("start_near", None): self.cur_in = [float(v) for v in cfg.start_near]   # the first locate's hint
         with self.track.run(f"autoloop-{cfg.session}", tags={"host": "mac", "session": cfg.session, "kind": "session"}) as parent:
@@ -479,6 +483,8 @@ def build_parser():
     ap.add_argument("--demo-vcodec", default=None, help="video codec for the demo datasets (dry run default h264; the Jetson recorder defaults to libsvtav1)")
     ap.add_argument("--demo-root", default=None, help="folder for the demo datasets (default <out-dir>/demos/<session>)"); ap.add_argument("--demo-repo", default="lastlight/so101-nut-pick", help="repo id of the kept-episode dataset; the rejects go to <repo>-rejects")
     ap.add_argument("--lab-config", default=None, help="JSON of jetson/lab_config.LabConfig fields (default: the stock-v1 labels)"); ap.add_argument("--lighting-tag", default=None, help="lighting label stored with every episode (vary it between sessions)")
+    ap.add_argument("--pick-session", dest="pick_session", action="store_true", default=True, help="one persistent pick_seq --serve ssh for all plans (saves ~5 s of start-up per stage); falls back to scp+ssh per stage (default)")
+    ap.add_argument("--no-pick-session", dest="pick_session", action="store_false", help="one scp+ssh+pick_seq start per stage, as before 12 Nov 2026")
     ap.add_argument("--dry-miss", type=float, default=0.1, help="--dry-run: chance that a pick misses the nut"); ap.add_argument("--out-dir", default=None)
     return ap
 
@@ -503,6 +509,7 @@ def main(argv=None):
     else:
         get = lambda path, t: json.load(urllib.request.urlopen(pl.DASH + path, timeout=t))
         ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True), arm_jobs=jetson_arm_jobs); track = lt.LabTrack(EXPERIMENT)
+    if not a.dry_run and a.pick_session: pl.open_session(True)   # why: lazy, nothing connects until the first plan; the guarded run_plan wraps pl.run_plan, which uses it, so the guard still sees every plan and row
     guard = gr.Guard(cc, table, lim, ctx); s = Runner(pl, cc, table, guard, ctx, cfg, track, rng, out=lambda l: print(l, flush=True), demo=demo).run()
     return 0 if all(x["clean"] for x in s["stops"]) else 2
 

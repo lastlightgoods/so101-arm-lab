@@ -10,8 +10,13 @@ LAST waypoint (target - reached) for the five arm joints. That cancels most of t
 measured at 1-3.5 deg on 9 Nov. Prints one JSON line per waypoint with target / reached / max error. Refuses to run
 while a lerobot job holds the arm; holds ~/so101/.arms_busy so the dashboard poller lets go of the port.
 --tick-sink [PATH] (default OFF) also appends one JSON line per command tick (action sent + state read just before it) for jetson/demo_recorder.py.
+
+--serve (instead of --plan): connect ONCE and read one JSON object per stdin line, for tools/pick_loop.py's PickSession (start-up is 5.4 s, a closed-loop pick has 3-5 stages):
+  {"waypoints": [...], "max_deg_s": 50, "correct": 0}   run that plan exactly as --plan would (same rows, then {"plan_done": n, "total_s": s})
+  {"quit": true}                                        disconnect and exit
+Anything else gets {"error": ...} and the arm keeps holding; no shell, no eval. Exits (disconnect, busy file removed) on EOF, quit, SIGTERM ({"stopped": true}) and after --idle-s without a plan.
 """
-import argparse, json, math, os, signal, subprocess, sys, time
+import argparse, json, math, os, select, signal, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try: import servo_telemetry   # read-only servo health block; absent = the sequence runs exactly as before
 except ImportError: servo_telemetry = None
@@ -144,32 +149,112 @@ class TickSink:
         except OSError: pass
 
 
+def run_waypoints(robot, plan, correct, max_deg_s, tele, sink, t0):
+    """The shared part of --plan and --serve: the start row, then each waypoint's eased move, settle, readback, bias and row. Returns the last pose read."""
+    cur = read(robot); print(json.dumps({"start": {j: round(v, 2) for j, v in cur.items()}}), flush=True)
+    bias = {j: 0.0 for j in ARM}
+    for wp in plan:
+        tgt = {j: float(wp["joints"].get(j, cur[j])) for j in ARM}; tgt["gripper"] = float(wp.get("gripper", cur["gripper"]))
+        cmd = {j: tgt[j] + correct * bias[j] for j in ARM}; cmd["gripper"] = tgt["gripper"]
+        cmd["wrist_flex"] = max(-93.0, min(93.0, cmd["wrist_flex"]))
+        secs = move(robot, cur, cmd, float(wp.get("seconds", 1.5)), max_deg_s, tele, sink, wp.get("name")); time.sleep(float(wp.get("settle", 0.3)))
+        tele.sample(force=True); got = read(robot); err = {j: tgt[j] - got[j] for j in ARM}
+        if wp.get("gripper_only"): err = {j: 0.0 for j in ARM}   # a pure gripper move says nothing new about arm sag
+        bias = ({j: err[j] for j in ARM} if not wp.get("gripper_only") else bias) if correct > 0 else bias   # why: feed forward the LAST error only; summing them acted like an integrator and overshot (9 Nov: 24 mm miss)
+        print(json.dumps({"wp": wp.get("name"), "seconds": round(secs, 2), "t": round(time.time() - t0, 1), "target": {j: round(tgt[j], 2) for j in J},
+                          "reached": {j: round(got[j], 2) for j in J}, "max_err_deg": round(max(abs(err[j]) for j in ARM), 2),
+                          **({"tele": tw} if (tw := tele.take()) else {})}), flush=True)
+        cur = got
+    return cur
+
+
+def check_plan(msg):
+    """Why the request is not a plan we will run, or None. Checked BEFORE the arm moves (a bad number halfway would leave it between waypoints)."""
+    wps = msg.get("waypoints")
+    if not isinstance(wps, list) or not wps: return "waypoints must be a non-empty list"
+    try:
+        for wp in wps:
+            if not isinstance(wp, dict) or not isinstance(wp.get("joints", {}), dict): return "each waypoint must be an object with a joints object"
+            for v in wp.get("joints", {}).values(): float(v)
+            for k in ("gripper", "seconds", "settle"):
+                if k in wp: float(wp[k])
+        v, c = float(msg.get("max_deg_s", 80.0)), float(msg.get("correct", 0.0))
+    except (TypeError, ValueError): return "a number in the plan is not a number"
+    return None if v > 0 and math.isfinite(v) and math.isfinite(c) else "max_deg_s must be positive and finite"
+
+
+class LineReader:
+    """Lines from a file descriptor with a timeout (select + os.read, so a buffered stdin cannot hide a ready line). next(timeout) -> str, None at EOF, raises TimeoutError."""
+    MAX = 4_000_000   # a plan is a few KB; a longer line is garbage and is dropped, not buffered forever
+    def __init__(self, fd=0): self.fd, self.buf, self.eof, self.skip = fd, b"", False, False
+    def next(self, timeout):
+        end = time.monotonic() + timeout
+        while True:
+            if b"\n" in self.buf:
+                line, self.buf = self.buf.split(b"\n", 1)
+                if self.skip: self.skip = False; return "\x00"
+                return line.decode("utf-8", "replace")
+            if len(self.buf) > self.MAX: self.buf, self.skip = b"", True
+            if self.eof:
+                last, self.buf = self.buf, b""; return last.decode("utf-8", "replace") if last.strip() else None
+            left = end - time.monotonic()
+            if left <= 0: raise TimeoutError
+            if not select.select([self.fd], [], [], left)[0]: continue
+            chunk = os.read(self.fd, 65536)
+            if chunk: self.buf += chunk
+            else: self.eof = True
+
+
+def serve(a, reader=None):
+    """--serve: one connection, many plans. Returns why it ended: eof | quit | idle | term | error."""
+    if lerobot_running() and not a.force: raise SystemExit("a lerobot job (teleop/record/rollout) is holding the arm; so101-stop first")
+    reader = reader or LineReader(0); made = not os.path.exists(BUSY)
+    if made: open(BUSY, "w").close(); time.sleep(1.0)
+    robot = None; why = "error"; n = 0
+    try:
+        robot = connect(); tele = Tele(robot); print(json.dumps({"ready": True}), flush=True)
+        while True:
+            try: line = reader.next(a.idle_s)
+            except TimeoutError: why = "idle"; break
+            if line is None: why = "eof"; break
+            if not line.strip(): continue
+            try: msg = json.loads(line)
+            except ValueError: msg = None
+            if not isinstance(msg, dict): print(json.dumps({"error": "not a JSON object"}), flush=True); continue
+            if msg == {"quit": True}: why = "quit"; break
+            if set(msg) - {"waypoints", "max_deg_s", "correct"}: print(json.dumps({"error": "only a plan or quit is accepted"}), flush=True); continue
+            if (bad := check_plan(msg)): print(json.dumps({"error": bad}), flush=True); continue
+            t0 = time.time(); sink = TickSink(a.tick_sink or os.environ.get("SO101_TICK_SINK") or DEFAULT_TICK_SINK) if a.tick_sink is not None else None   # why: one sink file per plan, as one --plan run per stage made today
+            try: run_waypoints(robot, msg["waypoints"], float(msg.get("correct", 0.0)), float(msg.get("max_deg_s", a.max_deg_s)), tele, sink, t0)
+            finally:
+                if sink is not None: sink.close()
+            n += 1; print(json.dumps({"plan_done": n, "total_s": round(time.time() - t0, 1)}), flush=True)
+    except KeyboardInterrupt: why = "term"; print(json.dumps({"stopped": True}), flush=True)   # why: so101-stop sends TERM; torque stays on, the arm holds where it is
+    except Exception as e: why = "error"; print(json.dumps({"error": f"{type(e).__name__}: {e}"[:300], "fatal": True}), flush=True)   # why: a bus fault mid-plan; leave rather than keep taking plans
+    finally:
+        if robot is not None: robot.disconnect()
+        if made:
+            try: os.remove(BUSY)
+            except FileNotFoundError: pass
+    print(json.dumps({"bye": why}), flush=True); return why
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--plan", required=True); ap.add_argument("--correct", type=float, default=0.8, help="gain on the last waypoint's error fed into the next command (0 = off)")
+    ap.add_argument("--plan"); ap.add_argument("--correct", type=float, default=0.8, help="gain on the last waypoint's error fed into the next command (0 = off)")
     ap.add_argument("--max-deg-s", type=float, default=80.0); ap.add_argument("--force", action="store_true")
+    ap.add_argument("--serve", action="store_true", help="connect once and run plans read as JSON lines on stdin (see above)"); ap.add_argument("--idle-s", type=float, default=60.0, help="--serve: exit after this long with no plan")
     ap.add_argument("--tick-sink", nargs="?", const="", default=None, metavar="PATH", help=f"write per-tick action and state here for the demo recorder (default off; no value = $SO101_TICK_SINK or {DEFAULT_TICK_SINK})")
     a = ap.parse_args()
+    if a.serve: serve(a); return
+    if not a.plan: ap.error("--plan or --serve is required")
     if lerobot_running() and not a.force: raise SystemExit("a lerobot job (teleop/record/rollout) is holding the arm; so101-stop first")
     plan = json.load(open(a.plan))["waypoints"]
     made = not os.path.exists(BUSY)
     if made: open(BUSY, "w").close(); time.sleep(1.0)
     robot = connect(); t0 = time.time(); tele = Tele(robot); sink = TickSink(a.tick_sink or os.environ.get("SO101_TICK_SINK") or DEFAULT_TICK_SINK) if a.tick_sink is not None else None
     try:
-        cur = read(robot); print(json.dumps({"start": {j: round(v, 2) for j, v in cur.items()}}), flush=True)
-        bias = {j: 0.0 for j in ARM}
-        for wp in plan:
-            tgt = {j: float(wp["joints"].get(j, cur[j])) for j in ARM}; tgt["gripper"] = float(wp.get("gripper", cur["gripper"]))
-            cmd = {j: tgt[j] + a.correct * bias[j] for j in ARM}; cmd["gripper"] = tgt["gripper"]
-            cmd["wrist_flex"] = max(-93.0, min(93.0, cmd["wrist_flex"]))
-            secs = move(robot, cur, cmd, float(wp.get("seconds", 1.5)), a.max_deg_s, tele, sink, wp.get("name")); time.sleep(float(wp.get("settle", 0.3)))
-            tele.sample(force=True); got = read(robot); err = {j: tgt[j] - got[j] for j in ARM}
-            if wp.get("gripper_only"): err = {j: 0.0 for j in ARM}   # a pure gripper move says nothing new about arm sag
-            bias = ({j: err[j] for j in ARM} if not wp.get("gripper_only") else bias) if a.correct > 0 else bias   # why: feed forward the LAST error only; summing them acted like an integrator and overshot (9 Nov: 24 mm miss)
-            print(json.dumps({"wp": wp.get("name"), "seconds": round(secs, 2), "t": round(time.time() - t0, 1), "target": {j: round(tgt[j], 2) for j in J},
-                              "reached": {j: round(got[j], 2) for j in J}, "max_err_deg": round(max(abs(err[j]) for j in ARM), 2),
-                              **({"tele": tw} if (tw := tele.take()) else {})}), flush=True)
-            cur = got
+        run_waypoints(robot, plan, a.correct, a.max_deg_s, tele, sink, t0)
         print(json.dumps({"done": True, "total_s": round(time.time() - t0, 1), **({"tele": tele.all.out()} if tele.on and tele.all.n else {})}), flush=True)
     finally:
         if sink is not None: sink.close()
