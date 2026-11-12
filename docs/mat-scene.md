@@ -348,3 +348,7 @@ write-back that keeps `arm_fit`, the holding path, the moved-mat path, fresh fol
 runs a subprocess);
 `tests/ui/test_stage_scene.py` (`obj_<id>` at the expected world position via `__matToWorld` in the right colour, fade and
 removal after two empty polls, the captions, the live-solve refresh, the chip parts, and the button's POST).
+
+## What each object is (kind, ring, keep-outs)
+
+`/api/scene` also carries `kind` for every object (`nut`, `wing nut`, `spacer`, `toy?`, `ring`, `ring wall`, `keep-out`), `keepout` ({r_mm, h_mm, why, colour_frac} or null), `label_src` (`rules`; `detector` once a detector feeds `label_objects(detections=...)`), plus top-level `ring` ({x_in, y_in, r_mm, h_mm} or null) and `keepouts` (one per keep-out, with the object id). They come from `tools/scene_labels.py` (shared with `tools/tidy.py`; light, never imports tidy), run in `scene_step` on the frame already decoded, at most once per 0.45 s and cached; an object newer than the cache has `kind: null` for up to that long. Keep-out height (60 mm) is assumed. The page colours the 3D stage and the TOP feed overlay by kind.

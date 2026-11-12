@@ -53,57 +53,15 @@ ko = load(os.path.join(ROOT, "tools", "keepout.py"), "keepout_for_tidy")   # kee
 def dist_mm(a, b): return math.hypot(a[0] - b[0], a[1] - b[1]) * IN
 
 
-# ---------------------------------------------------------------- the ring in the top frame
-def fit_circle(xs, ys):
-    """Least-squares circle through points -> (cx, cy, r)."""
-    xs, ys = np.asarray(xs, float), np.asarray(ys, float); A = np.c_[2 * xs, 2 * ys, np.ones(len(xs))]; s = np.linalg.lstsq(A, xs ** 2 + ys ** 2, rcond=None)[0]
-    return float(s[0]), float(s[1]), float(math.sqrt(max(s[2] + s[0] ** 2 + s[1] ** 2, 0.0)))
-
-
-def blue_pixels(img):
-    b, g, r = [img[:, :, i].astype(int) for i in range(3)]; m = ((b - r) > 60) & ((b - g) > 25) & (b > 90); m[int(img.shape[0] * BLUE_ROWS):, :] = False; return np.nonzero(m)
-
-
-def ring_band(img, cc, table, min_px=150, r_mm=(30.0, 65.0)):
-    """(ys, xs, (cx, cy, r_px)) of the ring's blue band: the largest connected blue region whose least-squares circle is ring-sized (r_mm) and whose pixels lie on
-    that circle (an annulus, not a filled blob). Other blue things on the mat (the toy frogs) are separate regions and fail one test or the other. None when none passes."""
-    b, g, r = [img[:, :, i].astype(int) for i in range(3)]; m = ((b - r) > 60) & ((b - g) > 25) & (b > 90); m[int(img.shape[0] * BLUE_ROWS):, :] = False
-    for ys, xs in ko.blue_components(m, min_px):
-        cx, cy, rp = fit_circle(xs, ys)
-        if rp <= 0: continue
-        X, Y = cc.pixel_to_table(table, cx, cy); X2, Y2 = cc.pixel_to_table(table, cx + rp, cy); rmm = math.hypot(X2 - X, Y2 - Y)
-        if r_mm[0] <= rmm <= r_mm[1] and float(np.median(np.abs(np.hypot(xs - cx, ys - cy) - rp))) < 0.2 * rp: return ys, xs, (cx, cy, rp)
-    return None
-
-
-def fit_ring(jpeg, cc, table, min_px=150, r_mm=(30.0, 65.0)):
-    """(x_in, y_in) of the ring's centre from one top frame (ring_band), pixel -> mat. None when no ring-shaped blue band is seen.
-    why: 11 Nov 22:4x two blue toy frogs pulled the old all-blue-pixels fit 4 in off the ring."""
-    import cv2
-    img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR) if isinstance(jpeg, (bytes, bytearray)) else jpeg
-    band = ring_band(img, cc, table, min_px, r_mm)
-    if band is None: return None
-    X, Y = cc.pixel_to_table(table, band[2][0], band[2][1]); return (X / IN, Y / IN)
-
-
-# ---------------------------------------------------------------- the toys
-def toy_kind(o):
-    """(kind, aim_mm) from the scene map's size and aspect: nut (round, ~10-12 mm), wing nut (longer, ratio 1.3-1.8), spacer (a standing ~6 mm one or a lying cylinder, ratio >= 1.8), unknown (too big)."""
-    w, h = float(o.get("w_mm") or 0), float(o.get("h_mm") or 0); long_, short = max(w, h), max(min(w, h), 1e-6)
-    if long_ > TOY_LONG_MM or long_ <= 0: return "unknown", 4.0
-    if long_ <= 8.0 or long_ / short >= 1.8: return "spacer", 5.0
-    if long_ / short >= 1.3: return "wing nut", 4.0
-    return "nut", 4.0
+# ---------------------------------------------------------------- the ring in the top frame, the toy kinds (shared with the dashboard: tools/scene_labels.py)
+sl = load(os.path.join(ROOT, "tools", "scene_labels.py"), "scene_labels_for_tidy")
+fit_circle, blue_pixels, ring_band, fit_ring, toy_kind, on_ring_wall = sl.fit_circle, sl.blue_pixels, sl.ring_band, sl.fit_ring, sl.toy_kind, sl.on_ring_wall
 
 
 def is_toy(o, area_max=2000.0, long_max=60.0, ring=None):
     """A scene blob that is a toy: not the whole ring (104 mm across) and, with `ring`, not a piece of the ring's wall (on_ring_wall)."""
     if not ("x_in" in o and "y_in" in o and float(o.get("area_mm2") or 0) < area_max and max(float(o.get("w_mm") or 0), float(o.get("h_mm") or 0)) <= long_max): return False
     return ring is None or not on_ring_wall(o, ring)
-
-
-def on_ring_wall(o, ring, inner_mm=RING_WALL_IN_MM, outer_mm=RING_WALL_OUT_MM):   # why: 11 Nov 22:0x the scene map cut the standing ring into 5 toy-sized blobs 35-54 mm from its fitted centre; tidy would have tried to pick them
-    return RING_R_MM - inner_mm < dist_mm((o["x_in"], o["y_in"]), ring) < RING_R_MM + outer_mm
 
 
 def inside_ring(o, ring, r_mm=RING_DONE_MM): return dist_mm((o["x_in"], o["y_in"]), ring) < r_mm

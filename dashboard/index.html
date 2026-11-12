@@ -91,7 +91,7 @@ main{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:min-content;gap:1
 #shellbody{height:calc(100% - 38px);overflow:hidden;padding:8px 14px;font-family:var(--mono);font-size:12.5px;line-height:1.45;display:flex;flex-direction:column;justify-content:flex-end}
 .sc{margin-top:8px}.sc .d{color:var(--acc);font-weight:600;text-shadow:var(--glow)}.sc .d i{color:var(--dim);font-style:normal;margin-right:8px}.sc .c{color:#9fc4ff;white-space:pre-wrap;word-break:break-all;max-height:3.6em;overflow:hidden}.sc .c::before{content:"$ ";color:var(--dim)}
 .sc .o{color:var(--dim);white-space:pre-wrap;word-break:break-all;max-height:4.4em;overflow:hidden;border-left:2px solid #1a2230;padding-left:8px;margin-top:2px}.sc.run .d::after{content:" ▮";color:var(--acc2);animation:pulse 1s infinite}
-.armwrap{display:flex;flex-direction:column;gap:8px}#arm3d{position:relative;width:100%;height:400px;border-radius:8px;overflow:hidden;background:radial-gradient(ellipse at 50% 80%,#101826,#07090d 70%)}#arm3d canvas{display:block}#arm3d .matcap{position:absolute;left:10px;bottom:10px;z-index:2;font:600 11px/1.4 var(--mono);letter-spacing:.14em;color:var(--dim);background:rgba(13,17,25,.78);border:1px solid var(--line);border-radius:4px;padding:7px 10px;max-width:calc(100% - 20px);pointer-events:none}#arm3d .matcap:empty{display:none}   /* mat-map caption: why the map is empty */
+.armwrap{display:flex;flex-direction:column;gap:8px}#arm3d{position:relative;width:100%;height:400px;border-radius:8px;overflow:hidden;background:radial-gradient(ellipse at 50% 80%,#101826,#07090d 70%)}#arm3d canvas{display:block}#arm3d .scenelegend{position:absolute;right:10px;bottom:10px;z-index:2;display:none;font:700 12px/1.5 var(--font);letter-spacing:.14em;color:var(--dim);background:rgba(13,17,25,.78);border:1px solid var(--line);border-radius:4px;padding:6px 10px;pointer-events:none}#arm3d .scenelegend.on{display:block}#arm3d .scenelegend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}#arm3d .scenelegend span{display:block;white-space:nowrap}#arm3d .matcap{position:absolute;left:10px;bottom:10px;z-index:2;font:600 11px/1.4 var(--mono);letter-spacing:.14em;color:var(--dim);background:rgba(13,17,25,.78);border:1px solid var(--line);border-radius:4px;padding:7px 10px;max-width:calc(100% - 20px);pointer-events:none}#arm3d .matcap:empty{display:none}   /* mat-map caption: why the map is empty */
 .armctl{position:absolute;top:8px;right:8px;display:flex;gap:4px;z-index:2}.armctl button{font:600 10px/1 var(--mono);letter-spacing:.15em;color:var(--dim);background:rgba(13,17,25,.85);border:1px solid var(--line);border-radius:4px;padding:6px 8px;cursor:pointer}
 .armctl button:hover{color:var(--ink);border-color:#2a3a55}
 .modes{display:flex;gap:10px;margin:-2px 0 8px;align-items:stretch}
@@ -398,6 +398,8 @@ policyPoll();setInterval(policyPoll,15000);
 // same way back. Nothing is drawn while uncalibrated. calOverlay() builds one overlay per feed; the TOP one keeps the original ids (#calov,
 // #calchip, #calread, #calbg) and globals (CAL, CALHI, calTap, calDraw, calClear, CALDBG), the FRONT one carries a _front suffix (#calov_front,
 // CALDBG_front). One shared calibPoll() feeds both (the 3D stage listens to it too: never add a second poller under this name).
+// what each mat-map blob is (kind from /api/scene), one colour table for the 3D stage and the TOP feed overlay
+const KIND_HEX={nut:0x4fd6ff,'wing nut':0xffd166,spacer:0x7cff6b,'toy?':0xc9c2b2,ring:0x2b8cff,'ring wall':0x2b8cff,'keep-out':0xff5a3c},KIND_TXT={nut:'NUT','wing nut':'WING NUT',spacer:'SPACER','toy?':'TOY?'};
 let CAL=null,CALHI=null;
 const inv3=m=>{const [[a,b,c],[d,e,f],[g,h,i]]=m,A=e*i-f*h,B=f*g-d*i,C=d*h-e*g,det=a*A+b*B+c*C;if(!det||!isFinite(det))return null;const s=1/det;
  return[[A*s,(c*h-b*i)*s,(b*f-c*e)*s],[B*s,(a*i-c*g)*s,(c*d-a*f)*s],[C*s,(b*g-a*h)*s,(a*e-b*d)*s]]};
@@ -430,6 +432,13 @@ function calOverlay(o){   // o: {img: '#cam_x', cam: 'top'|'front', suffix: '' |
   arrow([0,0],[2,0],c1,'X');arrow([0,0],[0,2],c2,'Y');                                                                                                           // mat axes at the origin
   for(const [id,p] of Object.entries(S.cal.layout_markers_in||{})){const [cx,cy]=matToDisp(R,p[0],p[1]);D.markers[id]=[cx,cy];x.strokeStyle=c1;x.fillStyle=c1;x.lineWidth=1.5;x.strokeRect(cx-5,cy-5,10,10);x.fillText(id,cx+8,cy-9)}   // marker centres
   const a=S.cal.arm;if(a&&a.base_mm){const bx=a.base_mm[0]/25.4,by=a.base_mm[1]/25.4,y=(a.yaw_deg||0)*Math.PI/180,[px,py]=matToDisp(R,bx,by);D.base=[px,py];x.fillStyle=ink;x.beginPath();x.arc(px,py,4,0,7);x.fill();arrow([bx,by],[bx+2*Math.cos(y),by+2*Math.sin(y)],ink,'ARM')}   // base + forward (+X arm)
+  if(o.cam==='top'&&window.sceneLast){   // what the mat map found, labelled on the feed: the ring, each keep-out as a circle of its own radius, each toy with its kind (same colours as the 3D stage)
+   const sc=window.sceneLast,E=D.scene={ring:null,keepouts:[],labels:[]},hs=h=>'#'+h.toString(16).padStart(6,'0'),disc=(xin,yin,rmm)=>{const p=matToDisp(R,xin,yin),q=matToDisp(R,xin+rmm/25.4,yin);return[p[0],p[1],Math.hypot(q[0]-p[0],q[1]-p[1])]};
+   x.font='700 12px '+css('--font');x.textAlign='center';x.textBaseline='middle';x.lineWidth=2;
+   if(sc.ring&&+sc.ring.r_mm>0){const [cx,cy,r]=disc(sc.ring.x_in,sc.ring.y_in,sc.ring.r_mm),col=hs(KIND_HEX.ring);x.strokeStyle=col;x.fillStyle=col;x.beginPath();x.arc(cx,cy,r,0,7);x.stroke();x.fillText('RING',cx,cy-r-8);E.ring=[cx,cy,r]}
+   for(const k of sc.keepouts||[]){if(!(+k.r_mm>0))continue;const [cx,cy,r]=disc(k.x_in,k.y_in,k.r_mm),col=hs(KIND_HEX['keep-out']),t='KEEP OUT · '+String(k.why||'').toUpperCase();x.strokeStyle=col;x.fillStyle=col;x.globalAlpha=.16;x.beginPath();x.arc(cx,cy,r,0,7);x.fill();x.globalAlpha=1;x.setLineDash([6,4]);x.beginPath();x.arc(cx,cy,r,0,7);x.stroke();x.setLineDash([]);x.fillText(t,cx,cy-r-8);E.keepouts.push([cx,cy,r,t])}
+   for(const ob of sc.objects||[]){const t=KIND_TXT[ob.kind];if(!t||!isFinite(+ob.x_in)||!isFinite(+ob.y_in))continue;const [cx,cy]=matToDisp(R,ob.x_in,ob.y_in),col=hs(KIND_HEX[ob.kind]);x.strokeStyle=col;x.fillStyle=col;x.lineWidth=1.5;x.strokeRect(cx-7,cy-7,14,14);x.fillText(t,cx,cy-14);E.labels.push([cx,cy,t])}
+   x.textAlign='left';x.lineWidth=1}
   if(S.tap){const [cx,cy]=pxToDisp(R,S.tap.u,S.tap.v);D.tap=[cx,cy];x.strokeStyle=c2;x.lineWidth=1.5;x.beginPath();x.moveTo(cx-20,cy);x.lineTo(cx-6,cy);x.moveTo(cx+6,cy);x.lineTo(cx+20,cy);x.moveTo(cx,cy-20);x.lineTo(cx,cy-6);x.moveTo(cx,cy+6);x.lineTo(cx,cy+20);x.stroke();x.beginPath();x.arc(cx,cy,6,0,7);x.stroke()}};
  S.clear=()=>{S.tap=null;S.seq++;read.classList.remove('on');read.innerHTML='';S.draw()};
  S.set=(cal,H,imageSize,deco)=>{   // cal: the ok /api/calib payload or null; H: this camera's px -> table mm; deco(cal) -> [chip html, chip title]
@@ -696,8 +705,8 @@ function placeFrontCam(pose){const P=validPose(pose.front);
   const hit=matToWorld(+ah[0]/25.4,+ah[1]/25.4,pose);hit.y+=0.001;frontRay.geometry.dispose();frontRay.geometry=new THREE.BufferGeometry().setFromPoints([FRONT_POS.clone(),hit]);frontRay.computeLineDistances();frontRay.visible=true}
  else{frontCam=frustum(0xffb347,0.085,0.047,0.12);FRONT_POS.set(0.62,0.07,0.40);frontCam.position.copy(FRONT_POS);frontCam.lookAt(new THREE.Vector3(0.05,0.05,0.06));frontCam.rotateY(Math.PI);scene.add(frontCam);frontRay.visible=false}
  frontCam.name='front_cam';frontCam.userData.pose=P;frontLabel.position.set(FRONT_POS.x,FRONT_POS.y+(P?0.06:0.09),FRONT_POS.z);window.__frontCam=frontCam}
-let matG=null;const objs=new Map();   // objs: mat-map objects by id (see scenePoll); everything that lives in the mat frame (local x = mat X, y = mat Y, z = up, metres); rebuilt when the calibration changes
-function buildMat(pose){objs.clear();/* mat-map meshes are children of the old group: disposed with it, redrawn by the next scenePoll */if(matG){scene.remove(matG);matG.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material&&o.material.map)o.material.map.dispose();if(o.material)o.material.dispose()})}
+let matG=null;const objs=new Map(),extras=[];let extrasSig='';   // objs: mat-map objects by id (see scenePoll); everything that lives in the mat frame (local x = mat X, y = mat Y, z = up, metres); rebuilt when the calibration changes
+function buildMat(pose){objs.clear();extras.length=0;extrasSig='';/* mat-map meshes are children of the old group: disposed with it, redrawn by the next scenePoll */if(matG){scene.remove(matG);matG.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material&&o.material.map)o.material.map.dispose();if(o.material)o.material.dispose()})}
  const{m,o}=matBasis(pose);matG=new THREE.Group();matG.name='mat_frame';matG.quaternion.setFromRotationMatrix(m);matG.position.copy(o);matG.userData.pose=pose;scene.add(matG);
  const mat=new THREE.Mesh(new THREE.PlaneGeometry(MAT_W,MAT_D),new THREE.MeshBasicMaterial({map:matTexture(),transparent:true,opacity:.92}));mat.name='mat';mat.position.set(MAT_W/2,MAT_D/2,0.0005);mat.renderOrder=-2;matG.add(mat);
  const edge=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0.001),new THREE.Vector3(MAT_W,0,0.001),new THREE.Vector3(MAT_W,MAT_D,0.001),new THREE.Vector3(0,MAT_D,0.001)]),new THREE.LineBasicMaterial({color:pose.calibrated?0xffb347:0x6a5a40,transparent:true,opacity:.9}));matG.add(edge);
@@ -715,19 +724,41 @@ addEventListener('calib',e=>{const np=calibPose(e.detail);if(JSON.stringify(np)!
 // Each object is a w_mm x h_mm x 8 mm box at (x_mm, y_mm), turned by angle_deg about the mat normal (local z), in its own colour, named obj_<id>,
 // with a small id tag (objtag_<id>). An object missing from two polls in a row is removed (one miss only fades it). Polled at 2 Hz; scenePoll() is
 // global so the tests drive it with the timers frozen. The caption on the stage says why the map is empty (no background, mat moved, holding).
-const OBJ_H=0.008;let sceneLiveAt=null;
+const OBJ_H=0.008;let sceneLiveAt=null,extraMiss=0;
+// what each blob IS (tools/scene_labels.py via /api/scene: kind, keepout, ring): colour by kind, a small text label, the ring as an open blue cylinder, each keep-out (the toy frogs) as a translucent red-orange cylinder
+const hexStr=h=>'#'+h.toString(16).padStart(6,'0');window.__extras=extras;
+const LEGEND=[['NUT','nut'],['WING NUT','wing nut'],['SPACER','spacer'],['TOY?','toy?'],['RING','ring'],['KEEP OUT','keep-out']];
+const legend=document.createElement('div');legend.id='scenelegend';legend.className='scenelegend';legend.innerHTML=LEGEND.map(([t,k])=>`<span><i style="background:${hexStr(KIND_HEX[k])}"></i>${t}</span>`).join('');box.appendChild(legend);
 const matcap=document.createElement('div');matcap.id='matcap';matcap.className='matcap';box.appendChild(matcap);
 const objHex=c=>{const v=Array.isArray(c)&&c.length===3?c.map(x=>Math.max(0,Math.min(255,Math.round(+x||0)))):[200,200,200];return (v[0]<<16)|(v[1]<<8)|v[2]};
 function objMake(o){const hex=objHex(o.color),m=new THREE.Mesh(new THREE.BoxGeometry(1,1,OBJ_H),new THREE.MeshStandardMaterial({color:hex,emissive:hex,emissiveIntensity:.3,roughness:.6,transparent:true,opacity:.92}));
  m.name='obj_'+o.id;m.add(new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:.7})));matG.add(m);
- const tag=label('#'+o.id,'#f2efe6',new THREE.Vector3(),matG,128);tag.scale.set(0.03,0.015,1);tag.name='objtag_'+o.id;return {mesh:m,tag,miss:0}}
-function objPlace(e,o){const m=e.mesh,hex=objHex(o.color);m.scale.set(Math.max(0.002,(+o.w_mm||0)/1000),Math.max(0.002,(+o.h_mm||0)/1000),1);m.position.set(o.x_mm/1000,o.y_mm/1000,OBJ_H/2+0.002);m.rotation.set(0,0,(+o.angle_deg||0)*Math.PI/180);   // mm -> m from the mat corner; z up the mat normal
- m.material.color.setHex(hex);m.material.emissive.setHex(hex);m.material.opacity=.92;e.tag.material.opacity=1;e.tag.position.set(o.x_mm/1000,o.y_mm/1000,OBJ_H+0.016);m.userData.obj=o;m.userData.hex=hex}
-function objDrop(id){const e=objs.get(id);if(!e)return;objs.delete(id);matG.remove(e.mesh);matG.remove(e.tag);e.mesh.traverse(x=>{if(x.geometry)x.geometry.dispose();if(x.material)x.material.dispose()});if(e.tag.material.map)e.tag.material.map.dispose();e.tag.material.dispose()}
+ const e={mesh:m,tag:null,tagText:null,miss:0};objTag(e,o);return e}
+function objTag(e,o){   // the label above a blob: its kind (NUT / WING NUT / SPACER / TOY?), its #id while it has no kind yet, nothing for the ring and the keep-outs (they have their own)
+ const txt=KIND_TXT[o.kind]||(o.kind?'':'#'+o.id),col=o.kind&&KIND_HEX[o.kind]!=null?hexStr(KIND_HEX[o.kind]):'#f2efe6';
+ if(e.tag&&e.tagText===txt+col)return;
+ if(e.tag){matG.remove(e.tag);if(e.tag.material.map)e.tag.material.map.dispose();e.tag.material.dispose();e.tag=null}
+ e.tagText=txt+col;if(!txt)return;const w=txt[0]==='#'?128:256;e.tag=label(txt,col,new THREE.Vector3(),matG,w);e.tag.scale.set(w===128?0.03:0.075,w===128?0.015:0.019,1);e.tag.name='objtag_'+o.id;e.tag.userData.text=txt}
+function objPlace(e,o){const m=e.mesh,k=o.kind,hex=k&&KIND_HEX[k]!=null?KIND_HEX[k]:objHex(o.color),op=k==='ring'?0:(k==='ring wall'?.6:.92);m.scale.set(Math.max(0.002,(+o.w_mm||0)/1000),Math.max(0.002,(+o.h_mm||0)/1000),1);m.position.set(o.x_mm/1000,o.y_mm/1000,OBJ_H/2+0.002);m.rotation.set(0,0,(+o.angle_deg||0)*Math.PI/180);   // mm -> m from the mat corner; z up the mat normal
+ m.material.color.setHex(hex);m.material.emissive.setHex(hex);m.material.opacity=op;m.visible=k!=='ring';   // the whole-ring blob is drawn as the open cylinder instead
+ objTag(e,o);if(e.tag){e.tag.material.opacity=1;e.tag.position.set(o.x_mm/1000,o.y_mm/1000,OBJ_H+0.016)}m.userData.obj=o;m.userData.hex=hex}
+function objDrop(id){const e=objs.get(id);if(!e)return;objs.delete(id);matG.remove(e.mesh);e.mesh.traverse(x=>{if(x.geometry)x.geometry.dispose();if(x.material)x.material.dispose()});if(e.tag){matG.remove(e.tag);if(e.tag.material.map)e.tag.material.map.dispose();e.tag.material.dispose()}}
+function extrasClear(){for(const g of extras.splice(0)){matG.remove(g);g.traverse(x=>{if(x.geometry)x.geometry.dispose();if(x.material){if(x.material.map)x.material.map.dispose();x.material.dispose()}})}extrasSig=''}
+function cyl(r,h,hex,op,open,name,x,y){const g=new THREE.Group();g.name=name;const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,48,1,open),new THREE.MeshBasicMaterial({color:hex,transparent:true,opacity:op,side:THREE.DoubleSide,depthWrite:false}));m.rotation.x=Math.PI/2;g.add(m);   // CylinderGeometry's axis is y: stand it up the mat normal (z)
+ const ln=new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry,30),new THREE.LineBasicMaterial({color:hex,transparent:true,opacity:.9}));ln.rotation.x=Math.PI/2;g.add(ln);g.position.set(x,y,h/2+0.002);matG.add(g);extras.push(g);return g}
+function extrasSet(ring,kos){   // the fitted ring (open blue cylinder, its radius and height from the server) and each keep-out (red-orange, labelled with its reason); rebuilt only when something moved
+ const q=v=>Math.round((+v||0)*100)/100,good=k=>k&&isFinite(+k.x_in)&&isFinite(+k.y_in)&&+k.r_mm>0&&+k.h_mm>0;kos=(kos||[]).filter(good);ring=good(ring)?ring:null;
+ const sig=JSON.stringify([ring&&[ring.x_in,ring.y_in,ring.r_mm,ring.h_mm].map(q),kos.map(k=>[k.id,k.x_in,k.y_in,k.r_mm,k.h_mm,k.why].map(v=>typeof v==='string'?v:q(v)))]);if(sig===extrasSig)return;extrasClear();extrasSig=sig;
+ if(ring){const x=ring.x_in*IN,y=ring.y_in*IN,h=ring.h_mm/1000,g=cyl(ring.r_mm/1000,h,KIND_HEX.ring,.34,true,'ring',x,y);g.userData={ring};const t=label('RING',hexStr(KIND_HEX.ring),new THREE.Vector3(x,y,h+0.02),matG,128);t.scale.set(0.05,0.025,1);t.name='ring_label';extras.push(t)}
+ for(const k of kos){const x=k.x_in*IN,y=k.y_in*IN,h=k.h_mm/1000,g=cyl(k.r_mm/1000,h,KIND_HEX['keep-out'],.3,false,'keepout_'+k.id,x,y);g.userData={keepout:k};
+  const t=label('KEEP OUT',hexStr(KIND_HEX['keep-out']),new THREE.Vector3(x,y,h+0.03),matG,256);t.scale.set(0.1,0.025,1);t.name='keepout_label_'+k.id;t.userData.text='KEEP OUT';extras.push(t);
+  const w=label(String(k.why||'').toUpperCase(),'#f2efe6',new THREE.Vector3(x,y,h+0.012),matG,256);w.scale.set(0.075,0.019,1);w.name='keepout_why_'+k.id;w.userData.text=String(k.why||'').toUpperCase();extras.push(w)}}
 async function scenePoll(){let s=null;try{s=await(await fetch('/api/scene',{cache:'no-store'})).json()}catch(e){}
  const ok=!!(s&&typeof s==='object'&&s.ok&&Array.isArray(s.objects)&&matG);window.sceneLast=ok?s:null;const seen=new Set();
  if(ok)for(const o of s.objects){if(!o||o.id==null||!isFinite(+o.x_mm)||!isFinite(+o.y_mm))continue;let e=objs.get(o.id);if(!e){e=objMake(o);objs.set(o.id,e)}e.miss=0;objPlace(e,o);seen.add(o.id)}
- for(const [id,e] of [...objs]){if(seen.has(id))continue;if(++e.miss>=2)objDrop(id);else{e.mesh.material.opacity=.3;e.tag.material.opacity=.35}}   // gone from the camera (or the camera gone): fade, then remove
+ const lab=ok&&(s.objects.some(o=>o&&o.kind)||!!s.ring);if(lab){extraMiss=0;extrasSet(s.ring,s.keepouts)}else if(ok||++extraMiss>=2)extrasClear();   // no labels (an older server, a labeller failure) or two polls without a scene: nothing drawn
+ legend.classList.toggle('on',!!lab);if(typeof calTop!=='undefined')calTop.draw()
+ for(const [id,e] of [...objs]){if(seen.has(id))continue;if(++e.miss>=2)objDrop(id);else{e.mesh.material.opacity=.3;if(e.tag)e.tag.material.opacity=.35}}   // gone from the camera (or the camera gone): fade, then remove
  let cap='';if(ok){if(s.background==='missing')cap='MAT MAP: NO BACKGROUND — tap SET BACKGROUND';else if(s.calib_ok===false)cap='MAT MAP: '+(s.calib_note||'calibration check failed');else if(s.holding)cap=`MAT MAP: HOLDING THE LAST CAMERA SOLVE (${s.n_markers_seen||0} markers visible)`}
  if(matcap.textContent!==cap)matcap.textContent=cap;
  const la=ok?(s.calib_live_at||null):null;if(la!==sceneLiveAt){sceneLiveAt=la;if(typeof calibPoll==='function')calibPoll()}   // the camera solve changed (or was written back): refresh the overlay and the mat pose now, not in a minute
