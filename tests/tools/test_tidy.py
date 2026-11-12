@@ -126,6 +126,13 @@ def test_the_adaptive_route_goes_straight_when_clean_and_over_the_base_when_not(
     names = [n for n, _ in r.start_route((RING[0], blocked), 1.0)]; assert names == ["high_back", "high_back_up", "high", "above"]
 
 
+def test_pieces_of_the_ring_wall_are_not_toys_but_toys_in_the_middle_and_well_outside_are(td):
+    ring = (6.085, 6.658)   # 11 Nov 22:0x live: the scene map cut the ring into blobs at (5.5,4.62) (7.17,5.02) (4.56,5.77) (7.25,7.38) (5.53,7.98), 35-54 mm out
+    wall = [toy(5.5, 4.62, 30, 30, 620), toy(7.17, 5.02, 53.2, 12, 384), toy(4.56, 5.77, 25.4, 8.7, 96), toy(7.25, 7.38, 23.2, 9.1, 120), toy(5.53, 7.98, 31.3, 30.7, 704)]
+    assert not any(td.is_toy(o, ring=ring) for o in wall) and all(td.is_toy(o) for o in wall), "without a ring the old rule still applies"
+    assert td.is_toy(toy(5.96, 5.9, 17.6, 10.5, 132), ring=ring) and td.is_toy(toy(2.37, 6.42, 20.4, 13.3, 168), ring=ring), "the wing nut inside (19 mm) and the spacer 95 mm out are toys"
+
+
 def test_check_gives_a_verdict_per_toy(td, pl, cc, table, mk):
     r = mk([]).rig
     ok = r.check((5.0, 3.5)); assert ok["reachable"] and ok["ok"] and ok["direct"] is True and ok["n_bad"] == 0
@@ -240,7 +247,7 @@ def test_toys_inside_the_ring_are_skipped_and_the_rest_are_tidied(mk):
 
 
 def test_a_round_refuses_when_no_toy_has_a_clean_route(mk):
-    m = mk([toy(RING[0] + 2.0, RING[1])]); s = m.t.round(); assert s["stop"].startswith("refused") and s["picked"] == 0 and s["refused"] and m.w.names == []
+    m = mk([toy(RING[0] + 2.6, RING[1])]); s = m.t.round(); assert s["stop"].startswith("refused")   # 66 mm out: clear of the wall band (on_ring_wall), still behind the ring and s["picked"] == 0 and s["refused"] and m.w.names == []
 
 
 def test_arm_busy_and_temperature_stop_the_run(td, mk):

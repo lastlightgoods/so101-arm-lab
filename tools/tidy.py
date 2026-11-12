@@ -21,6 +21,7 @@ RING_REPO, SPREAD_REPO = "lastlight/so101-toys-to-ring", "lastlight/so101-toys-s
 IN = 25.4
 RING_R_MM, RING_H_MM = 52.0, 51.0   # outer radius; 2 in tape (TC, 11 Nov 2026)
 RING_DONE_MM = 48.0                 # a toy this close to the ring's centre is inside it (already done)
+RING_WALL_IN_MM, RING_WALL_OUT_MM = 20.0, 10.0   # a blob centred this far inside / outside the ring's outer radius is the ring's own wall, not a toy
 PART_R_MM, TIP_R_MM, MARGIN_MM = 20.0, 8.0, 5.0   # the body / the jaw tip vs the rim (+5 mm over the 51 mm wall)
 DROP_IN_MAX = 3.3                   # highest vertical-gripper height anywhere (inches)
 GRIP_EMPTY_MAX = 2.0                # gripper readback (0-100) after the lift at or below this = nothing held (11 Nov 2026 live)
@@ -79,7 +80,14 @@ def toy_kind(o):
     return "nut", 4.0
 
 
-def is_toy(o, area_max=2000.0, long_max=60.0): return "x_in" in o and "y_in" in o and float(o.get("area_mm2") or 0) < area_max and max(float(o.get("w_mm") or 0), float(o.get("h_mm") or 0)) <= long_max   # why: the ring itself (104 mm across) is not a toy
+def is_toy(o, area_max=2000.0, long_max=60.0, ring=None):
+    """A scene blob that is a toy: not the whole ring (104 mm across) and, with `ring`, not a piece of the ring's wall (on_ring_wall)."""
+    if not ("x_in" in o and "y_in" in o and float(o.get("area_mm2") or 0) < area_max and max(float(o.get("w_mm") or 0), float(o.get("h_mm") or 0)) <= long_max): return False
+    return ring is None or not on_ring_wall(o, ring)
+
+
+def on_ring_wall(o, ring, inner_mm=RING_WALL_IN_MM, outer_mm=RING_WALL_OUT_MM):   # why: 11 Nov 22:0x the scene map cut the standing ring into 5 toy-sized blobs 35-54 mm from its fitted centre; tidy would have tried to pick them
+    return RING_R_MM - inner_mm < dist_mm((o["x_in"], o["y_in"]), ring) < RING_R_MM + outer_mm
 
 
 def inside_ring(o, ring, r_mm=RING_DONE_MM): return dist_mm((o["x_in"], o["y_in"]), ring) < r_mm
@@ -357,7 +365,7 @@ class Tidy:
         if r is None: raise SystemExit("tape ring not found in the top frame")
         self.rig.set_ring(r); return r
 
-    def toys(self, objs=None): return [o for o in (self.objects() if objs is None else objs) if is_toy(o)]
+    def toys(self, objs=None): return [o for o in (self.objects() if objs is None else objs) if is_toy(o, ring=self.rig.ring)]
 
     # -- guarded motion
     @contextlib.contextmanager
@@ -378,14 +386,14 @@ class Tidy:
 
     def grip_check_fn(self):
         orig = self.pl.jaw_check
-        def grip_check(jpeg=None, window=None, out_path=None, min_score=None):
-            g = [(x.get("reached") or {}).get("gripper") for x in self.last_rows if x.get("wp") == "lift"]; g = g[-1] if g else None; cam = None
+        def grip_check(jpeg=None, window=None, out_path=None, min_score=None, rows=None, **_):   # rows: the lift stage's rows, passed by closed_loop_pick since final-correct
+            g = [(x.get("reached") or {}).get("gripper") for x in (rows if rows is not None else self.last_rows) if x.get("wp") == "lift"]; g = g[-1] if g else None; cam = None
             if not (g is not None and g > GRIP_EMPTY_MAX):   # asked for the log (and decisive for a wing nut only)
                 try: cam = orig(None, window or self.pl.JAW_WINDOW, out_path)
                 except Exception: cam = None
             held = grip_decision(g, (cam or {}).get("in_jaws"), self.cur_kind)
             self.grip_log.append({"gripper_after_lift": g, "camera_in_jaws": (cam or {}).get("in_jaws"), "camera_score": ((cam or {}).get("ring") or {}).get("score"), "held": held})
-            return {"in_jaws": held, "ring": (cam or {}).get("ring"), "frame": (cam or {}).get("frame"), "window": [], "note": f"gripper after the lift {g}; camera {(cam or {}).get('in_jaws')}"}
+            return {"in_jaws": held, "ring": (cam or {}).get("ring"), "frame": (cam or {}).get("frame"), "window": [], "gripper": g, "camera": (cam or {}).get("in_jaws"), "note": f"gripper after the lift {g}; camera {(cam or {}).get('in_jaws')}"}   # gripper/camera: the keys pick_loop.jaw_check returns since final-correct
         return grip_check
 
     def go_home(self):
@@ -800,7 +808,7 @@ def main(argv=None):
     if ring is None: raise SystemExit("tape ring not found in the top frame (fewer than 150 blue pixels)")
     rig = Rig(pl, cc, table, ring)
     if a.cmd == "plan":
-        print(json.dumps(plan_report(pl, rig, [o for o in pl.fetch_scene_objects() if is_toy(o)], ring, a.order), indent=1)); return 0
+        print(json.dumps(plan_report(pl, rig, [o for o in pl.fetch_scene_objects() if is_toy(o, ring=ring)], ring, a.order), indent=1)); return 0
     get = lambda path, t: json.load(urllib.request.urlopen(pl.DASH + path, timeout=t))
     ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True), arm_jobs=al.jetson_arm_jobs)
     guard = gr.Guard(cc, table, gr.Limits(ceiling_in=4.6, stop_file=os.path.join(ROOT, "outputs", "run", "autoloop.stop")), ctx); track = pl._load("labtrack").LabTrack(EXPERIMENT)
