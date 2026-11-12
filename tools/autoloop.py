@@ -84,7 +84,7 @@ class Runner:
     def __init__(self, pl, cc, table, guard, ctx, cfg, track, rng, out=print, demo=None):
         self.pl, self.cc, self.table, self.guard, self.ctx, self.cfg, self.track, self.rng, self.out = pl, cc, table, guard, ctx, cfg, track, rng, out
         self.demo = demo   # a tools/demo_session.DemoSession, or None (the default: nothing below changes)
-        self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0; self.tele_rows = []; self.session_tele = []; self.keepouts = []; self._ko_key = None; self.noted = set()
+        self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0; self.tele_rows = []; self.session_tele = []; self.keepouts = []; self._ko_key = (); self.noted = set()
         self.markers_mm = list((table.get("layout_markers") or {}).values())
         self.pick_args = argparse.Namespace(jaw_open=pl.JAW_OPEN, max_deg_s=pl.SPEED["closed"], wrist_check=False, grasp_aim_mm=pl.GRASP_AIM_MM, grasp_tilt_deg=pl.GRASP_TILT_DEG, grasp_roll=self.opt("grasp_roll", "off"))
         self.biases = load_biases(os.path.join(getattr(pl, "ROOT", "."), "jetson", "calib", "pick_state.json"))   # read only: the pick loop's learned sag biases; the runner never writes that file
