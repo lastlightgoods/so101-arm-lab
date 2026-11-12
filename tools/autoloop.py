@@ -18,6 +18,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXPERIMENT = "so101-autoloop"
 SAFE_BOX_IN = (6.0, 4.0, 13.0, 8.0)   # default safe box in mat inches, the box the owner approved (plan doc 42, prep doc 44); same as pick_loop.SAFE_BOX
 IN = 25.4
+STAGE_HZ = 20.0   # --stage: ghost frames per second of virtual motion
 
 
 def load(path, name):
@@ -84,6 +85,7 @@ class Runner:
     def __init__(self, pl, cc, table, guard, ctx, cfg, track, rng, out=print, demo=None, torque_off=None):
         self.pl, self.cc, self.table, self.guard, self.ctx, self.cfg, self.track, self.rng, self.out = pl, cc, table, guard, ctx, cfg, track, rng, out
         self.torque_off = torque_off   # () -> bool: let go of the servos' torque at the very end of an UNATTENDED session, when the readback says the arm is at rest; None = never
+        self.on_target = None   # optional fn(target_in), called when a cycle's target is chosen (the --stage ghost's target ring)
         self.demo = demo   # a tools/demo_session.DemoSession, or None (the default: nothing below changes)
         self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0; self.tele_rows = []; self.session_tele = []; self.keepouts = []; self._ko_key = (); self.noted = set()
         self.markers_mm = list((table.get("layout_markers") or {}).values())
@@ -285,6 +287,7 @@ class Runner:
         try:
             with self.guarded():
                 sc = self.scene(); rec["target_in"] = tgt = self.target_for((sc or {}).get("objects") or []); last = self.cur_in
+                if self.on_target and tgt: self.on_target(tgt)
                 for attempt in range(self.cfg.max_retries + 1):
                     nut = self.locate(last)
                     if not nut: rec["found"] = False; break
@@ -444,8 +447,10 @@ class FakeWorld:
 class DryArm:
     """pick_loop's api / run_plan on the real kinematics (damped Gauss-Newton on fk_tip): every arm waypoint is reached `shortfall_mm` short
     along the base->tip direction, which is what the closed loop exists to correct. Gripper-only waypoints and rest are reached exactly."""
-    def __init__(self, cc, table, world, shortfall_mm=6.0):
+    def __init__(self, cc, table, world, shortfall_mm=6.0, sink=None):
         self.cc, self.table, self.world, self.short = cc, table, world, shortfall_mm
+        self.vs = load(os.path.join(ROOT, "tools", "virtual_stage.py"), "virtual_stage_for_autoloop"); self.sink = sink or self.vs.NullSink()   # the injected display-only sink (--stage); the default publishes and waits for nothing
+        self.pose = None; self.target_in = None
         self.ARM = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"); self.seed = {"shoulder_pan": 15.0, "shoulder_lift": 17.0, "elbow_flex": 2.0, "wrist_flex": 80.0, "wrist_roll": 0.46}
 
     def fake_tele(self, goal, seconds):
@@ -478,6 +483,15 @@ class DryArm:
         ax, ay = self.cc.table_to_arm(self.table, x * IN, y * IN); j = self.solve(dict(self.seed, wrist_roll=roll), np.array([ax, ay, float(self.table["arm_fit"]["table_z_mm"]) + h * IN]))
         j["wrist_roll"] = roll; return {"ok": True, "joints_deg": {k: round(v, 3) for k, v in j.items()}}
 
+    def objects(self):
+        """The fake nut and the target in mat inches, for the stage ghost (nothing when the world hides the nut / no target is known)."""
+        o = [] if self.world.hidden else [{"kind": "nut", "frame": "mat_in", "x": self.world.nut[0] / IN, "y": self.world.nut[1] / IN, "z": 0.0}]
+        return o + ([{"kind": "target", "frame": "mat_in", "x": self.target_in[0], "y": self.target_in[1], "z": 0.0}] if self.target_in else [])
+
+    def stage(self, goal, seconds):
+        """Display only: glide the ghost from the last pose to `goal` (LeRobot-convention degrees, like the real arm's readings) at STAGE_HZ, `seconds` of motion paced by the sink."""
+        if self.sink.active: self.pose = self.vs.glide(self.sink, self.pose, goal, seconds, self.objects(), STAGE_HZ)
+
     def run_plan(self, plan, max_deg_s):
         import numpy as np
         rows = []
@@ -486,9 +500,12 @@ class DryArm:
             if w["gripper_only"] or w["name"] == "rest": got = j
             else:
                 t = self.tip(j); d = t[:2] - np.array([38.8353, 0.0]); d = d / np.linalg.norm(d); want = t.copy(); want[:2] -= self.short * d; got = self.solve(j, want)
+            self.stage({**{k: float(got[k]) for k in self.ARM}, "gripper": float(w["gripper"])}, 1.0)
             rows.append({"wp": w["name"], "seconds": 1.0, "t": i, "target": {**j, "gripper": w["gripper"]}, "reached": {**{k: round(v, 3) for k, v in got.items()}, "gripper": w["gripper"]}, "max_err_deg": round(max(abs(j[k] - got[k]) for k in self.ARM), 2),
                          **({"tele": t} if (t := self.fake_tele({**j, "gripper": w["gripper"]}, 1.0)) else {})})
-        self.world.on_plan(plan); return rows
+        self.world.on_plan(plan)
+        if self.pose: self.sink.frame(self.pose, self.objects())   # the nut has moved with the plan
+        return rows
 
 
 # ---------------------------------------------------------------- command line
@@ -544,6 +561,8 @@ def build_parser():
     ap.add_argument("--safe-box", type=float, nargs=4, metavar=("X0", "Y0", "X1", "Y1"), help=f"mat inches where resets and random targets go (default {' '.join(f'{v:g}' for v in SAFE_BOX_IN)})")
     ap.add_argument("--radius-mm", type=float, default=15.0, help="landed = nut within this of the target"); ap.add_argument("--session", default=None)
     ap.add_argument("--dry-run", action="store_true", help="fake arm and fake dashboard: the whole loop, nothing moves"); ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--stage", action="store_true", help="with --dry-run: show the fake arm live on the dashboard's 3D stage as a labelled FAKE ghost (/tmp/so101_virtual_<session>.json, docs/virtual-stage.md); runs in real time; display only")
+    ap.add_argument("--stage-speed", type=float, default=1.0, help="--stage pacing: 1 = real time, 2 = twice as fast, 0 = no waiting")
     ap.add_argument("--max-consecutive-failures", type=int, default=3); ap.add_argument("--max-retries", type=int, default=1); ap.add_argument("--lost-after", type=int, default=3)
     ap.add_argument("--max-minutes", type=float, default=None, help="wall-clock cap for the whole session, checked between cycles (a clean stop); like --minutes, but reported as a guard stop"); ap.add_argument("--max-tries", type=int, default=None, help="cap on cycles attempted, whatever their outcome (a clean stop)")
     ap.add_argument("--temp-limit", type=float, default=65.0, help="stop when any servo reaches this temperature (C); the servo's own cut is 70"); ap.add_argument("--require-health", action="store_true", help="a plan whose rows carry no servo telemetry is a trip")
@@ -576,11 +595,14 @@ def main(argv=None, demo_transport=None):
     if a.dry_run and not os.path.exists(tpath): tpath = os.path.join(ROOT, "tests", "calib", "fixtures", "top_table_real.json")
     table = json.load(open(tpath))
     if not (table.get("arm_fit") and table.get("arm_base_mm")): raise SystemExit("autoloop needs the arm fit in top_table.json (tools/jog_capture.py --fit)")
+    if a.stage and not a.dry_run: raise SystemExit("--stage shows a fake run: it needs --dry-run (a real run is already the real arm on the stage)")
     cfg = make_cfg(a, out_dir); rng = random.Random(a.seed)
     lim = gr.Limits(margin_mm=a.margin_mm, ceiling_in=a.ceiling_in, max_err_deg=a.max_err_deg, lost_after=a.lost_after, max_failures=a.max_consecutive_failures, temp_limit_c=a.temp_limit, max_tries=a.max_tries, max_minutes=a.max_minutes, require_health=a.require_health or a.unattended, **({"stop_file": a.stop_file} if a.stop_file else {}))
     lt = load(os.path.join(ROOT, "jetson", "labtrack.py"), "labtrack_for_autoloop"); demo = None
     if a.dry_run:
-        world = FakeWorld(cc, table, gr.fk_mat_mm, nut_in=(6.0, 8.0), rng=rng, miss_p=a.dry_miss); arm = DryArm(cc, table, world)
+        world = FakeWorld(cc, table, gr.fk_mat_mm, nut_in=(6.0, 8.0), rng=rng, miss_p=a.dry_miss)
+        vs = load(os.path.join(ROOT, "tools", "virtual_stage.py"), "virtual_stage_for_autoloop")
+        sink = vs.VirtualSink("FAKE", cfg.session, speed=a.stage_speed) if a.stage else None; arm = DryArm(cc, table, world, sink=sink); arm.target_in = tuple(a.target)
         pl.api, pl.run_plan, pl.find_nut, pl.fetch_top, pl.fetch_wrist = arm.api, arm.run_plan, world.find_nut, (lambda: b""), (lambda: None)
         pl.fetch_scene_state = lambda: (world.api_scene()["objects"], 0)   # why: the dry run never asks a live dashboard for the scene (11 Nov 2026)
         ctx = gr.Ctx(world.api_state, world.api_scene, time.time, lambda s: None, lambda d: print(json.dumps(d), flush=True)); track = lt.LabTrack(EXPERIMENT + "-dry")
@@ -590,7 +612,11 @@ def main(argv=None, demo_transport=None):
         ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True), arm_jobs=jetson_arm_jobs, fetch_tele=lambda: get("/api/tele", 3)); track = lt.LabTrack(EXPERIMENT)
         if a.record_demos: demo = make_real_demo(a, cfg, lt, pl, demo_transport)   # why: before open_session, so the persistent pick_seq is started with --tick-sink
     if not a.dry_run and a.pick_session: pl.open_session(True)   # why: lazy, nothing connects until the first plan; the guarded run_plan wraps pl.run_plan, which uses it, so the guard still sees every plan and row
-    guard = gr.Guard(cc, table, lim, ctx); s = Runner(pl, cc, table, guard, ctx, cfg, track, rng, out=lambda l: print(l, flush=True), demo=demo, torque_off=(gr.ssh_torque_off if a.unattended and not a.dry_run else None)).run()
+    guard = gr.Guard(cc, table, lim, ctx); runner = Runner(pl, cc, table, guard, ctx, cfg, track, rng, out=lambda l: print(l, flush=True), demo=demo, torque_off=(gr.ssh_torque_off if a.unattended and not a.dry_run else None))
+    if a.dry_run: runner.on_target = lambda t: setattr(arm, "target_in", tuple(t))   # the ghost's target ring follows each cycle's target
+    try: s = runner.run()
+    finally:
+        if a.dry_run and sink: sink.close()   # the ghost disappears with the run
     return 0 if all(x["clean"] for x in s["stops"]) else 2
 
 

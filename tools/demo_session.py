@@ -254,12 +254,18 @@ class FakeRig:
     """The arm and its tick sink, simulated: a virtual clock, pick_seq's own easing (`ps`), a TickBuffer shared with the recorder, `synth` =
     demo_recorder.synth_plan_ticks. Each plan the fake arm runs appends its ticks; while an episode is open the recorder is pumped at every tick
     time. `think_s` = the idle time before each plan (the Mac thinking between staged runs)."""
-    def __init__(self, ps, buf, synth, t0=1000.0, think_s=0.8):
+    def __init__(self, ps, buf, synth, t0=1000.0, think_s=0.8, sink=None, stage_hz=20.0):
         self.ps, self.buf, self.synth, self.t, self.think = ps, buf, synth, t0, think_s; self.cur = {j: 0.0 for j in ps.J}
+        self.sink, self.stage_hz, self.pose = sink, stage_hz, None   # optional tools/virtual_stage sink (display only): the plan's reached poses glide across the dashboard's stage as a FAKE ghost
 
     def now(self): return self.t
 
     def run_plan(self, recorder, plan, rows, max_deg_s):
+        if self.sink is not None and self.sink.active:
+            import importlib.util as _u
+            spec = _u.spec_from_file_location("virtual_stage_for_demo", os.path.join(os.path.dirname(os.path.abspath(__file__)), "virtual_stage.py")); vs = _u.module_from_spec(spec); spec.loader.exec_module(vs)
+            for r in rows:
+                if all(k in (r.get("reached") or {}) for k in vs.JOINTS): self.pose = vs.glide(self.sink, self.pose, {k: float(r["reached"][k]) for k in vs.JOINTS}, float(r.get("seconds") or 1.0), None, self.stage_hz)
         self.t += self.think; t_end, self.cur, times = self.synth(self.buf, self.ps, plan, rows, max_deg_s, self.t, self.cur)
         if recorder is not None:
             for tm in times: recorder.pump(tm)
