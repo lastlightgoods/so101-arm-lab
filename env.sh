@@ -72,3 +72,5 @@ so101-policy() { $HOME/so101/.venv/bin/python $HOME/so101/tools/so101_policy.py 
 so101-film() { $HOME/so101/.venv/bin/python $HOME/so101/tools/film.py "$@"; }
 # so101-autoloop [--cycles 10 --minutes 60 --target X Y | --random-target --safe-box X0 Y0 X1 Y1 --dry-run ...] : unattended pick / judge / reset session under guardrails (docs/autoloop.md); stop it with so101-stop on the Jetson, `touch ~/so101/outputs/run/autoloop.stop`, or the wall STOP
 so101-autoloop() { $HOME/so101/.venv/bin/python $HOME/so101/tools/autoloop.py "$@"; }
+# so101-learn-loop plan|record|train|register|deploy|evaluate|report|all --name NAME [--cycles N --trials M ...] [--dry-run] : record scripted demos, train, register, deploy, evaluate on the Jetson, report vs the scripted baseline (docs/learn-loop.md); stop the arm with so101-stop or the stop file
+so101-learn-loop() { $HOME/so101/.venv/bin/python $HOME/so101/tools/learn_loop.py "$@"; }
