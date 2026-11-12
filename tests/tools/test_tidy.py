@@ -613,3 +613,30 @@ def test_a_big_plain_blob_inside_the_ring_is_the_ring_but_a_big_colourful_one_is
     ring_blob = toy(9.0 + 0.5, 6.0 + 0.8, 75.2, 57.6, 2152)
     assert td.ko.find_keepouts([ring_blob], plain, cc, table, ring) == [], "the ring's own blob, plain, inside: not a keep-out"
     k = td.ko.find_keepouts([frog(9.0, 6.0 + 10 / 25.4)], img, cc, table, ring); assert len(k) == 1, "a colourful frog inside the ring still is"
+
+
+# ---------------------------------------------------------------- the parked arm's shadow
+def test_the_parked_arm_hides_where_the_nuts_stood_12_nov(td, pl, cc, table):
+    w, h = table.get("image_size") or [640, 360]; hid = td.rest_hidden_fn(pl, cc, table, (h, w))
+    assert hid((8.86, 4.5)), "a nut the scene map missed: under the parked arm"
+    assert not hid((11.65, 4.0)) and hid((11.65, 4.0), 15.0), "another one, missed at the shadow's edge: clear at its centre, hidden within 15 mm"
+    assert not hid((9.0, 8.0)) and not hid((14.0, 8.0), 40.0), "the far half of the mat is seen"
+
+
+def test_spread_spots_stay_out_of_the_parked_arms_shadow(td, pl, cc, table):
+    w, h = table.get("image_size") or [640, 360]; hid = td.rest_hidden_fn(pl, cc, table, (h, w)); box = td.SPREAD_BOX_IN
+    free = [td.sample_spread_spot(random.Random(s), box, [], [], (3.0, 9.0), None) for s in range(40)]
+    assert any(hid(p, td.HIDDEN_CLEAR_MM) for p in free), "without the check some spots fall in the shadow (40 % of the box)"
+    spots = [td.sample_spread_spot(random.Random(s), box, [], [], (3.0, 9.0), None, hidden=hid) for s in range(40)]
+    assert all(p is not None and not hid(p, td.HIDDEN_CLEAR_MM) for p in spots), "with it none does, and a spot is still found"
+
+
+def test_the_ring_prefers_a_spot_the_camera_sees_but_does_not_require_one(td):
+    rng = lambda: random.Random(4); box, cur = (5.5, 3.3, 12.0, 8.7), (6.2, 7.4); shade = lambda p, r=0.0: p[1] * 25.4 - r < 4.0 * 25.4   # seen above y 4 in: a footprint (wall + 10 mm) is seen above y 6.4
+    p, seen = td.pick_ring_spot(rng(), box, cur, [], [], [], hidden=shade)
+    assert seen is True and not shade(p, td.RING_R_MM + 10.0), "a fully seen footprint when one exists"
+    p, seen = td.pick_ring_spot(rng(), box, cur, [], [], [], hidden=lambda p, r=0.0: True)
+    assert p is not None and seen is False, "everything hidden: still a spot, flagged unseen"
+    p, seen = td.pick_ring_spot(rng(), box, cur, [], [], [])
+    assert p is not None and seen is None, "no shadow function: not judged"
+    assert td.pick_ring_spot(rng(), box, cur, [], [], [], feasible=lambda q: False, hidden=shade) == (None, None), "nothing feasible: no spot"

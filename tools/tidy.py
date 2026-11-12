@@ -354,6 +354,15 @@ class Tidy:
         if r is None: raise SystemExit("tape ring not found in the top frame")
         self.rig.set_ring(r); return r
 
+    def hidden_fn(self):
+        """rest_hidden_fn for the live top frame's size, made once; None (the samplers skip the check, logged) when it cannot be made."""
+        if getattr(self, "_hidden", None) is None:
+            try:
+                import cv2
+                img = cv2.imdecode(np.frombuffer(self.fetch_top(), np.uint8), cv2.IMREAD_GRAYSCALE); self._hidden = rest_hidden_fn(self.pl, self.cc, self.table, img.shape[:2])
+            except Exception as e: self.say({"event": "hidden_mask_failed", "err": str(e)[:120]}); return None
+        return self._hidden
+
     def toys(self, objs=None): return [o for o in (self.objects() if objs is None else objs) if is_toy(o, ring=self.rig.ring) and not ko.is_keepout_object(o, self.rig.keepouts)]
 
     def refresh_keepouts(self, objs=None):
@@ -541,6 +550,23 @@ def ring_spot_ok(p, cur_in, pile_in, others_in, markers_mm, ring_r_mm=RING_R_MM,
     return None
 
 
+HIDDEN_CLEAR_MM = 40.0   # a spread spot stays this far from anything the parked arm hides: the same 40 mm as from a toy the camera sees
+
+
+def rest_hidden_fn(pl, cc, table, shape):
+    """hidden(p_in, r_mm=0) -> True when the disc of radius r_mm around p (mat inches) reaches a top-frame pixel the parked arm hides (pick_loop.arm_cut of
+    the REST pose, `shape` = the frame's (h, w)): the scene map sees nothing there. why: 12 Nov 2026 a wing nut and two nuts stood in that shadow (mat x 7.0-11.5,
+    y 0.5-5.5 in), the plan saw no toy outside the ring, and the shadow covers 40 % of the spread box and most of the ring box."""
+    h, w = shape; hid = pl.arm_cut(cc, table, np.full((h, w), 255, np.uint8), dict(pl.REST)) == 0
+    def hidden(p, r_mm=0.0):
+        for rr in (0.0, 0.5 * r_mm, r_mm):
+            for k in range(16 if rr else 1):
+                u, v = cc.table_to_pixel(table, p[0] * IN + rr * math.cos(k * math.pi / 8), p[1] * IN + rr * math.sin(k * math.pi / 8))
+                if 0 <= int(v) < h and 0 <= int(u) < w and hid[int(v), int(u)]: return True
+        return False
+    return hidden
+
+
 def sample_ring_spot(rng, box_in, cur_in, pile_in, others_in, markers_mm, feasible=None, ring_r_mm=RING_R_MM, clear_mm=1.5 * IN, edge_mm=30.0, marker_mm=RING_MARKER_MM, min_move_mm=60.0, mat_mm=(457.2, 304.8), tries=400):
     """A new centre (mat inches) for the ring inside `box_in`: >= clear_mm (1.5 in) of free space between the ring's wall and the pile and every other toy, ring wall >= edge_mm from the mat edges and
     marker_mm from every marker centre, >= min_move_mm from where it stands, and `feasible(p)` true (the arm can grip and set it down there). None when `tries` draws find none."""
@@ -551,6 +577,17 @@ def sample_ring_spot(rng, box_in, cur_in, pile_in, others_in, markers_mm, feasib
         if feasible is not None and not feasible(p): continue
         return p
     return None
+
+
+def pick_ring_spot(rng, box_in, cur_in, pile_in, others_in, markers_mm, feasible=None, hidden=None):
+    """(spot, seen): a spot whose whole footprint (wall + 10 mm) the top camera sees when sample_ring_spot finds one, else any spot it finds; seen is None without `hidden`.
+    Only a preference: the parked arm hides most of the ring box, so requiring it would often leave no spot."""
+    ok = (lambda q: True) if feasible is None else feasible
+    if hidden is not None:
+        p = sample_ring_spot(rng, box_in, cur_in, pile_in, others_in, markers_mm, lambda q: not hidden(q, RING_R_MM + 10.0) and ok(q))
+        if p is not None: return p, True
+    p = sample_ring_spot(rng, box_in, cur_in, pile_in, others_in, markers_mm, feasible)
+    return p, (None if hidden is None or p is None else not hidden(p, RING_R_MM + 10.0))
 
 
 class RingMover:
@@ -651,12 +688,14 @@ class RingMover:
 
 
 # ---------------------------------------------------------------- reset: spread the pile
-def sample_spread_spot(rng, box_in, others_in, markers_mm, ring_in, cur_in, ring_r_mm=RING_R_MM, ring_gap_mm=40.0, min_obj=40.0, min_marker=50.0, min_cur=60.0, avoid=(), tries=500):
-    """Autoloop's sample_spot rules (>= 40 mm from every other object, 50 mm from a marker centre, 60 mm from where the toy is) plus: clear of the ring's wall by ring_gap_mm and outside every (centre_in, radius_mm) of `avoid` (the pile)."""
+def sample_spread_spot(rng, box_in, others_in, markers_mm, ring_in, cur_in, ring_r_mm=RING_R_MM, ring_gap_mm=40.0, min_obj=40.0, min_marker=50.0, min_cur=60.0, avoid=(), tries=500, hidden=None):
+    """Autoloop's sample_spot rules (>= 40 mm from every other object, 50 mm from a marker centre, 60 mm from where the toy is) plus: clear of the ring's wall by ring_gap_mm, outside every (centre_in, radius_mm) of `avoid` (the pile),
+    and HIDDEN_CLEAR_MM from anything `hidden` (rest_hidden_fn) says the parked arm hides."""
     x0, y0, x1, y1 = box_in
     for _ in range(tries):
         p = [round(rng.uniform(x0, x1), 3), round(rng.uniform(y0, y1), 3)]
         if dist_mm(p, ring_in) < ring_r_mm + ring_gap_mm or any(dist_mm(p, c) < r for c, r in avoid): continue
+        if hidden is not None and hidden(p, HIDDEN_CLEAR_MM): continue
         if any(dist_mm(p, o) < min_obj for o in others_in) or any(dist_mm(p, [m[0] / IN, m[1] / IN]) < min_marker for m in markers_mm): continue
         if cur_in is not None and dist_mm(p, cur_in) < min_cur: continue
         return p
@@ -732,7 +771,7 @@ def make_blob_mask_fn(t):
 def spread_pile(t, pile_in, box_in, nudge=True, max_attempts=None):
     """Spread the toys of the pile onto random clear spots. One closed-loop pick each (the normal place); the pile's blobs are split into toy-sized pieces; a blob that fails twice is nudged once. -> summary."""
     rig = t.rig; s = {"moved": 0, "failed": 0, "nudged": 0, "attempts": 0, "stop": None, "spots": []}; fails = {}; nudged = set(); n_toys = len([o for o in t.toys() if dist_mm((o["x_in"], o["y_in"]), pile_in) < PILE_R_MM])
-    cap = max_attempts or 3 * max(n_toys, 1) + 6; mask_fn = make_blob_mask_fn(t) if t.a.blob_mask else None
+    cap = max_attempts or 3 * max(n_toys, 1) + 6; mask_fn = make_blob_mask_fn(t) if t.a.blob_mask else None; hid = t.hidden_fn()
     while s["attempts"] < cap:
         if tr := t.before(): s["stop"] = tr.reason; break
         objs = t.settled_objects(); t.refresh_keepouts(objs); pile = [o for o in t.toys(objs) if dist_mm((o["x_in"], o["y_in"]), pile_in) < PILE_R_MM]
@@ -742,12 +781,12 @@ def spread_pile(t, pile_in, box_in, nudge=True, max_attempts=None):
             nudged.add(key); s["nudged"] += 1; do_nudge(t, blob); continue
         others = [[o["x_in"], o["y_in"]] for o in t.toys(objs) if o is not blob]
         avoid = [(pile_in, PILE_R_MM + 15.0)] + [((k["x_in"], k["y_in"]), k["r_mm"] + 40.0) for k in rig.keepouts]
-        spot = sample_spread_spot(t.rng, box_in, others + list(s["spots"]), t.markers_mm, rig.ring, (blob["x_in"], blob["y_in"]), avoid=avoid)
+        spot = sample_spread_spot(t.rng, box_in, others + list(s["spots"]), t.markers_mm, rig.ring, (blob["x_in"], blob["y_in"]), avoid=avoid, hidden=hid)
         if spot is None: s["stop"] = "no free spot in the spread box"; break
         for _try in range(12):   # a spot whose carry passes the ring is not used: draw another
             cand = next((c for c in pile_candidates(blob, mask_fn) if rig.check(c, dest=spot)["ok"]), None)
             if cand is not None: break
-            spot = sample_spread_spot(t.rng, box_in, others + list(s["spots"]), t.markers_mm, rig.ring, (blob["x_in"], blob["y_in"]), avoid=avoid)
+            spot = sample_spread_spot(t.rng, box_in, others + list(s["spots"]), t.markers_mm, rig.ring, (blob["x_in"], blob["y_in"]), avoid=avoid, hidden=hid)
             if spot is None: break
         if cand is None or spot is None: s["stop"] = "refused: no clean route for the pile"; break
         s["attempts"] += 1; t.guard.count_try(); res = spread_pick(t, blob, cand, spot); t.say({"event": "spread", **res})
@@ -796,12 +835,12 @@ def reset_mat(t, dest=None):
         if any(dist_mm(p, (k["x_in"], k["y_in"])) < RING_R_MM + k["r_mm"] + 10.0 for k in kos) or not ko.segment_clear(rig.ring, p, kos, RING_R_MM + 10.0): return False
         try: mover.plan(rig.ring, p); return True
         except (SystemExit, Exception): return False
-    spot = dest or sample_ring_spot(t.rng, t.a.ring_box, rig.ring, pile, others, t.markers_mm, feasible)
+    spot, seen = (dest, None) if dest else pick_ring_spot(t.rng, t.a.ring_box, rig.ring, pile, others, t.markers_mm, feasible, t.hidden_fn())
     if spot is None: return {"ok": False, "stop": "no free spot for the ring"}
     if dest is not None and not (all(dist_mm(dest, (k["x_in"], k["y_in"])) >= RING_R_MM + k["r_mm"] + 10.0 for k in kos) and ko.segment_clear(rig.ring, dest, kos, RING_R_MM + 10.0)):
         return {"ok": False, "stop": "--ring-to spot or path too close to a keep-out"}
     if dest is not None and (why := ring_spot_ok(dest, rig.ring, pile, others, t.markers_mm)): return {"ok": False, "stop": f"--ring-to spot refused: {why}"}   # why: 12 Nov the explicit spot skipped these checks and the ring covered marker 2
-    t.say({"event": "ring_dest", "from_in": [round(v, 3) for v in rig.ring], "to_in": spot})
+    t.say({"event": "ring_dest", "from_in": [round(v, 3) for v in rig.ring], "to_in": spot, "footprint_seen": seen})
     with_trip = None
     try: mv = mover.lift_ring(spot)
     except TripError as e: with_trip = e.trip; mv = {"ok": False, "why": f"trip:{e.trip.reason}"}; t.go_home()
