@@ -22,7 +22,7 @@ class FinalArm(ShortArm):
     def run_plan(self, plan, max_deg_s):
         self.ik_at.append(len(self.ik_calls)); names = [w["name"] for w in plan["waypoints"]]; rows = super().run_plan(plan, max_deg_s)
         for r in rows:
-            if r["wp"] == "grasp" and ("pregrasp_up" in names or names == ["grasp"]) and (self.dh or self.dxy.any()):
+            if r["wp"] == "grasp" and ("pregrasp_up" in names or names in (["grasp"], ["pregrasp", "grasp"])) and (self.dh or self.dxy.any()):   # the lifted correction comes straight down from pregrasp like the final approach: same pose error
                 want = tip_of(self.cc, self.table, r["reached"]) + np.array([*self.dxy, self.dh]); r["reached"].update({k: round(v, 3) for k, v in solve_joints(self.cc, self.table, r["reached"], want).items()})
             if self.grip and r["wp"] in ("close2", "lift"):
                 g = self.grip(names, r["wp"]); r["reached"]["gripper"] = r["reached"]["gripper"] if g is None else g
@@ -62,22 +62,37 @@ def test_no_correction_when_the_final_pose_is_on_target(pl, cc, table, monkeypat
 @pytest.mark.parametrize("dh,dxy", [(3.5, (0.0, 0.0)), (-5.5, (0.0, 0.0)), (0.0, (3.0, 0.0)), (2.5, (0.0, -2.5))])   # the fake reads the grasp at +1 mm (its command) + dh: 4.5 / -4.5 (outside -4..1) / xy only (height in band, kept) / 3.5
 def test_one_corrective_move_at_grasp_height_lands_the_tip_on_target(pl, cc, table, monkeypatch, capsys, tmp_path, dh, dxy):
     arm = FinalArm(cc, table, shortfall_mm=7.0, dh=dh, dxy=dxy); out = run(pl, cc, table, monkeypatch, capsys, tmp_path, arm, wrist=frame_feed(jaw_frame(ring=True))); rec, = records(out); c, = stages(out, "final_corr")
-    assert [n for n, _ in arm.calls] == [HOVER, POSE, PRE, CORR, CLOSE, CARRY], "exactly one corrective stage, the grasp waypoint alone, before the close"
+    lifted = math.hypot(*c["corr_mm"]) > pl.FINAL_SLIDE_MAX_MM; assert c["lifted"] is lifted
+    corr = [["pregrasp"], ["pregrasp", "grasp"]] if lifted else [CORR]
+    assert [n for n, _ in arm.calls] == [HOVER, POSE, PRE, *corr, CLOSE, CARRY], "one corrective move before the close: the grasp waypoint alone, or up-over-down when it is bigger than FINAL_SLIDE_MAX_MM"
     in_band = pl.FINAL_H_BAND_MM[0] <= c["h_before"] <= pl.FINAL_H_BAND_MM[1]
     assert c["h_after"] == pytest.approx(c["h_before"] if in_band else pl.FINAL_H_TARGET_MM, abs=0.35) and math.hypot(*c["residual_mm"]) < 1.0, "the readback after the move is on the aim, and on the height target when it started outside the band"
-    assert not (pl.FINAL_H_BAND_MM[0] <= c["h_before"] <= pl.FINAL_H_BAND_MM[1]) or math.hypot(*stages(out, "final")[0]["residual_mm"]) > 1.5, "it fired for a reason"
+    assert not in_band or math.hypot(*stages(out, "final")[0]["residual_mm"]) > 1.5, "it fired for a reason"
     assert rec["final_h_before"] == c["h_before"] and rec["final_h_after"] == c["h_after"] and rec["final_corr_mm"] == pytest.approx(math.hypot(*c["corr_mm"]), abs=0.1) and rec["final_residual_mm"] == pytest.approx(math.hypot(*c["residual_mm"]), abs=0.1)
     r, = pl.rec.runs; assert r.metrics_["final_corr_mm"] == rec["final_corr_mm"] and r.metrics_["final_h_before"] == c["h_before"] and r.metrics_["final_h_after"] == c["h_after"]
-    ks = arm.plans[3]["waypoints"]; assert [w["name"] for w in ks] == ["grasp"] and arm.plans[4]["waypoints"][0]["joints"] == arm.plans[4]["waypoints"][1]["joints"], "the close steps hold the corrected grasp pose"
-    assert all(-0.26 <= h <= 0.26 for _, _, h in arm.plan_iks(3)), "the move is asked at grasp height only (within the 5 mm raise / 6 mm lower caps), never up in the air or deep under the mat"
-    assert [w["name"] for w in json.loads(json.dumps(arm.plans[3]))["waypoints"]] == ["grasp"] and "grasp" in json.load(open(tmp_path / f"s{id(arm)}.json"))["biases"]
+    gi, ci = (4, 5) if lifted else (3, 4)   # the plan that ends at the corrected grasp; the close plan
+    assert arm.plans[gi]["waypoints"][-1]["name"] == "grasp" and arm.plans[ci]["waypoints"][0]["joints"] == arm.plans[ci]["waypoints"][1]["joints"], "the close steps hold the corrected grasp pose"
+    assert -0.26 <= arm.plan_iks(gi)[-1][2] <= 0.26, "the grasp itself is asked at grasp height (within the 5 mm raise / 6 mm lower caps), never up in the air or deep under the mat"
+    assert "grasp" in json.load(open(tmp_path / f"s{id(arm)}.json"))["biases"]
+
+
+def test_a_big_xy_correction_lifts_the_open_jaws_and_a_small_one_slides(pl, cc, table, monkeypatch, capsys, tmp_path):
+    """12 Nov 2026: lying spacers rolled away on every 2.5-4.2 mm slide of the open jaws at grasp height and were held after the ~1 mm ones."""
+    arm = FinalArm(cc, table, shortfall_mm=7.0, dxy=(3.0, 0.0)); out = run(pl, cc, table, monkeypatch, capsys, tmp_path, arm, wrist=frame_feed(jaw_frame(ring=True))); c, = stages(out, "final_corr")
+    assert c["lifted"] is True and [n for n, _ in arm.calls][3:5] == [["pregrasp"], ["pregrasp", "grasp"]]
+    up, over_down = arm.plan_iks(3), arm.plan_iks(4)
+    assert up[0][2] == pytest.approx(pl.PREGRASP_H_IN, abs=0.02) and over_down[0][2] == pytest.approx(pl.PREGRASP_H_IN, abs=0.02), "up off the mat, and across at pregrasp height"
+    assert all(w["gripper"] == pl.JAW_OPEN for p in (arm.plans[3], arm.plans[4]) for w in p["waypoints"]), "the jaws stay open until the close"
+    assert math.hypot(up[0][0] - over_down[0][0], up[0][1] - over_down[0][1]) * 25.4 == pytest.approx(math.hypot(*c["corr_mm"]), abs=0.6), "the lift is at the old spot, the descent at the corrected one"
+    arm2 = FinalArm(cc, table, shortfall_mm=7.0, dh=3.0, dxy=(1.0, 0.0)); out2 = run(pl, cc, table, monkeypatch, capsys, tmp_path, arm2, wrist=frame_feed(jaw_frame(ring=True))); c2, = stages(out2, "final_corr")
+    assert math.hypot(*c2["corr_mm"]) <= pl.FINAL_SLIDE_MAX_MM and c2["lifted"] is False and [n for n, _ in arm2.calls][3] == CORR, "a small correction still slides at grasp height"
 
 
 def test_corrections_are_capped_and_never_repeated(pl, cc, table, monkeypatch, capsys, tmp_path):
     arm = FinalArm(cc, table, shortfall_mm=7.0, dh=14.0, dxy=(9.0, 0.0)); out = run(pl, cc, table, monkeypatch, capsys, tmp_path, arm, wrist=frame_feed(jaw_frame(ring=True))); c, = stages(out, "final_corr")
     assert math.hypot(*c["corr_mm"]) == pytest.approx(4.0, abs=0.06), "xy move capped at 4 mm"
     assert c["lowered_mm"] == pytest.approx(6.0), "height lowered by the cap, not the 13 mm the reading asks"
-    assert [n for n, _ in arm.calls] == [HOVER, POSE, PRE, CORR, CLOSE, CARRY], "the corrected reading is still off (the fake keeps it off) and there is still only ONE corrective move"
+    assert [n for n, _ in arm.calls] == [HOVER, POSE, PRE, ["pregrasp"], ["pregrasp", "grasp"], CLOSE, CARRY] and c["lifted"], "the corrected reading is still off (the fake keeps it off) and there is still only ONE corrective move (lifted: 4 mm > FINAL_SLIDE_MAX_MM)"
     assert c["h_after"] > 2.0, "left as it landed: no second go"
     arm2 = FinalArm(cc, table, shortfall_mm=7.0, dh=-9.0); out2 = run(pl, cc, table, monkeypatch, capsys, tmp_path, arm2, wrist=frame_feed(jaw_frame(ring=True))); c2, = stages(out2, "final_corr")
     assert c2["lowered_mm"] >= -5.0 - 1e-6 and all(-0.26 <= h <= 0.26 for _, _, h in arm2.plan_iks(3))

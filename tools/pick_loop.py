@@ -88,6 +88,8 @@ PRE_STAGE, CORR_STAGE, CLOSE_STAGE = ("pregrasp_up", "pregrasp", "grasp"), ("gra
 GRASP_H_TARGET_MM, GRASP_H_HIGH_MM, GRASP_H_LOW_MM = -1.0, 1.0, -4.0   # aim the jaws 1 mm into the mat; lower when the readback is above +1 mm, raise only below -4 mm
 FINAL_H_TARGET_MM, FINAL_H_BAND_MM = GRASP_H_TARGET_MM, (GRASP_H_LOW_MM, GRASP_H_HIGH_MM)   # the corrective move fires when the grasp readback is outside the band; it aims at the target
 FINAL_XY_TOL_MM, FINAL_XY_CAP_MM = 1.5, 4.0            # ... or when the xy residual against the aim is over the tolerance; the xy move is capped
+FINAL_SLIDE_MAX_MM = 1.5   # a bigger corrective xy move lifts the open jaws (up to pregrasp, over, straight down) instead of sliding them across the mat:
+                           # 12 Nov 2026 lying spacers rolled away on every 2.5-4.2 mm slide at grasp height (5 misses) and were held after the 0.9 / ~1 mm ones
 LOWER_CAP_MM = (-5.0, 6.0)                              # (raise, lower) caps of the grasp height, the same as the stage-2 rule's
 # why: 11 Nov 2026 live: the gripper readback (0-100) after the lift is 0.5-1.5 empty, 4.0-4.8 holding a nut across its flats or a 6 mm spacer, 1.3-1.5 holding a wing nut by a thin wing (= empty); close2 read 4.49 once but the lift 0.54 (the nut slipped out), so only the reading after the lift counts
 GRIP_EMPTY_MAX = 2.0
@@ -666,9 +668,13 @@ def closed_loop_pick(cc, table, nut_in, place_in, biases, a, run, say, wpose=Non
         info.update({"final_residual_mm": round(math.hypot(*res) * 25.4, 2), "grasp_cmd_in": [round(v, 3) for v in xy2], "final_corr_mm": 0.0, "final_h_before": round(h, 1), "final_h_after": round(h, 1)})
         fix = final_fix(h, res, lower)
         if fix:   # ONE corrective move: the grasp waypoint alone, at the corrected xy and height, jaws open (no sweep: it starts at the grasp and moves a few mm)
-            (cx, cy), lower2 = fix; xy3 = [xy2[0] + cx, xy2[1] + cy]; p2, r2 = stage(xy3, CORR_STAGE, grasp_h_in=hi(lower2)); x2, y2, h2, res2 = readback(r2)
+            (cx, cy), lower2 = fix; xy3 = [xy2[0] + cx, xy2[1] + cy]; lifted = math.hypot(cx, cy) * 25.4 > FINAL_SLIDE_MAX_MM
+            if lifted:   # straight up off the mat at the old spot, over at pregrasp height, straight down at the corrected one
+                pu, ru = stage(xy2, ("pregrasp",)); p2, r2 = stage(xy3, ("pregrasp",) + CORR_STAGE, grasp_h_in=hi(lower2)); p2 = {"waypoints": pu["waypoints"] + p2["waypoints"]}; r2 = ru + r2
+            else: p2, r2 = stage(xy3, CORR_STAGE, grasp_h_in=hi(lower2))
+            x2, y2, h2, res2 = readback(r2); info["final_corr_lifted"] = lifted
             info.update({"final_residual_mm": round(math.hypot(*res2) * 25.4, 2), "grasp_cmd_in": [round(v, 3) for v in xy3], "final_corr_mm": round(math.hypot(cx, cy) * 25.4, 2), "final_h_after": round(h2, 1), "grasp_lowered_mm": round(lower2, 1)})
-            say({"run": run, "stage": "final_corr", "attempt": attempt, "cmd_in": info["grasp_cmd_in"], "reached_in": [round(x2, 3), round(y2, 3)], "corr_mm": _mm((cx, cy)), "lowered_mm": round(lower2, 1), "h_before": round(h, 1), "h_after": round(h2, 1), "residual_mm": _mm(res2)})
+            say({"run": run, "stage": "final_corr", "attempt": attempt, "cmd_in": info["grasp_cmd_in"], "reached_in": [round(x2, 3), round(y2, 3)], "corr_mm": _mm((cx, cy)), "lifted": lifted, "lowered_mm": round(lower2, 1), "h_before": round(h, 1), "h_after": round(h2, 1), "residual_mm": _mm(res2)})
             plan = {"waypoints": [w for w in plan["waypoints"] if w["name"] != "grasp"] + p2["waypoints"]}; rows = [r for r in rows if r["wp"] != "grasp"] + r2; xy2, lower = xy3, lower2
         p3, r3 = stage(xy2, CLOSE_STAGE if jaw else CLOSE_STAGE + CARRY_STAGE, grasp_h_in=hi(lower))   # (close1, close2, lift [, the carry]) at the final pose
         return {"waypoints": plan["waypoints"] + p3["waypoints"]}, rows + r3, xy2, lower
