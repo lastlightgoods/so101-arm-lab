@@ -38,16 +38,17 @@ def run(pl, cc, table, monkeypatch, capsys, tmp_path, arm, extra=(), session=Tru
 
 # ---------------------------------------------------------------- the decision
 def test_final_fix_fires_outside_the_band_or_over_the_xy_tolerance_and_caps(pl):
-    f = pl.final_fix; mm = 1 / 25.4
-    assert f(1.0, (0.0, 0.0), 0.0) is None and f(0.5, (0.0, 0.0), 0.0) is None and f(2.0, (0.0, 0.0), 0.0) is None, "inside the 0.5-2.0 band, on the aim: nothing"
-    assert f(1.0, (1.4 * mm, 0.0), 0.0) is None, "1.4 mm xy is inside the 1.5 tolerance"
-    (cx, cy), lw = f(1.0, (1.6 * mm, 0.0), 0.0); assert cx == pytest.approx(1.6 * mm) and lw == 0.0, "xy alone: the height stays"
-    assert f(0.4, (0, 0), 0.0)[1] == pytest.approx(-0.6) and f(2.1, (0, 0), 0.0)[1] == pytest.approx(1.1), "outside the band: to 1.0 mm"
-    assert f(5.4, (0, 0), 0.0)[1] == pytest.approx(4.4) and f(5.4, (0, 0), 2.0)[1] == pytest.approx(6.0), "lowering is capped at 6 mm in all"
+    f = pl.final_fix; mm = 1 / 25.4; T, (LO, HI) = pl.FINAL_H_TARGET_MM, pl.FINAL_H_BAND_MM
+    assert (T, LO, HI) == (-1.0, -4.0, 1.0), "12 Nov 2026: the grasp aims 1 mm into the mat (the 11 Nov successes read -3.6 to +1.3 mm, median -1.4)"
+    assert f(T, (0.0, 0.0), 0.0) is None and f(LO, (0.0, 0.0), 0.0) is None and f(HI, (0.0, 0.0), 0.0) is None, "inside the band, on the aim: nothing"
+    assert f(T, (1.4 * mm, 0.0), 0.0) is None, "1.4 mm xy is inside the 1.5 tolerance"
+    (cx, cy), lw = f(T, (1.6 * mm, 0.0), 0.0); assert cx == pytest.approx(1.6 * mm) and lw == 0.0, "xy alone: the height stays"
+    assert f(HI + 0.1, (0, 0), 0.0)[1] == pytest.approx(HI + 0.1 - T) and f(LO - 0.1, (0, 0), 0.0)[1] == pytest.approx(LO - 0.1 - T), "outside the band: to the target"
+    assert f(3.4, (0, 0), 0.0)[1] == pytest.approx(4.4) and f(3.4, (0, 0), 2.0)[1] == pytest.approx(6.0), "lowering is capped at 6 mm in all"
     assert f(-9.0, (0, 0), 0.0)[1] == -5.0 and f(30.0, (0, 0), 0.0)[1] == 6.0, "raise cap 5, lower cap 6"
     assert f(30.0, (0, 0), 6.0) is None and f(-9.0, (0, 0), -5.0) is None, "already at the cap and xy fine: no move"
-    (cx, cy), _ = f(1.0, (10 * mm, 0.0), 0.0); assert math.hypot(cx, cy) / mm == pytest.approx(4.0), "xy capped at 4 mm"
-    (cx, cy), _ = f(1.0, (3 * mm, -4 * mm), 0.0); assert (cx / mm, cy / mm) == (pytest.approx(2.4), pytest.approx(-3.2)), "a 5 mm residual scaled to 4 mm, direction kept"
+    (cx, cy), _ = f(T, (10 * mm, 0.0), 0.0); assert math.hypot(cx, cy) / mm == pytest.approx(4.0), "xy capped at 4 mm"
+    (cx, cy), _ = f(T, (3 * mm, -4 * mm), 0.0); assert (cx / mm, cy / mm) == (pytest.approx(2.4), pytest.approx(-3.2)), "a 5 mm residual scaled to 4 mm, direction kept"
 
 
 # ---------------------------------------------------------------- the split stage on the fake arm
@@ -58,12 +59,13 @@ def test_no_correction_when_the_final_pose_is_on_target(pl, cc, table, monkeypat
     r, = pl.rec.runs; assert r.metrics_["final_corr_mm"] == 0.0 and "final_h_before" in r.metrics_ and r.metrics_["final_h_after"] == r.metrics_["final_h_before"]
 
 
-@pytest.mark.parametrize("dh,dxy", [(3.5, (0.0, 0.0)), (-3.0, (0.0, 0.0)), (0.0, (3.0, 0.0)), (2.5, (0.0, -2.5))])
+@pytest.mark.parametrize("dh,dxy", [(3.5, (0.0, 0.0)), (-5.5, (0.0, 0.0)), (0.0, (3.0, 0.0)), (2.5, (0.0, -2.5))])   # the fake reads the grasp at +1 mm (its command) + dh: 4.5 / -4.5 (outside -4..1) / xy only (height in band, kept) / 3.5
 def test_one_corrective_move_at_grasp_height_lands_the_tip_on_target(pl, cc, table, monkeypatch, capsys, tmp_path, dh, dxy):
     arm = FinalArm(cc, table, shortfall_mm=7.0, dh=dh, dxy=dxy); out = run(pl, cc, table, monkeypatch, capsys, tmp_path, arm, wrist=frame_feed(jaw_frame(ring=True))); rec, = records(out); c, = stages(out, "final_corr")
     assert [n for n, _ in arm.calls] == [HOVER, POSE, PRE, CORR, CLOSE, CARRY], "exactly one corrective stage, the grasp waypoint alone, before the close"
-    assert c["h_after"] == pytest.approx(1.0, abs=0.35) and math.hypot(*c["residual_mm"]) < 1.0, "the readback after the move is on the 1 mm target and on the aim"
-    assert abs(c["h_before"] - 1.0) > 0.5 or math.hypot(*stages(out, "final")[0]["residual_mm"]) > 1.5, "it fired for a reason"
+    in_band = pl.FINAL_H_BAND_MM[0] <= c["h_before"] <= pl.FINAL_H_BAND_MM[1]
+    assert c["h_after"] == pytest.approx(c["h_before"] if in_band else pl.FINAL_H_TARGET_MM, abs=0.35) and math.hypot(*c["residual_mm"]) < 1.0, "the readback after the move is on the aim, and on the height target when it started outside the band"
+    assert not (pl.FINAL_H_BAND_MM[0] <= c["h_before"] <= pl.FINAL_H_BAND_MM[1]) or math.hypot(*stages(out, "final")[0]["residual_mm"]) > 1.5, "it fired for a reason"
     assert rec["final_h_before"] == c["h_before"] and rec["final_h_after"] == c["h_after"] and rec["final_corr_mm"] == pytest.approx(math.hypot(*c["corr_mm"]), abs=0.1) and rec["final_residual_mm"] == pytest.approx(math.hypot(*c["residual_mm"]), abs=0.1)
     r, = pl.rec.runs; assert r.metrics_["final_corr_mm"] == rec["final_corr_mm"] and r.metrics_["final_h_before"] == c["h_before"] and r.metrics_["final_h_after"] == c["h_after"]
     ks = arm.plans[3]["waypoints"]; assert [w["name"] for w in ks] == ["grasp"] and arm.plans[4]["waypoints"][0]["joints"] == arm.plans[4]["waypoints"][1]["joints"], "the close steps hold the corrected grasp pose"

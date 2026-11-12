@@ -49,13 +49,13 @@ def test_two_readback_corrections_converge_on_an_arm_that_reaches_7mm_short(pl, 
     assert [n for n, _ in arm2.calls] == [["hover_pre", "hover_nut"], ["hover_pre", "hover_nut", "grasp"], FINAL] and records(out2)[0]["picked"] and "jaw_check" not in stages(out2), "--no-jaw-check: the three staged runs of before"
 
 
-@pytest.mark.parametrize("high_mm", [1.0, 4.0, 14.0])   # why: GRASP_H_IN is 1.0 mm, so these read 2.0 / 5.0 / 15.0 mm; since 11 Nov 2026 the grasp is lowered above 2.5 mm (was 6), to land at 1 mm
-def test_the_grasp_is_lowered_only_when_the_tip_sits_more_than_2_5mm_high(pl, cc, table, monkeypatch, capsys, tmp_path, high_mm):
+@pytest.mark.parametrize("high_mm", [-1.5, 1.5, 14.0])   # why: GRASP_H_IN is 1.0 mm, so these read -0.5 / 2.5 / 15.0 mm; since 12 Nov 2026 the grasp is lowered above +1 mm (GRASP_H_HIGH_MM) to land at -1 mm (GRASP_H_TARGET_MM)
+def test_the_grasp_is_lowered_only_when_the_tip_sits_above_the_high_mark(pl, cc, table, monkeypatch, capsys, tmp_path, high_mm):
     arm = ShortArm(cc, table, shortfall_mm=7.0, high_mm=high_mm)
     out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--grasp-tilt-deg", "0", "--state", str(tmp_path / "s.json")]); st = stages(out); rec, = records(out)
-    h = st["grasp_pose"]["h_mm"]; want = min(h - 1.0, 6.0) if h > 2.5 else 0.0
+    h = st["grasp_pose"]["h_mm"]; T = pl.GRASP_H_TARGET_MM; want = min(h - T, 6.0) if h > pl.GRASP_H_HIGH_MM else 0.0
     assert h == pytest.approx(pl.GRASP_H_IN * 25.4 + high_mm, abs=0.2) and st["grasp_pose"]["lowered_mm"] == pytest.approx(want, abs=0.06) and rec["grasp_lowered_mm"] == pytest.approx(want, abs=0.06)
-    assert (want == 0.0) == (high_mm == 1.0) and (want == 6.0) == (high_mm == 14.0), "2 mm high -> no change; 5 -> lowered 4; 15 -> capped at 6"
+    assert (want == 0.0) == (high_mm == -1.5) and (want == 6.0) == (high_mm == 14.0), "-0.5 mm -> no change; 2.5 -> lowered 3.5; 15 -> capped at 6"
     low = [h_in for (_, _, h_in) in arm.ik_calls if h_in < 0.2]   # stage 2's grasp, then the lift stage's grasp, close1, close2 (--grasp-tilt-deg 0 here: the lower/raise rule is tested on its own; the tilt changes the tip height by a mm or two)
     assert len(low) == 4 and low[0] == pytest.approx(pl.GRASP_H_IN, abs=1e-4) and all(h == pytest.approx(pl.GRASP_H_IN - want / 25.4, abs=0.005) for h in low[1:]), "the lowering goes through /api/ik for the grasp AND the close steps (h is printed to 0.1 mm, so 0.1 mm of slack)"
     assert pl.rec.runs[0].metrics_["grasp_lowered_mm"] == pytest.approx(want, abs=0.06)
@@ -183,10 +183,10 @@ def test_the_last_stage_moves_to_the_corrected_point_in_the_air_then_comes_strai
     assert pl.PREGRASP_H_IN * 25.4 >= 10.0 - 0.2
 
 
-@pytest.mark.parametrize("low_mm,raise_mm", [(-3.0, 3.0), (-7.0, 5.0), (1.0, 0.0)])   # why: h reads 1.0 + low_mm now that the grasp is at 1.0 mm (was 3.05): -2 -> raise 3, -6 -> capped at 5, +2 -> none
+@pytest.mark.parametrize("low_mm,raise_mm", [(-6.0, 4.0), (-9.0, 5.0), (-3.0, 0.0)])   # why: h reads 1.0 + low_mm: -5 -> raise 4 (to -1), -8 -> capped at 5, -2 -> none (12 Nov 2026: only below -4 mm, GRASP_H_LOW_MM)
 def test_a_grasp_that_presses_into_the_mat_is_raised(pl, cc, table, monkeypatch, capsys, tmp_path, low_mm, raise_mm):
-    """10 Nov: at the longer reaches the open-jaw grasp read -3.4 to -0.8 mm (pressing on the mat), stalled short and then dragged. A reading
-    under 1 mm raises the grasp so the readback lands at 1 mm, at most 5 mm."""
+    """10 Nov: at the longer reaches the open-jaw grasp read -3.4 to -0.8 mm (pressing on the mat), stalled short and then dragged; but on 11 Nov 18-21 h the picks that
+    landed 26 of 28 read -3.6 to +1.3 mm. So only a reading under GRASP_H_LOW_MM (-4) raises the grasp, to land at GRASP_H_TARGET_MM (-1), at most 5 mm."""
     arm = ShortArm(cc, table, shortfall_mm=7.0, high_mm=low_mm)
     out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--grasp-tilt-deg", "0", "--state", str(tmp_path / "s.json")]); st = stages(out); rec, = records(out)
     h = st["grasp_pose"]["h_mm"]; assert h == pytest.approx(pl.GRASP_H_IN * 25.4 + low_mm, abs=0.2)

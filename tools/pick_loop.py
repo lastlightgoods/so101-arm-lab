@@ -82,7 +82,11 @@ LIFT_STAGE, CARRY_STAGE, ABORT_STAGE = ("pregrasp_up", "pregrasp", "grasp", "clo
 # why: 11 Nov 2026 22:2x the stage-2 height reading did not carry to the final approach (pregrasp_up -> pregrasp -> grasp lands up to 4 mm off it: 1.6 vs 5.4, 5.4 vs 2.5 mm) and several misses closed 3.4-7 mm above a ~3 mm nut,
 # so with a persistent session (a stage costs ~0.2 s) the final stage is split at the grasp: read the tip back there, and send ONE corrective move at grasp height when it is off (docs/pick-loop.md)
 PRE_STAGE, CORR_STAGE, CLOSE_STAGE = ("pregrasp_up", "pregrasp", "grasp"), ("grasp",), ("close1", "close2", "lift")
-FINAL_H_TARGET_MM, FINAL_H_BAND_MM = 1.0, (0.5, 2.0)   # the corrective move fires when the grasp readback is outside the band; it aims at the target
+# why: 12 Nov 2026 00:1x-00:4x supervised tidy runs: 0 of 4 held, each grasp read +1.5 to +2.9 mm at the close and the jaws rolled lying spacers away;
+# the 11 Nov 18:12-21:35 runs that landed 26 of 28 closed at a readback of -3.6 to +1.3 mm (median about -1.4: pressing on the mat, the jaws under the part).
+# The 1 mm target (5be71dc stage-2 rule, then the final correction) lifted the grasp off the mat. One target for both rules, from those measurements:
+GRASP_H_TARGET_MM, GRASP_H_HIGH_MM, GRASP_H_LOW_MM = -1.0, 1.0, -4.0   # aim the jaws 1 mm into the mat; lower when the readback is above +1 mm, raise only below -4 mm
+FINAL_H_TARGET_MM, FINAL_H_BAND_MM = GRASP_H_TARGET_MM, (GRASP_H_LOW_MM, GRASP_H_HIGH_MM)   # the corrective move fires when the grasp readback is outside the band; it aims at the target
 FINAL_XY_TOL_MM, FINAL_XY_CAP_MM = 1.5, 4.0            # ... or when the xy residual against the aim is over the tolerance; the xy move is capped
 LOWER_CAP_MM = (-5.0, 6.0)                              # (raise, lower) caps of the grasp height, the same as the stage-2 rule's
 # why: 11 Nov 2026 live: the gripper readback (0-100) after the lift is 0.5-1.5 empty, 4.0-4.8 holding a nut across its flats or a 6 mm spacer, 1.3-1.5 holding a wing nut by a thin wing (= empty); close2 read 4.49 once but the lift 0.54 (the nut slipped out), so only the reading after the lift counts
@@ -639,7 +643,7 @@ def closed_loop_pick(cc, table, nut_in, place_in, biases, a, run, say, wpose=Non
     def grasp_pose(attempt):   # (b) corrected hover (jaws open), then down to grasp height; read back again, and measure the tip height
         _, r2 = stage(xy1, STAGES[1]); j2 = reached_joints(r2, "grasp"); x, y, h = fk_mat(cc, table, j2)
         c2 = (aim[0] - x, aim[1] - y); xy2 = [xy1[0] + c2[0], xy1[1] + c2[1]]
-        lower = min(h - 1.0, 6.0) if h > 2.5 else (-min(1.0 - h, 5.0) if h < 1.0 else 0.0)   # why: the jaws must reach the mat to get under the nut; the cap keeps the IK target within 3 mm below the mat plane the readback contradicts
+        T = GRASP_H_TARGET_MM; lower = min(h - T, 6.0) if h > GRASP_H_HIGH_MM else (-min(T - h, 5.0) if h < GRASP_H_LOW_MM else 0.0)   # why: the jaws must reach the mat to get under the part (see GRASP_H_TARGET_MM); the caps keep the IK target near the mat plane
         # ... and 11 Nov 2026 the old band (accept 1-6 mm) let final grasps sit 3.4-7 mm up over a ~3 mm nut (misses at 5.3, 5.6, 6.7 mm, the jaws closed above it): above 2.5 mm, lower to land at 1 mm
         # ... and a tip that reads below 1 mm is pressing on the mat (10 Nov: -3.4 to -0.8 mm at the longer reaches), which stalls it short and
         # drags it when it moves on: raise the grasp so the readback lands at 1 mm (at most 5 mm). Negative lowered_mm = raised.
