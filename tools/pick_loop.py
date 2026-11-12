@@ -21,7 +21,7 @@ State (biases, place offset, history) persists in --state so later sessions star
 Every pick is also one MLflow run in experiment `so101-picks` (jetson/labtrack.py: params, landing error, per-waypoint sag, the stage
 corrections, the overhead frame at landing, the jaw-check frames, the plan and the state file); with no tracking server the loop runs as before.
 """
-import argparse, json, math, os, random, subprocess, sys, time, urllib.error, urllib.request
+import argparse, json, math, os, random, select, subprocess, sys, time, urllib.error, urllib.request
 import cv2, numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -79,6 +79,14 @@ ARM = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"
 NO_LEARN = tuple(BACKOFF)   # why: pregrasp_up and hover_pre are defined from another waypoint's command, not mat points: their droop is not sag to learn, and they must not change the biases
 STAGES = (("hover_pre", "hover_nut"), ("hover_pre", "hover_nut", "grasp"), ("pregrasp_up", "pregrasp", "grasp", "close1", "close2", "lift", "hover_tgt", "place", "open", "lift2", "rest"))
 LIFT_STAGE, CARRY_STAGE, ABORT_STAGE = ("pregrasp_up", "pregrasp", "grasp", "close1", "close2", "lift"), ("hover_tgt", "place", "open", "lift2", "rest"), ("hover_pre", "hover_nut", "rest")
+# why: 11 Nov 2026 22:2x the stage-2 height reading did not carry to the final approach (pregrasp_up -> pregrasp -> grasp lands up to 4 mm off it: 1.6 vs 5.4, 5.4 vs 2.5 mm) and several misses closed 3.4-7 mm above a ~3 mm nut,
+# so with a persistent session (a stage costs ~0.2 s) the final stage is split at the grasp: read the tip back there, and send ONE corrective move at grasp height when it is off (docs/pick-loop.md)
+PRE_STAGE, CORR_STAGE, CLOSE_STAGE = ("pregrasp_up", "pregrasp", "grasp"), ("grasp",), ("close1", "close2", "lift")
+FINAL_H_TARGET_MM, FINAL_H_BAND_MM = 1.0, (0.5, 2.0)   # the corrective move fires when the grasp readback is outside the band; it aims at the target
+FINAL_XY_TOL_MM, FINAL_XY_CAP_MM = 1.5, 4.0            # ... or when the xy residual against the aim is over the tolerance; the xy move is capped
+LOWER_CAP_MM = (-5.0, 6.0)                              # (raise, lower) caps of the grasp height, the same as the stage-2 rule's
+# why: 11 Nov 2026 live: the gripper readback (0-100) after the lift is 0.5-1.5 empty, 4.0-4.8 holding a nut across its flats or a 6 mm spacer, 1.3-1.5 holding a wing nut by a thin wing (= empty); close2 read 4.49 once but the lift 0.54 (the nut slipped out), so only the reading after the lift counts
+GRIP_EMPTY_MAX = 2.0
 SPEED = {"closed": 50.0, "open": 80.0}   # why: the staged runs start each stage from a standstill close to the nut; 50 deg/s settles cleaner for the readback
 JAW_HOLE_MAX = 100.0   # mean grey (0-255) allowed in a ring's hole inside the jaw window: the held nut's hole measured 19-56, the bright jaw edge 204-222 (frames 11 Nov 2026)
 JAW_WINDOW = (300, 300, 380, 360)   # wrist-frame pixels (x0, y0, x1, y1) between the jaw tips after close + lift (diag frames, 10 Nov 2026: the nut's ring sat at about (340, 325))
@@ -343,10 +351,96 @@ def build_plan(nut_in, tgt_in, biases, names=None, jaw_open=JAW_OPEN, grasp_h_in
     return {"waypoints": wps}
 
 
-def run_plan(plan, max_deg_s):
+PLAN_TIMEOUT_S = 180
+PICK_SEQ_ARGS = ""   # why: extra pick_seq flags, set by tools/autoloop.py --record-demos to "--tick-sink PATH" before the session starts, empty otherwise (2026-11-12); --serve writes one sink file (with its header line) per plan, like --plan runs
+SERVE_CMD = "cd ~/so101 && source env.sh >/dev/null 2>&1; exec ~/so101/.venv/bin/python pick_seq.py --serve --idle-s 60"
+SESSION = None   # why: 12 Nov 2026 a pick_seq session costs 5.4 s of start-up and a closed-loop pick has 3-5 stages; main() / autoloop set this to a PickSession (--session, default on), run_plan then reuses one connection
+
+
+class SessionDead(Exception):
+    """The persistent pick_seq is gone. `rows` = the waypoint rows of THIS plan already received (non-empty: the arm moved, never replay it silently)."""
+    def __init__(self, msg, rows=()): super().__init__(msg); self.rows = list(rows)
+
+
+class PickSession:
+    """One `ssh jetson ... pick_seq.py --serve` kept for many plans (jetson/pick_seq.py --serve): started lazily on the first plan, plans go in as JSON lines on stdin, rows and
+    {"plan_done": n} come back on stdout. `argv` / `popen` are for tests. A session that never completed a plan (old pick_seq without --serve, arm busy) is `broken`: run_plan uses
+    the scp+ssh path from then on. One that ran plans and then ended (60 s idle timeout, ssh drop) is simply restarted for the next plan."""
+    def __init__(self, argv=None, timeout=PLAN_TIMEOUT_S, popen=subprocess.Popen):
+        self.argv = argv or ["ssh", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3", "jetson", SERVE_CMD + ((" " + PICK_SEQ_ARGS) if PICK_SEQ_ARGS else "")]
+        self.timeout, self.popen, self.proc, self.buf, self.served, self.broken, self.starts = timeout, popen, None, b"", 0, False, 0
+
+    def _start(self):
+        self.proc = self.popen(self.argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0); self.buf = b""; self.starts += 1
+
+    def _line(self, deadline):
+        while b"\n" not in self.buf:
+            left = deadline - time.monotonic()
+            if left <= 0: raise subprocess.TimeoutExpired(self.argv, self.timeout)
+            if not select.select([self.proc.stdout], [], [], min(left, 1.0))[0]: continue
+            chunk = os.read(self.proc.stdout.fileno(), 65536)
+            if not chunk: return None
+            self.buf += chunk
+        line, self.buf = self.buf.split(b"\n", 1); return line.decode("utf-8", "replace")
+
+    def _run_once(self, plan, max_deg_s):
+        if self.proc is None or self.proc.poll() is not None: self._start()
+        rows = []; deadline = time.monotonic() + self.timeout
+        try: self.proc.stdin.write((json.dumps({"waypoints": plan["waypoints"], "max_deg_s": max_deg_s, "correct": 0}) + "\n").encode()); self.proc.stdin.flush()
+        except (BrokenPipeError, OSError) as e: raise SessionDead(f"pick_seq session: write failed ({e})") from e
+        while True:
+            try: line = self._line(deadline)
+            except subprocess.TimeoutExpired: self.close(); raise   # why: the arm may still be moving; no replay, the caller trips
+            if line is None: raise SessionDead("pick_seq session ended mid-plan" if rows else "pick_seq session ended before the plan ran", rows)
+            try: d = json.loads(line)
+            except ValueError: continue
+            if not isinstance(d, dict): continue
+            if "wp" in d: rows.append(d)
+            elif "plan_done" in d: self.served += 1; return rows
+            elif d.get("stopped"): self.close(); raise SystemExit("pick_seq was stopped (so101-stop); not retrying")
+            elif d.get("fatal"): raise SessionDead("pick_seq session failed: " + str(d.get("error"))[:200], rows)
+            elif "error" in d: raise SystemExit("pick_seq refused the plan: " + str(d["error"])[:200])
+            elif "bye" in d: raise SessionDead(f"pick_seq session left ({d['bye']})", rows)
+
+    def run(self, plan, max_deg_s):
+        for attempt in (0, 1):
+            try: return self._run_once(plan, max_deg_s)
+            except SessionDead as e:
+                self.close()
+                if e.rows: raise
+                if attempt == 0 and self.served: continue   # why: it served plans and then left (idle timeout): nothing ran, start a new one
+                if not self.served: self.broken = True
+                raise
+
+    def close(self):
+        p, self.proc = self.proc, None
+        if p is None: return
+        try: p.stdin.write(b'{"quit": true}\n'); p.stdin.flush(); p.stdin.close()
+        except (BrokenPipeError, OSError, ValueError): pass
+        try: p.wait(timeout=5)
+        except Exception:
+            try: p.terminate(); p.wait(timeout=3)
+            except Exception:
+                try: p.kill()
+                except Exception: pass
+        try: p.stdout.close()
+        except Exception: pass
+
+
+def run_plan(plan, max_deg_s, session=None):
+    s = session or SESSION
+    if s is not None and not s.broken:
+        try: return s.run(plan, max_deg_s)
+        except SessionDead as e:
+            if e.rows: raise SystemExit(f"{e}; {len(e.rows)} rows of the plan arrived, not replaying it") from e   # why: the arm moved part of the plan; never a silent half-plan
+            print(json.dumps({"note": "pick_seq session unavailable, one attempt on the scp+ssh path", "why": str(e)}), file=sys.stderr, flush=True)
+    return run_plan_ssh(plan, max_deg_s)
+
+
+def run_plan_ssh(plan, max_deg_s):
     p = "/tmp/pick_plan.json"; open("/tmp/pick_plan_local.json", "w").write(json.dumps(plan))
     subprocess.run(["scp", "-q", "/tmp/pick_plan_local.json", f"jetson:{p}"], check=True)
-    out = subprocess.run(["ssh", "-o", "ConnectTimeout=8", "jetson", f"cd ~/so101 && source env.sh >/dev/null 2>&1; ~/so101/.venv/bin/python pick_seq.py --plan {p} --correct 0 --max-deg-s {max_deg_s}"], capture_output=True, text=True, timeout=180)
+    out = subprocess.run(["ssh", "-o", "ConnectTimeout=8", "jetson", f"cd ~/so101 && source env.sh >/dev/null 2>&1; ~/so101/.venv/bin/python pick_seq.py --plan {p} --correct 0 --max-deg-s {max_deg_s}{(' ' + PICK_SEQ_ARGS) if PICK_SEQ_ARGS else ''}"], capture_output=True, text=True, timeout=PLAN_TIMEOUT_S)
     rows = []
     for line in out.stdout.splitlines():
         try: d = json.loads(line)
@@ -354,6 +448,18 @@ def run_plan(plan, max_deg_s):
         if "wp" in d: rows.append(d)
     if not rows: raise SystemExit("pick_seq produced no waypoint rows:\n" + out.stdout[-800:] + out.stderr[-800:])
     return rows
+
+
+def open_session(on=True):
+    """Install a PickSession as the module's session (lazy: nothing connects until the first plan). Returns it, or None when off."""
+    global SESSION
+    SESSION = PickSession() if on else None; return SESSION
+
+
+def close_session():
+    global SESSION
+    s, SESSION = SESSION, None
+    if s is not None: s.close()
 
 
 def fk_mat(cc, table, joints):
@@ -440,6 +546,9 @@ def resolve_grasp_roll(spec, cc, table, nut_in, tilt_deg=0.0, objects=None):
     return round(r, 2), info
 
 
+def _session_on(): return SESSION is not None and not SESSION.broken
+
+
 def reached_joints(rows, name):
     r = [r for r in rows if r["wp"] == name][-1]; return {k: float(r["reached"][k]) for k in ARM}
 
@@ -448,7 +557,29 @@ def _mm(c): return [round(c[0] * 25.4, 1), round(c[1] * 25.4, 1)]
 
 
 # ---------------------------------------------------------------- the jaw check (2A)
-def jaw_check(jpeg=None, window=JAW_WINDOW, out_path=None, min_score=None):
+def gripper_after_lift(rows):
+    """The gripper readback (0-100) of the lift waypoint of `rows`, or None (no rows, no lift row, no reading). Only this one counts: close2 can read high and the nut still slip out on the lift (11 Nov 2026)."""
+    try:
+        r = [r for r in (rows or []) if r.get("wp") == "lift"]; return float(r[-1]["reached"]["gripper"]) if r else None
+    except Exception: return None
+
+
+def grip_held(camera, gripper, grip_max=GRIP_EMPTY_MAX):
+    """held = (gripper after the lift > grip_max) OR (the camera ring check says in_jaws). True / False, or None when the gripper reads empty and the camera is unknown (carry on, as before)."""
+    if gripper is not None and gripper > grip_max: return True
+    return camera
+
+
+def jaw_check(jpeg=None, window=JAW_WINDOW, out_path=None, min_score=None, rows=None, grip_max=GRIP_EMPTY_MAX):
+    """The object-agnostic grip check: the wrist-camera ring check (`_camera_check`, unchanged) OR the gripper readback after the lift (`rows`: the lift stage's rows;
+    None: camera only). {"in_jaws" (the verdict), "camera" (the ring check's), "gripper" (the lift reading or None), ...the camera's keys}. Never raises."""
+    res = _camera_check(jpeg, window, out_path, min_score); grip = gripper_after_lift(rows)
+    res.update({"camera": res["in_jaws"], "gripper": None if grip is None else round(grip, 2)}); res["in_jaws"] = grip_held(res["camera"], grip, grip_max)
+    if res["in_jaws"] is True and res["camera"] is not True: res["note"] = res["note"] or f"held by the gripper reading ({grip:.2f} > {grip_max})"
+    return res
+
+
+def _camera_check(jpeg=None, window=JAW_WINDOW, out_path=None, min_score=None):
     """Is the nut between the jaw tips? wrist_check.find_ring over the jaw window of a wrist frame taken after the lift (`jpeg`; None
     fetches one). Never raises: {"in_jaws": True | False | None, "ring": {uv, r_px, score} | None, "frame": out_path | None, "window", "note"};
     in_jaws None means unknown (no frame, a bad frame, a failure) and the caller carries on as if it were held."""
@@ -471,6 +602,16 @@ def jaw_check(jpeg=None, window=JAW_WINDOW, out_path=None, min_score=None):
         return res
     except Exception as e:   # why: a check must never take the pick down with it; unknown -> carry, and the note says why
         res["note"] = f"jaw check failed: {type(e).__name__}: {e}"; return res
+
+
+def final_fix(h_mm, res_in, lower_mm):
+    """The final-pose correction decision: (xy move in mat inches, new lowered_mm) or None. Fires when the grasp readback height `h_mm` is outside FINAL_H_BAND_MM or the xy residual
+    `res_in` (aim - reached, inches) is over FINAL_XY_TOL_MM; the xy move is the residual capped to FINAL_XY_CAP_MM, the height moves to FINAL_H_TARGET_MM within LOWER_CAP_MM."""
+    off_h = not (FINAL_H_BAND_MM[0] <= h_mm <= FINAL_H_BAND_MM[1]); r_mm = math.hypot(*res_in) * 25.4; off_xy = r_mm > FINAL_XY_TOL_MM
+    new_lower = max(LOWER_CAP_MM[0], min(LOWER_CAP_MM[1], lower_mm + (h_mm - FINAL_H_TARGET_MM))) if off_h else lower_mm
+    if not off_xy and abs(new_lower - lower_mm) < 0.05: return None   # (off_h pinned at a cap: nothing to move)
+    k = min(1.0, FINAL_XY_CAP_MM / r_mm) if r_mm > 0 else 1.0
+    return (res_in[0] * k, res_in[1] * k), new_lower
 
 
 def closed_loop_pick(cc, table, nut_in, place_in, biases, a, run, say, wpose=None, check_path=None, jaw_path=None):
@@ -498,32 +639,48 @@ def closed_loop_pick(cc, table, nut_in, place_in, biases, a, run, say, wpose=Non
     def grasp_pose(attempt):   # (b) corrected hover (jaws open), then down to grasp height; read back again, and measure the tip height
         _, r2 = stage(xy1, STAGES[1]); j2 = reached_joints(r2, "grasp"); x, y, h = fk_mat(cc, table, j2)
         c2 = (aim[0] - x, aim[1] - y); xy2 = [xy1[0] + c2[0], xy1[1] + c2[1]]
-        lower = min(h - 3.0, 6.0) if h > 6.0 else (-min(1.0 - h, 5.0) if h < 1.0 else 0.0)   # why: the jaws must reach the mat to get under the nut; the cap keeps the IK target within 3 mm below the mat plane the readback contradicts
+        lower = min(h - 1.0, 6.0) if h > 2.5 else (-min(1.0 - h, 5.0) if h < 1.0 else 0.0)   # why: the jaws must reach the mat to get under the nut; the cap keeps the IK target within 3 mm below the mat plane the readback contradicts
+        # ... and 11 Nov 2026 the old band (accept 1-6 mm) let final grasps sit 3.4-7 mm up over a ~3 mm nut (misses at 5.3, 5.6, 6.7 mm, the jaws closed above it): above 2.5 mm, lower to land at 1 mm
         # ... and a tip that reads below 1 mm is pressing on the mat (10 Nov: -3.4 to -0.8 mm at the longer reaches), which stalls it short and
         # drags it when it moves on: raise the grasp so the readback lands at 1 mm (at most 5 mm). Negative lowered_mm = raised.
         info.update({"corr2_mm": _mm(c2), "grasp_h_mm": round(h, 1), "grasp_lowered_mm": round(lower, 1)})
         say({"run": run, "stage": "grasp_pose", "attempt": attempt, "cmd_in": [round(v, 3) for v in xy1], "reached_in": [round(x, 3), round(y, 3)], "h_mm": round(h, 1), "corr2_mm": info["corr2_mm"], "lowered_mm": round(lower, 1)})
         return xy2, lower
 
-    def grasp(xy2, lower, names, attempt):   # (c) the pick at the twice-corrected point
-        plan, rows = stage(xy2, names, grasp_h_in=(GRASP_H_IN - lower / 25.4) if lower else None)
-        j3 = reached_joints(rows, "grasp"); x, y, h = fk_mat(cc, table, j3); res = (aim[0] - x, aim[1] - y)
-        info["final_residual_mm"] = round(math.hypot(*res) * 25.4, 2); info["grasp_cmd_in"] = [round(v, 3) for v in xy2]
-        say({"run": run, "stage": "final", "attempt": attempt, "cmd_in": info["grasp_cmd_in"], "reached_in": [round(x, 3), round(y, 3)], "h_mm": round(h, 1), "residual_mm": _mm(res), "sag_deg": {r["wp"]: r["max_err_deg"] for r in rows}})
-        return plan, rows
+    def readback(rows):   # the tip at the grasp row: (x_in, y_in, h_mm, residual against the aim in inches)
+        x, y, h = fk_mat(cc, table, reached_joints(rows, "grasp")); return x, y, h, (aim[0] - x, aim[1] - y)
+
+    def grasp(xy2, lower, attempt):   # (c) the pick at the twice-corrected point; returns (plan, rows, xy, lower) of the final pose (the corrected one when the final-pose correction fired)
+        hi = lambda lw: (GRASP_H_IN - lw / 25.4) if lw else None
+        if not _session_on():   # why: without the persistent session each stage costs a connect (5.8 s), so the split (and its correction) is off: the single lift stage of before (12 Nov 2026)
+            plan, rows = stage(xy2, LIFT_STAGE if jaw else STAGES[2], grasp_h_in=hi(lower)); x, y, h, res = readback(rows)
+            info.update({"final_residual_mm": round(math.hypot(*res) * 25.4, 2), "grasp_cmd_in": [round(v, 3) for v in xy2], "final_corr_mm": None, "final_h_before": None, "final_h_after": None})
+            say({"run": run, "stage": "final", "attempt": attempt, "cmd_in": info["grasp_cmd_in"], "reached_in": [round(x, 3), round(y, 3)], "h_mm": round(h, 1), "residual_mm": _mm(res), "sag_deg": {r["wp"]: r["max_err_deg"] for r in rows}})
+            return plan, rows, xy2, lower
+        plan, rows = stage(xy2, PRE_STAGE, grasp_h_in=hi(lower)); x, y, h, res = readback(rows)
+        say({"run": run, "stage": "final", "attempt": attempt, "cmd_in": [round(v, 3) for v in xy2], "reached_in": [round(x, 3), round(y, 3)], "h_mm": round(h, 1), "residual_mm": _mm(res), "sag_deg": {r["wp"]: r["max_err_deg"] for r in rows}})
+        info.update({"final_residual_mm": round(math.hypot(*res) * 25.4, 2), "grasp_cmd_in": [round(v, 3) for v in xy2], "final_corr_mm": 0.0, "final_h_before": round(h, 1), "final_h_after": round(h, 1)})
+        fix = final_fix(h, res, lower)
+        if fix:   # ONE corrective move: the grasp waypoint alone, at the corrected xy and height, jaws open (no sweep: it starts at the grasp and moves a few mm)
+            (cx, cy), lower2 = fix; xy3 = [xy2[0] + cx, xy2[1] + cy]; p2, r2 = stage(xy3, CORR_STAGE, grasp_h_in=hi(lower2)); x2, y2, h2, res2 = readback(r2)
+            info.update({"final_residual_mm": round(math.hypot(*res2) * 25.4, 2), "grasp_cmd_in": [round(v, 3) for v in xy3], "final_corr_mm": round(math.hypot(cx, cy) * 25.4, 2), "final_h_after": round(h2, 1), "grasp_lowered_mm": round(lower2, 1)})
+            say({"run": run, "stage": "final_corr", "attempt": attempt, "cmd_in": info["grasp_cmd_in"], "reached_in": [round(x2, 3), round(y2, 3)], "corr_mm": _mm((cx, cy)), "lowered_mm": round(lower2, 1), "h_before": round(h, 1), "h_after": round(h2, 1), "residual_mm": _mm(res2)})
+            plan = {"waypoints": [w for w in plan["waypoints"] if w["name"] != "grasp"] + p2["waypoints"]}; rows = [r for r in rows if r["wp"] != "grasp"] + r2; xy2, lower = xy3, lower2
+        p3, r3 = stage(xy2, CLOSE_STAGE if jaw else CLOSE_STAGE + CARRY_STAGE, grasp_h_in=hi(lower))   # (close1, close2, lift [, the carry]) at the final pose
+        return {"waypoints": plan["waypoints"] + p3["waypoints"]}, rows + r3, xy2, lower
 
     xy2, lower = grasp_pose(1)
-    if not jaw: plan, rows = grasp(xy2, lower, STAGES[2], 1); return plan, rows, info   # --no-jaw-check: grasp, close, lift, carry, place, open, lift, rest in one session, as before
-    plan, rows = grasp(xy2, lower, LIFT_STAGE, 1)
-    def look(attempt, path):   # (d) the wrist camera: is the nut between the jaw tips?
-        jc = jaw_check(None, window, path)
+    plan, rows, xy2, lower = grasp(xy2, lower, 1)
+    if not jaw: return plan, rows, info   # --no-jaw-check: grasp .. rest as before (one stage with the session off; with it, split at the grasp for the correction)
+    def look(attempt, path, rows):   # (d) the grip check: the gripper readback after the lift OR the wrist camera (is the nut between the jaw tips?)
+        jc = jaw_check(None, window, path, rows=rows)
         if jc["frame"]: info["jaw_frames"].append(jc["frame"])
         say({"run": run, "stage": "jaw_check", "attempt": attempt, **jc}); return jc
-    jc = look(1, jaw_path)
+    jc = look(1, jaw_path, rows)
     if jc["in_jaws"] is False:   # one retry: the corrected hover opens the jaws over the spot, then the readback-corrected grasp again
-        info["jaw_retry"] = True; xy2, lower = grasp_pose(2); plan, rows = grasp(xy2, lower, LIFT_STAGE, 2)
-        jc = look(2, jaw_path.replace(".jpg", "_retry.jpg") if jaw_path else None)
-    info.update({"in_jaws": jc["in_jaws"], "jaw_ring": jc["ring"]["uv"] if jc["ring"] else None})
+        info["jaw_retry"] = True; xy2, lower = grasp_pose(2); plan, rows, xy2, lower = grasp(xy2, lower, 2)
+        jc = look(2, jaw_path.replace(".jpg", "_retry.jpg") if jaw_path else None, rows)
+    info.update({"in_jaws": jc["in_jaws"], "jaw_ring": jc["ring"]["uv"] if jc["ring"] else None, "gripper": jc["gripper"], "camera": jc["camera"]})
     if jc["in_jaws"] is False: info["reason"] = "not_in_jaws"; p2, r2 = stage(xy2, ABORT_STAGE)   # open over the nut's spot, then rest: no carry
     else: p2, r2 = stage(xy2, CARRY_STAGE)   # (e) True, or None (no frame): carry
     return {"waypoints": plan["waypoints"] + p2["waypoints"]}, rows + r2, info
@@ -565,6 +722,7 @@ def pick_once(cc, table, state, a, run, nut_in, tgt, place_in, off, say, session
         rec = {"run": run, "target_in": tgt, "nut_in": [round(v, 2) for v in nut_in], "picked": picked, "landed_in": [round(v, 2) for v in landed[0]] if landed else None, "err_mm": round(err_mm, 1) if err_mm is not None else None,
                "seconds": round(dt, 1), "sag_deg": {r["wp"]: r["max_err_deg"] for r in rows}, "place_offset_in": [round(v, 3) for v in off], "mode": mode, "control": control, "jaw_open": a.jaw_open,
                "corr1_mm": info.get("corr1_mm"), "corr2_mm": info.get("corr2_mm"), "grasp_h_mm": info.get("grasp_h_mm"), "grasp_lowered_mm": info.get("grasp_lowered_mm"), "final_residual_mm": info.get("final_residual_mm"),
+               "final_corr_mm": info.get("final_corr_mm"), "final_h_before": info.get("final_h_before"), "final_h_after": info.get("final_h_after"), "gripper": info.get("gripper"), "camera": info.get("camera"),
                "aim_mm": info.get("aim_mm"), "jaw_dir": info.get("jaw_dir"), "aim_in": info.get("aim_in"),
                "wrist_offset_mm": wc["offset_mm"] if wc else None, "in_jaws": info.get("in_jaws"), "jaw_ring": info.get("jaw_ring"), "jaw_retry": bool(info.get("jaw_retry")), "reason": info.get("reason"), "landing_source": landing_source,
                "fast_close": bool(a.fast_close), **(extra or {}), "t": time.strftime("%H:%M:%S")}
@@ -572,7 +730,7 @@ def pick_once(cc, table, state, a, run, nut_in, tgt, place_in, off, say, session
         c1, c2 = info.get("corr1_mm"), info.get("corr2_mm"); ij = info.get("in_jaws")
         tr.metrics({"landing_err_mm": err_mm, "before_mm": before_mm, "seconds": dt, "picked": int(picked), "found_at_landing": int(landed is not None), **{f"sag_{r['wp']}": r["max_err_deg"] for r in rows if "max_err_deg" in r},
                     "corr1_mm": math.hypot(*c1) if c1 else None, "corr1_x_mm": c1[0] if c1 else None, "corr1_y_mm": c1[1] if c1 else None, "corr2_mm": math.hypot(*c2) if c2 else None, "corr2_x_mm": c2[0] if c2 else None, "corr2_y_mm": c2[1] if c2 else None,
-                    "grasp_h_mm": info.get("grasp_h_mm"), "grasp_lowered_mm": info.get("grasp_lowered_mm"), "final_residual_mm": info.get("final_residual_mm"), "wrist_offset_mm": wc["offset_norm_mm"] if wc else None, "jaw_open": a.jaw_open, "aim_mm": info.get("aim_mm"), "grasp_roll_deg": info.get("grasp_roll_deg"),
+                    "grasp_h_mm": info.get("grasp_h_mm"), "grasp_lowered_mm": info.get("grasp_lowered_mm"), "final_residual_mm": info.get("final_residual_mm"), "final_corr_mm": info.get("final_corr_mm"), "final_h_before": info.get("final_h_before"), "final_h_after": info.get("final_h_after"), "gripper_after_lift": info.get("gripper"), "wrist_offset_mm": wc["offset_norm_mm"] if wc else None, "jaw_open": a.jaw_open, "aim_mm": info.get("aim_mm"), "grasp_roll_deg": info.get("grasp_roll_deg"),
                     "in_jaws": None if ij is None else int(ij), "jaw_retry": int(bool(info.get("jaw_retry"))), "not_in_jaws": int(not_in_jaws),
                     **(servo_tele().metrics(tele) if (tele := tele_of(rows)) else {})})   # why: sag, heat, current and voltage per pick, so sessions compare (docs/telemetry.md)
         if tele: tr.json(tele, "servo_telemetry.json")
@@ -657,11 +815,19 @@ def parser():
     ap.add_argument("--reset", action="store_true", help="instead of the runs: pick the nut from wherever it is and place it at a random clear spot inside --safe-box")
     ap.add_argument("--safe-box", type=float, nargs=4, default=list(SAFE_BOX), metavar=("X0", "Y0", "X1", "Y1"), help=f"--reset: the box the nut is dropped in, mat inches (default {' '.join(map(str, SAFE_BOX))})")
     ap.add_argument("--seed", type=int, default=None, help="--reset: seed for the target sampling (default: random)")
+    ap.add_argument("--session", dest="session", action="store_true", default=True, help="one persistent pick_seq --serve over ssh for all stages (saves ~5 s of start-up per stage; needs jetson/pick_seq.py with --serve; falls back to scp+ssh per stage) (default)")
+    ap.add_argument("--no-session", dest="session", action="store_false", help="one scp+ssh+pick_seq start per stage, as before 12 Nov 2026")
     return ap
 
 
 def main():
-    a = parser().parse_args(); cc = cam_calib(); table = json.load(open(os.path.join(ROOT, "jetson", "calib", "top_table.json"))); track = labtrack()
+    a = parser().parse_args(); open_session(a.session)
+    try: _main(a)
+    finally: close_session()   # why: the ssh must not outlive the pick, on any exit
+
+
+def _main(a):
+    cc = cam_calib(); table = json.load(open(os.path.join(ROOT, "jetson", "calib", "top_table.json"))); track = labtrack()
     mode = "closed" if a.closed_loop else "open"; a.max_deg_s = a.max_deg_s if a.max_deg_s is not None else SPEED[mode]
     if a.closed_loop and not (table.get("arm_fit") and table.get("arm_base_mm")): raise SystemExit("closed loop needs the arm fit in jetson/calib/top_table.json (tools/jog_capture.py --fit); or run --open-loop")
     wpath = os.path.join(ROOT, "jetson", "calib", "wrist_campose.json"); wpose = json.load(open(wpath)) if a.wrist_check and os.path.exists(wpath) else None

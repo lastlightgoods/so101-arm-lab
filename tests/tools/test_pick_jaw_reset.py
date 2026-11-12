@@ -249,6 +249,6 @@ def test_the_loop_uses_the_finder_when_the_near_search_fails_and_stops_lost_afte
     # a miss between two finds resets the count
     arm4 = ShortArm(cc, table, found=False, scene=[]); seen = iter([[], [], [NUT_OBJ], [], [], [NUT_OBJ]]); monkeypatch.setattr(pl, "fetch_scene_objects", lambda: next(seen))
     monkeypatch.setattr(pl, "find_nut", arm4.find_nut); monkeypatch.setattr(pl, "api", arm4.api); monkeypatch.setattr(pl, "run_plan", arm4.run_plan)
-    import sys; monkeypatch.setattr(sys, "argv", ["pick_loop.py", "--runs", "2", "--no-jaw-check", "--state", str(tmp_path / "s4.json")]); pl.main()
+    import sys; monkeypatch.setattr(sys, "argv", ["pick_loop.py", "--runs", "2", "--no-jaw-check", "--no-session", "--state", str(tmp_path / "s4.json")]); pl.main()
     out4 = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
     assert [o["miss"] for o in out4 if "miss" in o] == [1, 2, 1, 2] and [r["run"] for r in records(out4)] == [1, 2] and not stops(out4) and len(arm4.calls) == 6

@@ -150,9 +150,33 @@ in `so101-picks` ([mlops/tracking.md](mlops/tracking.md)).
 ## Two-step close, jaw check, finder, reset
 
 - **Close**: waypoints `close1` (gripper 20, settle 0.4 s) then `close2` (gripper 0, settle 0.6 s): the moving jaw meets the nut slowly and does not flick it. `--fast-close` keeps the single `close`. Gripper-only waypoints are skipped by sag learning (the arm does not move there), so only arm-moving waypoints get a bias.
-- **Jaw check** (after `lift`): one wrist frame, ring detector inside `--jaw-window`. Found -> carry. Not found -> open, back to the hover, redo the readback-corrected grasp ONCE. Not found again -> open over the spot, rest, record `picked=false, reason="not_in_jaws"`, and the loop stops. A frame that cannot be fetched or decoded (including an empty buffer) is "unknown": the nut is carried anyway, the note is logged, and the check never raises. `--no-jaw-check` disables it.
+- **Jaw check** (after `lift`; the grip check below decides `in_jaws`): one wrist frame, ring detector inside `--jaw-window`. Held -> carry. Not held -> open, back to the hover, redo the readback-corrected grasp ONCE. Not held again -> open over the spot, rest, record `picked=false, reason="not_in_jaws"`, and the loop stops. A frame that cannot be fetched or decoded (including an empty buffer) is "unknown": the nut is carried anyway, the note is logged, and the check never raises. `--no-jaw-check` disables it.
 - **Finder** (`find_nut_anywhere`): when the 70 px search near the last spot misses, the scene map (`/api/scene`) is asked for objects with 8 <= w_mm <= 20 and h_mm <= 20 (nearest to the last spot first); failing that, a dark-blob search over the WHOLE mat with the marker squares (+10 mm margin) masked. Markers come from `jetson/calib/top_layout.json` when present, else the table calibration's `layout_markers`. After `--lost-after` consecutive misses the loop stops with `stop: "lost"`; any find resets the count.
 - **Reset** (`--reset`, `reset_nut`): finds the nut anywhere, picks a random target inside the safe box at least 40 mm from every other scene object, 50 mm from every marker square centre and 60 mm from where the nut is now, picks it up (closed loop, jaw check included) and places it there. Rejection sampling, 200 tries, then `SystemExit` with the reason (clear the mat or widen `--safe-box`). The record has `mode: "reset"`; sag learning carries over, place offsets are left alone.
+
+## The final-pose correction (`final_corr`, 11 Nov 2026)
+
+Stage 2 reads the tip height at the grasp and the lower/raise rule decides from it, but the final stage arrives differently (`pregrasp_up` -> `pregrasp` -> `grasp`) and its readback height differed from stage 2's by up to 4 mm (live, 11 Nov 22:2x: stage 2 read 1.6 mm, final 5.4; stage 2 read 5.4 (lowered 4.4), final 2.5). Final xy residuals were 1-4 mm, and several misses closed the jaws 3.4-7 mm above a ~3 mm nut. So the correction measured in stage 2 does not transfer, and the final stage is read where it matters.
+
+With the persistent pick_seq session (`--session`, the default; a stage costs ~0.2 s instead of 5.8 s) the final stage is split at the grasp:
+
+1. `pregrasp_up, pregrasp, grasp`: read the tip back (`fk_mat` of the grasp row); stage line `final`.
+2. If the height is outside 0.5-2.0 mm, or the xy residual against the aim is over `FINAL_XY_TOL_MM` (1.5 mm): ONE corrective move, the `grasp` waypoint alone with the jaws open, at the corrected point. xy = commanded + (aim - reached), capped at 4 mm (`FINAL_XY_CAP_MM`); height target 1.0 mm (`FINAL_H_TARGET_MM`), lowered/raised from the current command within the stage-2 caps (6 mm lower, 5 mm raise, `LOWER_CAP_MM`). The move starts at the grasp pose and travels a few mm at grasp height: no sweep at the mat. Never more than one per attempt (a retry gets its own). Read back again; stage line `final_corr` with `corr_mm`, `lowered_mm`, `h_before`, `h_after`, `residual_mm`.
+3. `close1, close2, lift` at the final (corrected) pose, then the grip check, then the carry (or the abort).
+
+Session off (`--no-session`, or a dead session): the split would cost a connect per stage, so the single `pregrasp_up .. lift` stage of before runs and nothing is corrected. `--no-jaw-check` with the session splits the same way (`close1, close2, lift` plus the carry in one stage after the correction). Record and MLflow: `final_corr_mm` (0.0 = checked, no move; None = not split), `final_h_before`, `final_h_after`; `final_residual_mm` is the reading after the correction. The learned grasp bias comes from the corrected row (the pre-correction grasp row is not learned).
+
+## The grip check (object-agnostic, 11 Nov 2026)
+
+`held = (gripper readback after the lift > GRIP_EMPTY_MAX) OR (the wrist-camera ring check says in_jaws)`, `GRIP_EMPTY_MAX = 2.0` on the 0-100 gripper scale. Measured live 11 Nov 2026:
+
+| holding | gripper after the lift |
+|---|---|
+| nothing | 0.5-1.5 |
+| a nut across its flats, or a 6 mm spacer | 4.0-4.8 |
+| a wing nut by a thin wing | 1.3-1.5 (looks empty; the camera has to say held) |
+
+Only the reading after the lift counts: once `close2` read 4.49 and the lift read 0.54 (the nut slipped out on the lift). `jaw_check(..., rows=)` takes the stage rows and reads the `lift` row; the camera check itself is unchanged. The `jaw_check` stage line carries `in_jaws` (the verdict), `gripper` and `camera` (the ring check's True/False/None); the record has `gripper` and `camera`, MLflow `gripper_after_lift`. Gripper low and camera unknown (no frame) stays unknown and is carried, as before. A False verdict takes the same retry and abort paths.
 
 ## The wrist-camera check (`tools/wrist_check.py`)
 
@@ -181,6 +205,8 @@ and "reaches" every waypoint 7 mm short along the base-to-tip direction; the sta
 at 80 deg/s, the history record and the MLflow metrics carry the new fields, jaws default to 35. For the check: the ring finder on a
 synthetic frame (ring plus a dark shadow blob) and on the real 10 Nov frame, the project / back-project round trip within 0.5 mm at three
 poses, the CLI, and that a bad frame, a missing pose or a dead feed never raise into the loop.
+
+`tests/tools/test_pick_final_corr.py`: the correction decision and caps, one corrective move at grasp height (and never two), session off and `--no-jaw-check`, the grip check truth table, the retry and abort paths with it.
 
 `tests/tools/test_pick_jaw_reset.py`: jaw check (found, one retry, twice -> `not_in_jaws` with exact `run_plan` call counts, never raises), two-step and fast close, reset sampling over 500 seeded draws, the whole-mat finder (scene first, markers masked, empty mat) and `lost` after three misses.
 

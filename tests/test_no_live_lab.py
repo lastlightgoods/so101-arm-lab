@@ -14,8 +14,11 @@ def test_a_popen_bound_before_the_guard_is_blocked_too():
     assert p.returncode == 255 and "blocked in tests" in err
 
 
-def test_other_commands_still_run():
+def test_other_commands_and_a_local_rsync_still_run(tmp_path):
     assert subprocess.run(["echo", "ok"], capture_output=True, text=True).stdout.strip() == "ok"
+    (tmp_path / "a").mkdir(); (tmp_path / "a" / "f").write_text("x"); r = subprocess.run(["rsync", "-a", f"{tmp_path}/a/", f"{tmp_path}/b/"], capture_output=True, text=True)
+    assert r.returncode == 0 and (tmp_path / "b" / "f").read_text() == "x"
+    assert subprocess.run(["rsync", "-a", f"{tmp_path}/a/", "jetson:/tmp/x/"], capture_output=True, text=True).returncode == 255
 
 
 def test_the_live_dashboard_is_unreachable():

@@ -15,7 +15,7 @@ def portable(x):
     return x
 
 
-GOLDEN_OFF = ("be7afb9d0b63e8d622f8993aa34246a5dc48ef291fc5154fa81425b68e1e03c1", 63)   # why: regenerated 11 Nov 2026 for the plan change (grasp at 1.0 mm, the -3 deg wrist tilt, the pregrasp_up waypoint, the tilt's height compensation: the dry run reads the plan joints); before that it was 26eb79b2... of the code below. sha256 of the normalised dry-run output of main's autoloop.py (6 cycles, seed 11, dry-miss 0.3, learned biases {}), before --record-demos existed (regenerated from caa06b5 with portable())   # the scene-first nut search (find_nut_near, the map asked at every hint before any dark search) leaves this output unchanged
+GOLDEN_OFF = ("4dc9e9a5917f33aadeeb3614269a82b42f7f45cfb63bdc673adb6d50dfc150ba", 63)   # why: regenerated 11 Nov 2026 for the grip check (the jaw_check stage line and the pick record carry "gripper" and "camera", and the final-pose correction fields). Before that: regenerated 11 Nov 2026 for the plan change (grasp at 1.0 mm, the -3 deg wrist tilt, the pregrasp_up waypoint, the tilt's height compensation: the dry run reads the plan joints); before that it was 26eb79b2... of the code below. sha256 of the normalised dry-run output of main's autoloop.py (6 cycles, seed 11, dry-miss 0.3, learned biases {}), before --record-demos existed (regenerated from caa06b5 with portable())   # the scene-first nut search (find_nut_near, the map asked at every hint before any dark search) leaves this output unchanged
 
 
 @pytest.fixture(scope="module")
@@ -155,8 +155,14 @@ def test_main_dry_run_record_demos_writes_a_dataset_lerobot_loads_back(al, tmp_p
     blob = open(root / "meta" / "lab" / "episodes.jsonl").read(); assert "/Users/" not in blob and "@" not in blob
 
 
-def test_record_demos_needs_dry_run_until_the_camera_tee_exists(al, tmp_path):
-    with pytest.raises(SystemExit, match="phase 2"): al.main(["--record-demos", "--cycles", "1", "--out-dir", str(tmp_path)])
+def test_record_demos_without_dry_run_stops_before_any_arm_motion_when_the_recorder_does_not_answer(al, tmp_path, monkeypatch):
+    # why: 2026-11-11 21:53 the old form of this test (expecting "phase 2" to refuse) ran AFTER phase 2 merged: it pinged the real recorder over ssh,
+    # recorded one real autoloop cycle on the arm and moved the tape ring. Now the recorder is a dead injected transport and the arm session is a tripwire.
+    pl = al.load_pick_loop(); monkeypatch.setattr(al, "load_pick_loop", lambda: pl)
+    def no_arm(*a, **k): raise AssertionError("the arm session must not start")
+    monkeypatch.setattr(pl, "open_session", no_arm); monkeypatch.setattr(pl, "run_plan", no_arm)
+    with pytest.raises(SystemExit, match="does not answer"):
+        al.main(["--record-demos", "--cycles", "1", "--out-dir", str(tmp_path), "--stop-file", str(tmp_path / "none.stop")], demo_transport=lambda op, p, t=30.0: {"ok": False, "err": "no_daemon"})
 
 
 def test_with_the_flag_off_the_dry_run_output_is_what_main_printed_before_the_flag_existed(al, tmp_path, capsys, monkeypatch):

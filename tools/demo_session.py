@@ -5,10 +5,13 @@ tools/autoloop.py (--record-demos) and jetson/demo_recorder.py.
     keep_decision(cycle, ...)   pure: does this try become a training episode, which tier, and why not
     DemoSession(...)            open_try / on_plan / end_try / commit around each TRY; MLflow links; the dataset-version run at the end
 
-PHASE 1: the recorder runs in this process against a fake arm (virtual clock, ticks synthesised from the plan with pick_seq's own easing)
-and a fake camera. Phase 2 puts the recorder on the Jetson behind a socket; DemoSession then talks to it and `fake` is None.
+    RemoteRecorder(transport, ...)  PHASE 2: the same interface as jetson/demo_recorder.DemoRecorder, but every call is one request to the resident
+                                    jetson/demo_recorderd.py (over ssh in real runs; `transport` is injected so tests and the dry run use no ssh)
+
+PHASE 1 (--dry-run): the recorder runs in this process against a fake arm (virtual clock, ticks synthesised from the plan with pick_seq's own easing)
+and a fake camera. PHASE 2: the recorder is the resident process on the Jetson, DemoSession gets a RemoteRecorder and `fake` is None.
 """
-import hashlib, json, os, subprocess
+import hashlib, json, os, subprocess, tempfile
 
 EXPERIMENT_DATASETS = "so101-datasets"
 PRE_RESET_ERROR = "nut on the target"   # autoloop's rec["error"] prefix when the pre-reset could not move the nut off the target
@@ -67,7 +70,7 @@ class DemoSession:
     so101-datasets experiment (its runs are no-ops when tracking is off)."""
     def __init__(self, recorder, session, dr, track=None, radius_mm=15.0, fake=None, repo_root=None, out=None):
         self.rec, self.session, self.dr, self.track, self.radius, self.fake, self.out = recorder, session, dr, track, radius_mm, fake, out or (lambda d: None)
-        self.sha = git_sha(repo_root) if repo_root else None; self.parent_id = None; self.pending = None; self.max_err_deg = 0.0; self.outcomes = []; self.recording = False
+        self.sha = git_sha(repo_root) if repo_root else None; self.parent_id = None; self.pending = None; self.max_err_deg = 0.0; self.outcomes = []; self.recording = False; self.open_err = None
 
     def set_parent(self, run_id): self.parent_id = run_id
 
@@ -82,7 +85,9 @@ class DemoSession:
         meta = {"scene": {"start_in": info.get("nut_in"), "target_in": info.get("target_in"), "start_region": None},   # TODO(phase 2): start regions (plan 6.1) are not defined in the code yet
                 "teacher": {"session": self.session, "cycle": n, "git_sha": self.sha},
                 "links": {"mlflow_cycle_run_name": f"autoloop-{self.session}-c{n}", "mlflow_session_run_id": self.parent_id}}
-        self.cycle_n = n; self.rec.open(meta, t); self.recording = True; self.pending = None
+        self.cycle_n = n; self.pending = None; self.open_err = None
+        try: self.rec.open(meta, t); self.recording = True
+        except RecorderError as e: self.recording = False; self.open_err = str(e)[:160]   # why: a recorder that refuses or does not answer must never stop the arm; this try is simply not recorded (2026-11-11)
 
     def on_plan(self, plan, rows, max_deg_s):
         """Called by the runner after every plan the arm ran. With a fake rig this is where the plan's ticks come from; with the real arm (phase 2) pick_seq writes them."""
@@ -91,6 +96,7 @@ class DemoSession:
 
     def end_try(self, cycle, jaw_held, stages):
         """The last stage returned: stop sampling (the judge and the reset run after this and are not recorded)."""
+        if not self.recording: return   # the recorder refused this try at open_try (commit() reports it)
         t = self.fake.now() if self.fake else None
         health = self.rec.end(t); self.recording = False
         self.pending = {"jaw_held": jaw_held, "stages": list(stages), "health": health}
@@ -108,6 +114,10 @@ class DemoSession:
     def commit(self, cycle, trip):
         """Decide and write. Sets cycle["demo"] to the outcome."""
         p = self.pending
+        if p is None and self.open_err:
+            out = {"kept": False, "tier": None, "discard_reason": f"recorder_open_failed:{self.open_err}", "dataset": None, "dataset_repo": self.rec.rejects_repo, "episode_index": None, "frames": 0, "config_id": self.rec.cfg.config_id,
+                   "cadence_over_budget_pct": 0.0, "dropped_idle_frames": 0}
+            cycle["demo"] = out; self.outcomes.append(out); self.open_err = None; return out
         if p is None: return None
         self.pending = None
         d = keep_decision(cycle, self.radius, trip.reason if trip else None, p["jaw_held"], p["health"])
@@ -131,29 +141,113 @@ class DemoSession:
         run.metrics({"episode_frames": o["frames"], "episode_index": o["episode_index"], "cadence_over_budget_pct": o["cadence_over_budget_pct"]})
         run.json({k: v for k, v in o.items()}, "episode_meta.json")
         if o["dataset"] and o["episode_index"] is not None:
-            root = self.rec.root if o["dataset"] == "main" else self.rec.rejects_root
-            self.dr.append_jsonl(os.path.join(self.dr.sidecar_dir(root), "links.jsonl"), {"episode_index": o["episode_index"], "dataset": o["dataset"], "mlflow_cycle_run_name": f"autoloop-{self.session}-c{cycle['cycle']}",
+            self.rec.append_link(o["dataset"], {"episode_index": o["episode_index"], "dataset": o["dataset"], "mlflow_cycle_run_name": f"autoloop-{self.session}-c{cycle['cycle']}",
                                                                                            "mlflow_cycle_run_id": getattr(run, "id", None), "mlflow_session_run_id": self.parent_id})
 
     def finish(self, summary=None):
         """End of session: finalize the datasets, log the dataset-version run, return the numbers for the session summary."""
-        self.abort("session_end"); self.rec.close(); cfgs = {}; frames = 0
-        for r in self.dr.read_sidecar(self.rec.root):
+        self.abort("session_end"); self.rec.close()
+        try: sm = self.rec.summary()
+        except RecorderError as e:   # why: a recorder that died during the session must not crash the session summary; the counts the runner kept are still right (2026-11-11)
+            c = self.rec.counts; return {**c, "episodes_total": None, "frames_total": None, "config_counts": {}, "dataset_hash": None, "rejects_hash": None, "repo_id": self.rec.repo_id, "rejects_repo": self.rec.rejects_repo, "fps": self.rec.fps, "summary_error": str(e)[:120]}
+        cfgs = {}; frames = 0
+        for r in sm["main"]["rows"]:
             cid = ((r.get("configuration") or {}).get("config_id")) or "unknown"; cfgs[cid] = cfgs.get(cid, 0) + 1; frames += int(r.get("n_frames") or 0)
-        have = lambda root: os.path.exists(os.path.join(root, "meta", "info.json"))
-        main_hash = self.dr.dataset_hash(self.rec.root) if have(self.rec.root) else None; rej_hash = self.dr.dataset_hash(self.rec.rejects_root) if have(self.rec.rejects_root) else None
-        out = {"kept": self.rec.counts["kept"], "rejected": self.rec.counts["rejected"], "aborted": self.rec.counts["aborted"], "empty": self.rec.counts["empty"], "episodes_total": sum(cfgs.values()), "frames_total": frames,
+        main_hash, rej_hash = sm["main"]["hash"], sm["rejects"]["hash"]; c = self.rec.counts
+        out = {"kept": c["kept"], "rejected": c["rejected"], "aborted": c["aborted"], "empty": c["empty"], "episodes_total": sum(cfgs.values()), "frames_total": frames,
                "config_counts": cfgs, "dataset_hash": main_hash, "rejects_hash": rej_hash, "repo_id": self.rec.repo_id, "rejects_repo": self.rec.rejects_repo, "fps": self.rec.fps}
         if self.track is not None and main_hash:
             name = f"dataset-{self.rec.repo_id.split('/')[-1]}-{main_hash[:8]}"
             with self.track.run(name, tags={"kind": "dataset-version", "session": self.session}) as r:
-                r.params({"repo_id": self.rec.repo_id, "rejects_repo": self.rec.rejects_repo, "dataset_hash": main_hash, "rejects_hash": rej_hash, "fps": self.rec.fps, "features_hash": features_hash(self.rec.features),
+                r.params({"repo_id": self.rec.repo_id, "rejects_repo": self.rec.rejects_repo, "dataset_hash": main_hash, "rejects_hash": rej_hash, "fps": self.rec.fps, "features_hash": features_hash(sm["features"]),
                           "session": self.session, "episodes_total": out["episodes_total"], "frames_total": frames, **{f"config_{k}": v for k, v in cfgs.items()}})
                 r.metrics({"episodes_total": out["episodes_total"], "frames_total": frames, "kept": out["kept"], "rejected": out["rejected"], "aborted": out["aborted"],
                            "yield": out["kept"] / (out["kept"] + out["rejected"] + out["aborted"]) if (out["kept"] + out["rejected"] + out["aborted"]) else None})
-                for rel in ("meta/info.json", "meta/lab/episodes.jsonl"): r.artifact(os.path.join(self.rec.root, rel), "dataset")
-                r.json({"counts": self.rec.counts, "rejects": [{k: x.get(k) for k in ("episode_index", "verdict")} for x in self.dr.read_sidecar(self.rec.rejects_root)]}, "rejects_summary.json")
+                with tempfile.TemporaryDirectory() as td:   # why: the datasets may live on the Jetson; the artifacts are written from the summary text, same file names as before
+                    for fn, txt in (("info.json", sm["main"]["info"]), ("episodes.jsonl", sm["main"]["episodes"])):
+                        if txt is not None: pth = os.path.join(td, fn); open(pth, "w").write(txt); r.artifact(pth, "dataset")
+                r.json({"counts": c, "rejects": [{k: x.get(k) for k in ("episode_index", "verdict")} for x in sm["rejects"]["rows"]]}, "rejects_summary.json")
         return out
+
+
+class RecorderError(Exception):
+    """The resident recorder refused a request or did not answer."""
+
+
+def ssh_transport(host="jetson", python="~/so101/.venv/bin/python", script="~/so101/demo_recorderd.py", connect_timeout=8):
+    """transport(op, payload, timeout) -> reply dict, over one ssh per call (payload on stdin, reply on stdout). Never raises: a failure is {"ok": False, "err": ...}.
+    A request is one call, so a lost connection costs one episode, never the arm."""
+    def call(op, payload, timeout=30.0):
+        if not op.isalpha(): return {"ok": False, "err": "bad op"}
+        cmd = f"cd ~/so101 && source env.sh >/dev/null 2>&1; {python} {script} ctl {op} --timeout {int(timeout)}"
+        try: r = subprocess.run(["ssh", "-o", f"ConnectTimeout={connect_timeout}", host, cmd], input=json.dumps(payload), capture_output=True, text=True, timeout=timeout + 15)
+        except Exception as e: return {"ok": False, "err": f"ssh: {type(e).__name__}: {str(e)[:80]}"}
+        for line in reversed(r.stdout.strip().splitlines()):
+            try: return json.loads(line)
+            except ValueError: continue
+        return {"ok": False, "err": f"no reply (rc {r.returncode}): {r.stderr.strip()[-120:]}"}
+    return call
+
+
+class _EpStub:
+    def __init__(self, meta): self.meta = meta
+
+
+class RemoteRecorder:
+    """DemoRecorder's interface (open / end / commit / abort / alive / close / summary / append_link and the attributes DemoSession reads) over a control channel to
+    jetson/demo_recorderd.py. `transport(op, payload, timeout)` returns the reply dict (ssh_transport, or a fake in tests).
+    Only open() raises (RecorderError, and DemoSession turns that into "this try is not recorded"); end / commit / abort / alive never do: a dead recorder gives an
+    unhealthy episode and a False alive(), which the runner's `recorder` guardrail stops the session on between cycles, never in the middle of a pick."""
+    def __init__(self, transport, root, repo_id, cfg, rejects_root=None, rejects_repo=None, vcodec="libsvtav1", fps=30):
+        self.t, self.root, self.repo_id, self.cfg, self.vcodec, self.fps = transport, root, repo_id, cfg, vcodec, fps
+        self.rejects_root = rejects_root or root.rstrip("/") + "-rejects"; self.rejects_repo = rejects_repo or repo_id + "-rejects"
+        self.counts = {"kept": 0, "rejected": 0, "aborted": 0, "empty": 0}; self.ep = None; self._summary = None; self.features = {}
+
+    def configure(self):
+        r = self.t("configure", {"repo": self.repo_id, "root": self.root, "rejects_root": self.rejects_root, "rejects_repo": self.rejects_repo, "lab": self.cfg.to_dict(), "vcodec": self.vcodec}, 120.0)
+        if not r.get("ok"): raise RecorderError(f"configure: {r.get('err')}")
+        self.root, self.rejects_root, self.fps = r.get("root", self.root), r.get("rejects_root", self.rejects_root), r.get("fps", self.fps); self._summary = None; return r
+
+    def alive(self): return bool(self.t("ping", {}, 10.0).get("ok"))
+
+    def status(self): return self.t("status", {}, 15.0)
+
+    def open(self, meta=None, t=None):
+        self._summary = None; r = self.t("open", {"meta": meta or {}}, 20.0)
+        if not r.get("ok"): raise RecorderError(str(r.get("err")))
+        self.ep = _EpStub(meta or {}); return r
+
+    def end(self, t=None):
+        r = self.t("end", {}, 30.0)
+        if r.get("ok"): return r["health"]
+        return {"ok": False, "reasons": [f"recorder_unreachable:{str(r.get('err'))[:60]}"], "frames": 0, "dropped_idle_frames": 0, "over_budget_pct": 0.0, "cam_age_max_s": {}, "banding": {}}
+
+    def abort(self, reason="aborted"):
+        if self.ep is None: return False
+        r = self.t("abort", {"reason": reason}, 20.0); was = bool(r.get("was_open"))
+        if was: self.counts["aborted"] += 1
+        self.ep = None; return was
+
+    def commit(self, keep, verdict=None):
+        meta = self.ep.meta if self.ep is not None else {}; r = self.t("commit", {"keep": bool(keep), "verdict": verdict or {}, "meta": meta}, 900.0); self.ep = None
+        if not r.get("ok"):
+            self.counts["aborted"] += 1; return {"dataset": None, "episode_index": None, "frames": 0, "health": {"ok": False, "reasons": [f"commit_failed:{str(r.get('err'))[:80]}"]}}
+        if r.get("dataset") is None: self.counts["empty"] += 1
+        else: self.counts["kept" if r["dataset"] == "main" else "rejected"] += 1
+        return {k: r.get(k) for k in ("dataset", "episode_index", "frames", "health")}
+
+    def append_link(self, kind, row): self.t("link", {"kind": kind, "row": row}, 20.0)
+
+    def close(self):
+        r = self.t("finish", {}, 300.0)
+        if r.get("ok"): self._summary = r; self.features = r.get("features") or {}
+
+    def summary(self):
+        if self._summary is None:
+            r = self.t("summary", {}, 120.0)
+            if not r.get("ok"): raise RecorderError(f"summary: {r.get('err')}")
+            self._summary = r; self.features = r.get("features") or {}
+        return self._summary
 
 
 class FakeRig:

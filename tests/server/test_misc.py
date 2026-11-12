@@ -18,6 +18,11 @@ def test_event_log_write_failure_is_swallowed(srv, monkeypatch):
     assert srv.state["events"][0]["msg"] == "still recorded in memory"
 
 
+def test_every_spoken_line_goes_to_the_mac_speakers_only(srv, monkeypatch):
+    assert srv.say_argv("Holding.") == ["say", "-a", "MacBook Pro Speakers", "-r", "190", "Holding."]   # TC 2026-11-11: all voice through the Mac speakers
+    monkeypatch.setattr(srv, "SAY_DEVICE", ""); assert srv.say_argv(7) == ["say", "-r", "190", "7"]
+
+
 def test_say_queues_text_with_timestamp(srv, said):
     srv.say("Next."); srv.say(42)
     assert said() == ["Next.", "42"]
@@ -38,7 +43,7 @@ def test_say_loop_dedups_and_drops_superseded(srv, fake, monkeypatch):
     q = _Q(); monkeypatch.setattr(srv, "SAY_Q", q)
     q.put((time.time() - 10, "stale: superseded while others waited")); q.put((time.time(), "Holding.")); q.put((time.time(), "Holding.")); q.put((time.time(), "Next."))
     with pytest.raises(_Drained): srv.say_loop()
-    assert [a for a, _ in fake.calls] == [["say", "-r", "190", "Holding."], ["say", "-r", "190", "Next."]]
+    assert [a for a, _ in fake.calls] == [["say", "-a", "MacBook Pro Speakers", "-r", "190", "Holding."], ["say", "-a", "MacBook Pro Speakers", "-r", "190", "Next."]]
     assert all(k.get("timeout") == 20 for _, k in fake.calls) and srv._last_said["text"] == "Next."
 
 

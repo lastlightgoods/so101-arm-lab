@@ -19,8 +19,16 @@ def say_loop():
         if not SAY_Q.empty() and time.time() - t > 2.5: continue            # superseded while waiting
         if text == _last_said["text"] and time.time() - _last_said["t"] < 3: continue   # same line twice in a row
         _last_said.update(text=text, t=time.time())
-        try: subprocess.run(["say", "-r", "190", text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+        try: subprocess.run(say_argv(text), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
         except Exception: pass
+
+
+SAY_DEVICE = os.environ.get("SO101_SAY_DEVICE", "MacBook Pro Speakers")   # why: TC 2026-11-11 "put all voice from this project through the mac speakers" (the default output is often a Bluetooth speaker); "" = the system default
+
+
+def say_argv(text):
+    """macOS `say` on SAY_DEVICE only (no fallback to the default output: a missing device stays silent)."""
+    return ["say"] + (["-a", SAY_DEVICE] if SAY_DEVICE else []) + ["-r", "190", str(text)]
 HERE = os.path.dirname(os.path.abspath(__file__)); HOME = os.path.expanduser("~")
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
 JETSON = os.environ.get("SO101_JETSON", "jetson")
@@ -194,7 +202,9 @@ JETSON_CAMS = {"top": ("usb-046d_HD_Pro_Webcam_C920_9D46D6AF-video-index0", "mjp
                "front": ("usb-046d_HD_Pro_Webcam_C920_B6A1F66F-video-index0", "mjpeg", "640x360"),    # Logitech C920 facing the arm
                "wrist": ("usb-icSpring_icspring_camera-video-index0", "yuyv422", "640x480")}
 def jetson_cam_loop(name, dev, fmt, size):
-    cmd = (f"while [ -f ~/so101/.cams_busy ]; do sleep 1; done; [ -e /dev/v4l/by-id/{dev} ] || exit 3; "
+    cmd = (f"while [ -f ~/so101/.cams_busy ]; do sleep 1; done; "
+           f"[ -f ~/so101/camd.py ] && {{ python3 ~/so101/camd.py tap {name}; rc=$?; [ $rc -eq 3 ] || exit $rc; }}; "   # why: camd (jetson/camd.py) owns the cameras when it runs and serves this same MJPEG; exit 3 = no camd, so the ffmpeg below runs exactly as before (11 Nov 2026, docs/scripted-demos.md)
+           f"[ -e /dev/v4l/by-id/{dev} ] || exit 3; "
            f"ffmpeg -loglevel error -f v4l2 -input_format {fmt} -video_size {size} -framerate 15 -i /dev/v4l/by-id/{dev} -f mjpeg -q:v 6 - & p=$!; "
            "while kill -0 $p 2>/dev/null; do [ -f ~/so101/.cams_busy ] && kill $p; sleep 0.5; done")
     announced = False
