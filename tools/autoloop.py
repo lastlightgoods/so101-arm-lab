@@ -140,7 +140,8 @@ class Runner:
         try:
             fnn = getattr(pl, "find_nut_near", None); cands = self.nutlike(objs)
             if fnn:   # why: 11 Nov 2026 the dark-blob search took fragments of the printed squares for the nut and missed the real one on a light square; the scene map (polled while objects are pending) answers first, the dark blob is its fallback
-                near = last_in or list(self.cfg.target); got = fnn(cc, tab, near, sleep=self.ctx.sleep) or fnn(cc, tab, list(self.cfg.target), radius_px=140, sleep=self.ctx.sleep)
+                near = last_in or list(self.cfg.target); hints = ((near, 70), (list(self.cfg.target), 140))   # why: the scene map at every hint before the dark blob at any (11 Nov 2026)
+                got = next((g for g in (fnn(cc, tab, h, radius_px=r, sleep=self.ctx.sleep, dark=False) for h, r in hints) if g), None) or next((g for g in (fnn(cc, tab, h, radius_px=r, sleep=self.ctx.sleep, wait_s=0.0) for h, r in hints) if g), None)
                 if got:
                     self.locates.append({"near_in": [round(v, 3) for v in last_in] if last_in else None, "n_objects": len(objs), "n_candidates": len(cands), "candidates": [{"x_in": o.get("x_in"), "y_in": o.get("y_in"), "w_mm": o.get("w_mm"), "h_mm": o.get("h_mm")} for o in cands[:8]],
                                          "chosen_in": [round(v, 3) for v in got[0]], "source": getattr(got, "source", None)})

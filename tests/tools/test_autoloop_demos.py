@@ -15,7 +15,7 @@ def portable(x):
     return x
 
 
-GOLDEN_OFF = ("b132447830e5df2807b6b80b41aed04d8a19c45030a33a2703567308e1ac03b3", 63)   # why: regenerated 11 Nov 2026 for the plan change (grasp at 1.0 mm, the -3 deg wrist tilt, the pregrasp_up waypoint, the tilt's height compensation: the dry run reads the plan joints); before that it was 26eb79b2... of the code below. sha256 of the normalised dry-run output of main's autoloop.py (6 cycles, seed 11, dry-miss 0.3, learned biases {}), before --record-demos existed (regenerated from caa06b5 with portable())   # why: and again 11 Nov 2026 (nut-search-scene): the first locate's source reads "dark" not "scene" (the near search is now find_nut_near, whose radius excludes the fake nut at the first hint); nothing else changed
+GOLDEN_OFF = ("be7afb9d0b63e8d622f8993aa34246a5dc48ef291fc5154fa81425b68e1e03c1", 63)   # why: regenerated 11 Nov 2026 for the plan change (grasp at 1.0 mm, the -3 deg wrist tilt, the pregrasp_up waypoint, the tilt's height compensation: the dry run reads the plan joints); before that it was 26eb79b2... of the code below. sha256 of the normalised dry-run output of main's autoloop.py (6 cycles, seed 11, dry-miss 0.3, learned biases {}), before --record-demos existed (regenerated from caa06b5 with portable())   # the scene-first nut search (find_nut_near, the map asked at every hint before any dark search) leaves this output unchanged
 
 
 @pytest.fixture(scope="module")

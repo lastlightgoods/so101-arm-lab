@@ -134,10 +134,10 @@ class Found(tuple):
     source = None
 
 
-def find_nut_near(cc, table, near_in, radius_px=70, radius_mm=None, wait_s=3.0, jpeg=None, joints="live", sleep=None):
+def find_nut_near(cc, table, near_in, radius_px=70, radius_mm=None, wait_s=3.0, jpeg=None, joints="live", sleep=None, dark=True):
     """The nut near `near_in` (mat inches) -> Found (mat_in, pixel, area; `.source` "scene" | "dark") or None. The scene map first: poll /api/scene every
     0.5 s while it reports pending objects (at most `wait_s`; a new object needs ~1.5 s), take the nut-like object nearest `near_in` within `radius_mm`
-    (default: what a `radius_px` box covers). None there: the dark-blob search find_nut with the same radius. Never raises on a dashboard error.
+    (default: what a `radius_px` box covers). None there: the dark-blob search find_nut with the same radius (dark=False: None). Never raises on a dashboard error.
     why: 11 Nov 2026 the dark-blob search kept taking fragments of the printed squares for the nut (6.78, 4.81) and never saw the real one on a light square
     (10.17, 7.32), while the scene map found it every time."""
     sleep = sleep or time.sleep
@@ -153,7 +153,8 @@ def find_nut_near(cc, table, near_in, radius_px=70, radius_mm=None, wait_s=3.0, 
             o = min(c, key=lambda t: t[0])[1]; xy = [float(o["x_in"]), float(o["y_in"])]; u, v = cc.table_to_pixel(table, xy[0] * 25.4, xy[1] * 25.4)
             f = Found((xy, [float(u), float(v)], None)); f.source = "scene"; return f
     except Exception as e: print(json.dumps({"find_nut_near": "scene failed", "err": f"{type(e).__name__}: {e}"}), file=sys.stderr, flush=True)
-    kw ={"jpeg": jpeg} if jpeg is not None else {}; kw.update({"joints": joints} if joints != "live" else {})
+    if not dark: return None   # scene only: the callers try the scene map at every hint before any dark-blob search
+    kw = {"jpeg": jpeg} if jpeg is not None else {}; kw.update({"joints": joints} if joints != "live" else {})
     d = find_nut(cc, table, near_in, radius_px=radius_px, **kw)
     if d is None: return None
     f = Found(d); f.source = "dark"; return f
@@ -577,7 +578,8 @@ def main():
     run, misses = 0, 0
     while run < a.runs:
         nxt = run + 1; tgt = list(a.target) if (nxt == a.runs or nxt % 2 == 0) else list(a.alt); key = f"{tgt[0]:.2f},{tgt[1]:.2f}"
-        found = find_nut_near(cc, table, near) or find_nut_near(cc, table, list(a.target), radius_px=140) or find_nut_near(cc, table, list(a.alt), radius_px=140); source = found.source if found else None   # why: the scene map first at each hint, the dark blob behind it (11 Nov 2026)
+        hints = ((near, 70), (list(a.target), 140), (list(a.alt), 140))   # why: the scene map at EVERY hint before the dark blob at any: a printed-square fragment at the first hint must not beat a nut the map sees from the second (11 Nov 2026)
+        found = next((f for f in (find_nut_near(cc, table, h, radius_px=r, dark=False) for h, r in hints) if f), None) or next((f for f in (find_nut_near(cc, table, h, radius_px=r, wait_s=0.0) for h, r in hints) if f), None); source = found.source if found else None
         if not found:   # the whole-mat finder: the scene map, then a dark-blob search over the whole mat with the markers masked
             anywhere = find_nut_anywhere(cc, table, near_in=near, markers_in=markers)
             if anywhere: found, source = (anywhere[0], None, None), anywhere[1]; say({"run": nxt, "note": "nut found by the whole-mat finder", "source": source, "nut_in": [round(v, 3) for v in anywhere[0]]})

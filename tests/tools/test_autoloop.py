@@ -197,7 +197,7 @@ def test_frames_are_saved_and_attached_when_on_and_every_locate_logs_its_candida
     r = autorig(); s, out = r.run(capsys, cycles=1, max_retries=0, save_frames=True); c, = events(out, "cycle")
     d = os.path.join(r.tmp, "out", "autoloop_t_frames"); assert sorted(os.listdir(d)) == ["c1_reset.jpg", "c1_try1.jpg"]
     run, = [x for x in r.track.runs if x.name.endswith("-c1")]; assert {"frames/c1_try1.jpg", "frames/c1_reset.jpg"} <= set(run.files)
-    loc, reset_loc = c["locates"]; assert loc["n_candidates"] == 1 and loc["chosen_in"] == pytest.approx(c["nut_in"], abs=1e-3) and loc["source"] == "dark"
+    loc, reset_loc = c["locates"]; assert loc["n_candidates"] == 1 and loc["chosen_in"] == pytest.approx(c["nut_in"], abs=1e-3) and loc["source"] == "scene"   # the map is asked at every hint before any dark search (11 Nov 2026)
     assert loc["candidates"][0]["w_mm"] == 12.0 and reset_loc["near_in"] is not None, "the try's locate, then the reset's"
 
 
