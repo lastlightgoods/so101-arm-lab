@@ -34,7 +34,7 @@ class Rig:
         def run_plan(plan, max_deg_s):
             rows = self.arm.run_plan(plan, max_deg_s); self.world.on_plan(plan)
             return [self.row_hook(r) for r in rows] if self.row_hook else rows
-        monkeypatch.setattr(pl, "api", self.arm.api); monkeypatch.setattr(pl, "run_plan", run_plan); monkeypatch.setattr(pl, "find_nut", self.world.find_nut); monkeypatch.setattr(pl, "fetch_wrist", lambda: None); monkeypatch.setattr(pl, "fetch_scene_objects", lambda: self.world.api_scene()["objects"])   # why: hermetic: the jaw check and the finder must never reach a live dashboard
+        monkeypatch.setattr(pl, "api", self.arm.api); monkeypatch.setattr(pl, "run_plan", run_plan); monkeypatch.setattr(pl, "find_nut", self.world.find_nut); monkeypatch.setattr(pl, "fetch_wrist", lambda: None); monkeypatch.setattr(pl, "fetch_scene_objects", lambda: self.world.api_scene()["objects"]); monkeypatch.setattr(pl, "fetch_scene_state", lambda: (self.world.api_scene()["objects"], 0))   # why: hermetic: the jaw check and the finder must never reach a live dashboard
         self.stop_file = str(tmp_path / "autoloop.stop"); self.limits = {}
         self.ctx = gr.Ctx(self.state, self.scene, self.clock.now, self.clock.sleep, self.notes.append)
 

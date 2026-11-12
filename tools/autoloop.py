@@ -138,9 +138,16 @@ class Runner:
         the target, else the scene object nearest the last spot."""
         pl, cc, tab = self.pl, self.cc, self.table; sc = self.scene(); objs = (sc or {}).get("objects") or []
         try:
+            fnn = getattr(pl, "find_nut_near", None); cands = self.nutlike(objs)
+            if fnn:   # why: 11 Nov 2026 the dark-blob search took fragments of the printed squares for the nut and missed the real one on a light square; the scene map (polled while objects are pending) answers first, the dark blob is its fallback
+                near = last_in or list(self.cfg.target); got = fnn(cc, tab, near, sleep=self.ctx.sleep) or fnn(cc, tab, list(self.cfg.target), radius_px=140, sleep=self.ctx.sleep)
+                if got:
+                    self.locates.append({"near_in": [round(v, 3) for v in last_in] if last_in else None, "n_objects": len(objs), "n_candidates": len(cands), "candidates": [{"x_in": o.get("x_in"), "y_in": o.get("y_in"), "w_mm": o.get("w_mm"), "h_mm": o.get("h_mm")} for o in cands[:8]],
+                                         "chosen_in": [round(v, 3) for v in got[0]], "source": getattr(got, "source", None)})
+                    return list(got[0]), got[1], got[2]
             fn = getattr(pl, "find_nut_anywhere", None)
             if fn:   # why: pick_loop's finder takes near_in and returns (xy_in, source); the runner works in find_nut's (xy_in, px, area)
-                cands = self.nutlike(objs); got = fn(cc, tab, scene_objects=objs, near_in=last_in)
+                got = fn(cc, tab, scene_objects=objs, near_in=last_in)
                 self.locates.append({"near_in": [round(v, 3) for v in last_in] if last_in else None, "n_objects": len(objs), "n_candidates": len(cands),
                                      "candidates": [{"x_in": o.get("x_in"), "y_in": o.get("y_in"), "w_mm": o.get("w_mm"), "h_mm": o.get("h_mm")} for o in cands[:8]],
                                      "chosen_in": [round(v, 3) for v in got[0]] if got else None, "source": got[1] if got else None})   # why: which object was "the nut" is the open question of first10b's resets

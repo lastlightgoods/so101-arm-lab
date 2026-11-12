@@ -129,13 +129,13 @@ def pl(tmp_path, monkeypatch, cc, wc):
     m = load(os.path.join(TOOLS, "pick_loop.py"), "pick_loop_closed")
     calib = tmp_path / "jetson" / "calib"; calib.mkdir(parents=True); shutil.copy(FIXTURE_TABLE, calib / "top_table.json"); shutil.copy(WRIST_POSE, calib / "wrist_campose.json")
     rec = Recorder(); monkeypatch.setattr(m, "ROOT", str(tmp_path)); monkeypatch.setattr(m, "cam_calib", lambda: cc); monkeypatch.setattr(m, "wrist_mod", lambda: wc); monkeypatch.setattr(m, "labtrack", lambda: rec)
-    monkeypatch.setattr(m, "rec", rec, raising=False); monkeypatch.setattr(m.time, "sleep", lambda s: None); monkeypatch.setattr(m, "fetch_top", lambda: JPEG); monkeypatch.setattr(m, "fetch_wrist", lambda: None); monkeypatch.setattr(m, "follower_joints", lambda: None)   # why: hermetic: the arm cut-out never reads a live /api/state
+    monkeypatch.setattr(m, "rec", rec, raising=False); monkeypatch.setattr(m.time, "sleep", lambda s: None); monkeypatch.setattr(m, "fetch_top", lambda: JPEG); monkeypatch.setattr(m, "fetch_wrist", lambda: None); monkeypatch.setattr(m, "follower_joints", lambda: None); monkeypatch.setattr(m, "fetch_scene_state", lambda: ([], 0))   # why: hermetic: the arm cut-out never reads a live /api/state, nor the scene search a live /api/scene (a test with a scene fakes fetch_scene_state)
     return m
 
 
 def drive(pl, monkeypatch, capsys, arm, argv):
     """Run pick_loop.main() against `arm`; returns every stdout line parsed as JSON."""
-    monkeypatch.setattr(pl, "find_nut", arm.find_nut); monkeypatch.setattr(pl, "api", arm.api); monkeypatch.setattr(pl, "run_plan", arm.run_plan); monkeypatch.setattr(pl, "fetch_scene_objects", lambda: list(arm.scene))
+    monkeypatch.setattr(pl, "find_nut", arm.find_nut); monkeypatch.setattr(pl, "api", arm.api); monkeypatch.setattr(pl, "run_plan", arm.run_plan); monkeypatch.setattr(pl, "fetch_scene_objects", lambda: list(arm.scene)); monkeypatch.setattr(pl, "fetch_scene_state", lambda: (list(arm.scene), 0))
     monkeypatch.setattr(sys, "argv", ["pick_loop.py", *argv]); pl.main()
     return [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
 

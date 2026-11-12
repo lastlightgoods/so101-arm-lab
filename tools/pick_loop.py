@@ -123,6 +123,42 @@ def fetch_scene_objects():
     except Exception: return []
 
 
+def fetch_scene_state():
+    """(objects, pending) of /api/scene: the nut-like or not objects the map confirmed and how many it is still confirming (SCENE_MIN_HITS, ~1.5 s); ([], 0) when the dashboard, the camera or the background is missing."""
+    try: r = api("/api/scene"); return (list(r.get("objects") or []), int(r.get("pending") or 0)) if r.get("ok", True) else ([], 0)
+    except Exception: return [], 0
+
+
+class Found(tuple):
+    """find_nut's (mat_in, pixel, area) with `.source` ("scene" | "dark") saying which search answered."""
+    source = None
+
+
+def find_nut_near(cc, table, near_in, radius_px=70, radius_mm=None, wait_s=3.0, jpeg=None, joints="live", sleep=None):
+    """The nut near `near_in` (mat inches) -> Found (mat_in, pixel, area; `.source` "scene" | "dark") or None. The scene map first: poll /api/scene every
+    0.5 s while it reports pending objects (at most `wait_s`; a new object needs ~1.5 s), take the nut-like object nearest `near_in` within `radius_mm`
+    (default: what a `radius_px` box covers). None there: the dark-blob search find_nut with the same radius. Never raises on a dashboard error.
+    why: 11 Nov 2026 the dark-blob search kept taking fragments of the printed squares for the nut (6.78, 4.81) and never saw the real one on a light square
+    (10.17, 7.32), while the scene map found it every time."""
+    sleep = sleep or time.sleep
+    try:
+        if radius_mm is None:
+            u, v = cc.table_to_pixel(table, near_in[0] * 25.4, near_in[1] * 25.4); (x0, y0), (x1, y1) = cc.pixel_to_table(table, u, v), cc.pixel_to_table(table, u + 1.0, v)
+            radius_mm = radius_px * math.hypot(x1 - x0, y1 - y0)
+        objs, pend = fetch_scene_state(); waited = 0.0
+        while pend > 0 and waited < wait_s: sleep(0.5); waited += 0.5; objs, pend = fetch_scene_state()
+        c = [(math.hypot(float(o["x_in"]) - near_in[0], float(o["y_in"]) - near_in[1]) * 25.4, o) for o in nut_candidates(objs) if "x_in" in o and "y_in" in o]
+        c = [t for t in c if t[0] <= radius_mm]
+        if c:
+            o = min(c, key=lambda t: t[0])[1]; xy = [float(o["x_in"]), float(o["y_in"])]; u, v = cc.table_to_pixel(table, xy[0] * 25.4, xy[1] * 25.4)
+            f = Found((xy, [float(u), float(v)], None)); f.source = "scene"; return f
+    except Exception as e: print(json.dumps({"find_nut_near": "scene failed", "err": f"{type(e).__name__}: {e}"}), flush=True)
+    kw = {"jpeg": jpeg} if jpeg is not None else {}; kw.update({"joints": joints} if joints != "live" else {})
+    d = find_nut(cc, table, near_in, radius_px=radius_px, **kw)
+    if d is None: return None
+    f = Found(d); f.source = "dark"; return f
+
+
 def find_nut(cc, table, near_in, radius_px=70, jpeg=None, joints="live"):
     """Dark blob nearest to `near_in` (mat inches) in a fresh overhead frame (or the given JPEG bytes) -> (mat_in, pixel, area) or None. `joints`: the
     follower's joints for the arm cut-out, as in find_nut_mat ("live" reads /api/state; None skips it; a dict is used as is). why: 11 Nov 2026 13:45 the
@@ -421,7 +457,8 @@ def pick_once(cc, table, state, a, run, nut_in, tgt, place_in, off, say, session
             r["max_err_deg"] = round(max(abs(desired[r["wp"]][k] - r["reached"][k]) for k in ARM), 2)
         time.sleep(1.0)
         not_in_jaws = info.get("reason") == "not_in_jaws"
-        landing_jpg = fetch_top(); landed = find_nut(cc, table, nut_in if not_in_jaws else place_in, radius_px=60, jpeg=landing_jpg)   # why: an aborted pick left the nut where it was; look there, not at the target
+        landing_jpg = fetch_top(); landed = find_nut_near(cc, table, nut_in if not_in_jaws else place_in, radius_px=60, jpeg=landing_jpg)   # why: an aborted pick left the nut where it was; look there, not at the target
+        landing_source = getattr(landed, "source", None); tr.params({"landing_source": landing_source, "nut_source": (extra or {}).get("nut_source")})   # why: 11 Nov 2026 which search saw the nut (scene map or dark blob) is the first thing to check when a cycle goes wrong
         before_mm = math.hypot(nut_in[0] - tgt[0], nut_in[1] - tgt[1]) * 25.4
         err_mm = math.hypot(landed[0][0] - tgt[0], landed[0][1] - tgt[1]) * 25.4 if landed else None
         picked = (not not_in_jaws) and landed is not None and (err_mm < before_mm - 5.0 or before_mm < 40.0)   # it got closer, or it was already there and stayed within the search radius
@@ -432,7 +469,7 @@ def pick_once(cc, table, state, a, run, nut_in, tgt, place_in, off, say, session
                "seconds": round(dt, 1), "sag_deg": {r["wp"]: r["max_err_deg"] for r in rows}, "place_offset_in": [round(v, 3) for v in off], "mode": mode, "control": control, "jaw_open": a.jaw_open,
                "corr1_mm": info.get("corr1_mm"), "corr2_mm": info.get("corr2_mm"), "grasp_h_mm": info.get("grasp_h_mm"), "grasp_lowered_mm": info.get("grasp_lowered_mm"), "final_residual_mm": info.get("final_residual_mm"),
                "aim_mm": info.get("aim_mm"), "jaw_dir": info.get("jaw_dir"), "aim_in": info.get("aim_in"),
-               "wrist_offset_mm": wc["offset_mm"] if wc else None, "in_jaws": info.get("in_jaws"), "jaw_ring": info.get("jaw_ring"), "jaw_retry": bool(info.get("jaw_retry")), "reason": info.get("reason"),
+               "wrist_offset_mm": wc["offset_mm"] if wc else None, "in_jaws": info.get("in_jaws"), "jaw_ring": info.get("jaw_ring"), "jaw_retry": bool(info.get("jaw_retry")), "reason": info.get("reason"), "landing_source": landing_source,
                "fast_close": bool(a.fast_close), **(extra or {}), "t": time.strftime("%H:%M:%S")}
         state["history"].append(rec); json.dump(state, open(a.state, "w"), indent=1); print(json.dumps(rec), flush=True)
         c1, c2 = info.get("corr1_mm"), info.get("corr2_mm"); ij = info.get("in_jaws")
@@ -489,7 +526,7 @@ def reset_nut(state, cc, table, safe_box, avoid, rng, a=None, say=None, markers_
     a = a or default_args(); say = say or (lambda d: print(json.dumps(d), flush=True)); track = track or labtrack(); session = session or time.strftime("%Y%m%d-%H%M%S")
     markers = marker_centres_in(table, load_layout()) if markers_in is None else markers_in
     near = state["history"][-1]["landed_in"] if state.get("history") and state["history"][-1].get("landed_in") else list(a.target)
-    found = find_nut(cc, table, near); source = "near"
+    found = find_nut_near(cc, table, near); source = found.source if found else None
     if not found:
         anywhere = find_nut_anywhere(cc, table, scene_objects, near_in=near, markers_in=markers)
         if not anywhere: raise SystemExit(f"reset: nut not found anywhere on the mat (last seen near {[round(v, 2) for v in near]})")
@@ -540,7 +577,7 @@ def main():
     run, misses = 0, 0
     while run < a.runs:
         nxt = run + 1; tgt = list(a.target) if (nxt == a.runs or nxt % 2 == 0) else list(a.alt); key = f"{tgt[0]:.2f},{tgt[1]:.2f}"
-        found = find_nut(cc, table, near) or find_nut(cc, table, list(a.target), radius_px=140) or find_nut(cc, table, list(a.alt), radius_px=140); source = "near"
+        found = find_nut_near(cc, table, near) or find_nut_near(cc, table, list(a.target), radius_px=140) or find_nut_near(cc, table, list(a.alt), radius_px=140); source = found.source if found else None   # why: the scene map first at each hint, the dark blob behind it (11 Nov 2026)
         if not found:   # the whole-mat finder: the scene map, then a dark-blob search over the whole mat with the markers masked
             anywhere = find_nut_anywhere(cc, table, near_in=near, markers_in=markers)
             if anywhere: found, source = (anywhere[0], None, None), anywhere[1]; say({"run": nxt, "note": "nut found by the whole-mat finder", "source": source, "nut_in": [round(v, 3) for v in anywhere[0]]})
@@ -548,7 +585,7 @@ def main():
             misses += 1; say({"run": nxt, "miss": misses, "near": [round(v, 3) for v in near], "lost_after": a.lost_after})
             if misses >= a.lost_after: print(json.dumps({"run": nxt, "stop": "lost", "misses": misses, "near": [round(v, 3) for v in near]}), flush=True); break
             time.sleep(1.0); continue   # why: a miss does not spend a run; the scene map updates at ~2 Hz, so look again
-        run, misses = nxt, 0; off = state["place_offsets_in"].setdefault(key, [0.0, 0.0]); nut_in = found[0]; place_in = [tgt[0] + off[0], tgt[1] + off[1]]
+        say({"run": nxt, "nut_source": source, "nut_in": [round(v, 3) for v in found[0]]}); run, misses = nxt, 0; off = state["place_offsets_in"].setdefault(key, [0.0, 0.0]); nut_in = found[0]; place_in = [tgt[0] + off[0], tgt[1] + off[1]]
         rec, landed, picked, stop = pick_once(cc, table, state, a, run, nut_in, tgt, place_in, off, say, session, track, mode, wpose, extra={"nut_source": source})
         if stop: print(json.dumps(stop), flush=True); break
         near = landed[0]
