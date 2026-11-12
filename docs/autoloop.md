@@ -88,7 +88,24 @@ frame rate. So:
   so the session ends within one waypoint stage; if the arm is mid-pick it is sent to rest first. Delete the file before the next session.
 * **The wall STOP** (the panel's emergency button) cuts the arm; the runner finds out at its next `/api/state` poll or when `pick_seq`
   fails, and ends with `panel` or `run_plan`.
-* Ctrl-C ends the session (`end: interrupted`) and still writes the summary; it sends no rest command.
+* Ctrl-C ends the session (`end: interrupted`) and still writes the summary. Since the overnight guards (below) it, SIGTERM (`kill <pid>`) and a crash also send the arm to rest first, under the same rule as a trip.
+* The dashboard STOP (wall, iPad, phone page) now also writes the stop file (`dashboard/server.py write_stop_file`): `so101-stop` only kills what is running that second, and a STOP pressed between two plans used to be missed (the runner restarted `pick_seq`). The file stays until you delete it; the next run then stops at once with `stop_file`.
+
+## Overnight guards (tools/guardrails.py, shared with tools/tidy.py)
+
+`--unattended` refuses to start without `--max-minutes` and `--max-tries`, and turns on `--require-health`. Trips and their sources:
+
+| trip | when | source of the number |
+|---|---|---|
+| `servo_hot` | any servo >= `--temp-limit` (60 C) | servo cut is 70 C (Max_Temperature_Limit); 60 is the lab amber mark, an assumption |
+| `servo_current` | one arm joint >= 2.7 A, or all servos > 5.0 A | STS3215 stall 2.7 A at 12 V (docs/stronger-arm.md); 5 A supply and board rating. The gripper is exempt |
+| `servo_voltage` | supply < 10.0 V | lab choice (servo_telemetry.VOLT_LOW_V) |
+| `servo_stall` | position error > 6 deg with load >= 50 % for >= 3 s | 6 deg: above the 4.7 deg worst loaded sag, below the 8 deg motion trip; 50 %: assumption, never measured on the arm |
+| `servo_error` | any servo error bit (voltage, sensor, temp, current, overload) | the servo's Status register |
+| `no_servo_telemetry` | `--require-health` and a plan came back without telemetry | |
+| `max_tries`, `max_minutes` | `--max-tries`, `--max-minutes`; clean stops, checked between picks | |
+
+Rows from `pick_seq` carry the servo summary of each waypoint, so heat, current, supply and stall are judged after every plan, not only between cycles; a plan already running is not interrupted. Live `/api/tele` is also read between cycles (only when it has a sample younger than 5 s).
 
 ## What a session leaves behind
 

@@ -10,7 +10,7 @@ The pick is tools/pick_loop.closed_loop_pick (readback-corrected hover, grasp, l
 checked against the ring as a solid cylinder before anything moves; a release over the ring at 110 mm with a tipped gripper; an adaptive route; the "fluid" trims; a grip check.
 Nothing here edits pick_loop: the module's tables and functions are patched for the length of one pick (Rig.patched) and put back.
 """
-import argparse, contextlib, importlib.util, json, math, os, random, sys, time, urllib.request
+import argparse, contextlib, importlib.util, json, math, os, random, signal, sys, time, urllib.request
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,6 +28,7 @@ GRIP_EMPTY_MAX = 2.0                # gripper readback (0-100) after the lift at
 REST_TIP_IN = (9.02, 3.21)          # straight above the rest tip is where the arm goes up before crossing to the ring
 HIGH_MM = 110.0
 MAX_FAILS = 3
+CLEAN_ENDS = ('all_tidy', 'max', 'max_tries', 'max_minutes')   # exit code 0: finished, or a cap the owner set
 BLUE_ROWS = 5 / 6                   # the bottom sixth of the frame holds the camera's own blue tape
 # -- the ring lift (reset)
 RING_GRIP_H_MM, RING_PRE_H_MM, RING_HOVER_H_MM, RING_JAW, RING_AIM_MM, WALL_MID_MM = 15.0, 63.0, 76.0, 50, 12.0, 41.0   # 11 Nov 21:0x live; the grip is 10 mm lower than that first try
@@ -330,7 +331,7 @@ class Tidy:
     """The runner. `guard` a guardrails.Guard, `ctx` its Ctx, `track` a LabTrack, `eps` {"ring": Episode, "spread": Episode} (rec None = off), `args` the parsed CLI."""
     def __init__(self, pl, cc, table, rig, guard, ctx, track, args, rng, eps=None, out=print, fetch_top=None):
         self.pl, self.cc, self.table, self.rig, self.guard, self.ctx, self.track, self.a, self.rng, self.out = pl, cc, table, rig, guard, ctx, track, args, rng, out
-        self.eps = eps or {}; self.fetch_top = fetch_top or pl.fetch_top; self.n = 0; self.tl = []; self.last_rows = []; self.grip_log = []; self.cur_kind = "nut"; self.stages = []; self.fails = 0
+        self.eps = eps or {}; self.fetch_top = fetch_top or pl.fetch_top; self.n = 0; self.tl = []; self.last_rows = []; self.grip_log = []; self.cur_kind = "nut"; self.stages = []; self.fails = 0; self.in_motion = False
         self.markers_mm = list((table.get("layout_markers") or {}).values()); self.noted = set()
         self.biases = load_biases(os.path.join(getattr(pl, "ROOT", ROOT), "jetson", "calib", "pick_state.json"))
 
@@ -374,11 +375,11 @@ class Tidy:
         def run(plan, max_deg_s):
             if t := self.guard.check_plan(plan): raise TripError(t)
             if plan["waypoints"] and plan["waypoints"][0]["name"] == "hover_tgt" and self.rig.fluid: max_deg_s = max(max_deg_s, 80.0)   # the carry needs no precision
-            t0 = time.time()
+            t0 = time.time(); self.in_motion = True
             try: rows = orig(plan, max_deg_s)
             except (Exception, SystemExit) as e: raise TripError(self.guard.trip("run_plan", {"err": f"{type(e).__name__}: {e}"[:300]})) from e
-            for r in rows:
-                if t := self.guard.check_waypoint(r): raise TripError(t)
+            if rows and rows[-1].get("wp") == "rest": self.in_motion = False   # the plan ended at rest
+            if t := self.guard.check_rows(rows): raise TripError(t)   # motion error, then servo health (heat, current, supply, error bits, stall) of every row
             self.last_rows = rows; self.tl.append({"t0": round(t0 - t00, 2), "t1": round(time.time() - t00, 2), "wps": [(x.get("wp"), x.get("t"), x.get("seconds"), (x.get("reached") or {}).get("gripper")) for x in rows]}); return rows
         pl.run_plan = run
         try: yield
@@ -398,8 +399,19 @@ class Tidy:
 
     def go_home(self):
         try:
-            if self.guard.readback_healthy(): self.orig_run(self.pl.build_plan(None, None, {}, names=("rest",)), self.pl.SPEED["closed"])
+            if self.guard.readback_healthy(): self.orig_run(self.pl.build_plan(None, None, {}, names=("rest",)), self.pl.SPEED["closed"]); self.in_motion = False
         except (Exception, SystemExit): pass
+
+    def send_rest(self, fresh=False):
+        """The rest plan on the unwrapped run_plan (the stop file must not block the way home). fresh: end the pick_seq that may still be finishing the interrupted plan and start a new one (only when a session was open)."""
+        if fresh and getattr(self.pl, "SESSION", None) is not None: self.pl.close_session(); self.pl.open_session(True)
+        (getattr(self, "orig_run", None) or self.pl.run_plan)(self.pl.build_plan(None, None, {}, names=("rest",)), self.pl.SPEED["closed"])
+
+    def park(self, reason, fresh=False):
+        """Every exit path ends here: rest if the arm is not already there (guardrails.park_on_exit decides). Torque stays on at rest (pick_seq never releases it)."""
+        r = self.guard.park(lambda: self.send_rest(fresh), self.in_motion, reason, self.ctx)
+        if r["parked"]: self.in_motion = False
+        self.say({"event": "park", "reason": reason, **r}); return r
 
     def pick_args(self, aim, roll):
         pl = self.pl; return argparse.Namespace(jaw_open=self.a.jaw_open or pl.JAW_OPEN, max_deg_s=pl.SPEED["closed"], wrist_check=False, grasp_aim_mm=aim, grasp_tilt_deg=pl.GRASP_TILT_DEG,
@@ -692,7 +704,7 @@ def spread_pile(t, pile_in, box_in, nudge=True, max_attempts=None):
             spot = sample_spread_spot(t.rng, box_in, others + list(s["spots"]), t.markers_mm, rig.ring, (blob["x_in"], blob["y_in"]), avoid=[(pile_in, PILE_R_MM + 15.0)])
             if spot is None: break
         if cand is None or spot is None: s["stop"] = "refused: no clean route for the pile"; break
-        s["attempts"] += 1; res = spread_pick(t, blob, cand, spot); t.say({"event": "spread", **res})
+        s["attempts"] += 1; t.guard.count_try(); res = spread_pick(t, blob, cand, spot); t.say({"event": "spread", **res})
         if res.get("trip"): s["stop"] = res["trip"]; break
         if res["ok"]: s["moved"] += 1; s["spots"].append(spot); fails.pop(key, None); t.fails = 0
         else:
@@ -783,7 +795,9 @@ def build_parser():
     ap.add_argument("--max", type=int, default=None, help="at most this many picks per tidy round"); ap.add_argument("--rounds", type=int, default=1); ap.add_argument("--order", choices=("clean", "near"), default="clean")
     ap.add_argument("--grip-check", choices=("own", "loop"), default="own", help="own: gripper readback after the lift > 2.0 OR the wrist camera; loop: closed_loop_pick's own (switch once final-correct is on main)")
     ap.add_argument("--no-roll", action="store_true"); ap.add_argument("--jaw-open", type=int, default=None); ap.add_argument("--seed", type=int, default=None); ap.add_argument("--session", default=time.strftime("%Y%m%d-%H%M%S"))
-    ap.add_argument("--temp-limit", type=float, default=60.0, help="servo temperature (C) above which the run stops, when /api/state publishes one"); ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--temp-limit", type=float, default=60.0, help="servo temperature (C) at which the run stops (plan rows and /api/tele; the servo's own cut is 70)"); ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--max-minutes", type=float, default=None, help="wall-clock cap for the whole session, checked between picks (a clean stop)"); ap.add_argument("--max-tries", type=int, default=None, help="cap on picks attempted (ring and spread), whatever their outcome (a clean stop)")
+    ap.add_argument("--require-health", action="store_true", help="a plan whose rows carry no servo telemetry is a trip"); ap.add_argument("--unattended", action="store_true", help="overnight mode: refuses to start without --max-minutes AND --max-tries, and implies --require-health")
     ap.add_argument("--ring-box", type=float, nargs=4, default=list(RING_BOX_IN)); ap.add_argument("--spread-box", type=float, nargs=4, default=list(SPREAD_BOX_IN)); ap.add_argument("--no-nudge", dest="nudge", action="store_false"); ap.add_argument("--no-blob-mask", dest="blob_mask", action="store_false")
     ap.add_argument("--ring-to", type=float, nargs=2, default=None, help="reset: set the ring down at this centre (mat inches) instead of a random one")
     ap.add_argument("--demo-host", default="jetson"); ap.add_argument("--demo-root", default=None); ap.add_argument("--demo-vcodec", default=None); ap.add_argument("--demo-tick-sink", default="/dev/shm/so101_ticks.jsonl"); ap.add_argument("--lab-config", default=None)
@@ -802,7 +816,9 @@ def plan_report(pl, rig, toys, ring, order):
 
 
 def main(argv=None):
-    a = build_parser().parse_args(argv); gr = load_gr(); al = load_al(); pl = load_pl(); cc = pl.cam_calib(); table = json.load(open(os.path.join(ROOT, "jetson", "calib", "top_table.json")))
+    a = build_parser().parse_args(argv); gr = load_gr()
+    if a.unattended and (missing := gr.unattended_problems(gr.Limits(max_tries=a.max_tries, max_minutes=a.max_minutes))): raise SystemExit("--unattended needs " + " and ".join(missing))   # before anything is loaded or fetched
+    al = load_al(); pl = load_pl(); cc = pl.cam_calib(); table = json.load(open(os.path.join(ROOT, "jetson", "calib", "top_table.json")))
     if not (table.get("arm_fit") and table.get("arm_base_mm")): raise SystemExit("tidy needs the arm fit in jetson/calib/top_table.json")
     ring = fit_ring(pl.fetch_top(), cc, table)
     if ring is None: raise SystemExit("tape ring not found in the top frame (fewer than 150 blue pixels)")
@@ -810,19 +826,29 @@ def main(argv=None):
     if a.cmd == "plan":
         print(json.dumps(plan_report(pl, rig, [o for o in pl.fetch_scene_objects() if is_toy(o, ring=ring)], ring, a.order), indent=1)); return 0
     get = lambda path, t: json.load(urllib.request.urlopen(pl.DASH + path, timeout=t))
-    ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True), arm_jobs=al.jetson_arm_jobs)
-    guard = gr.Guard(cc, table, gr.Limits(ceiling_in=4.6, stop_file=os.path.join(ROOT, "outputs", "run", "autoloop.stop")), ctx); track = pl._load("labtrack").LabTrack(EXPERIMENT)
+    ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True), arm_jobs=al.jetson_arm_jobs, fetch_tele=lambda: get("/api/tele", 3))
+    lim = gr.Limits(ceiling_in=4.6, stop_file=os.path.join(ROOT, "outputs", "run", "autoloop.stop"), temp_limit_c=a.temp_limit, max_tries=a.max_tries, max_minutes=a.max_minutes, require_health=a.require_health or a.unattended)
+    guard = gr.Guard(cc, table, lim, ctx); track = pl._load("labtrack").LabTrack(EXPERIMENT)
     eps = {"ring": Episode(make_recorder(a, pl, a.ring_repo, "so101-toys-to-ring") if a.record else None, a.ring_repo), "spread": Episode(make_recorder(a, pl, a.spread_repo, "so101-toys-spread") if a.record_spread else None, a.spread_repo)}
     pl.open_session(True)
+    t = None
     try:
         eps['ring'].activate()   # fail before any motion when the recorder will not take its configuration
         t = Tidy(pl, cc, table, rig, guard, ctx, track, a, random.Random(a.seed), eps, out=lambda l: print(l, flush=True))
-        if a.cmd == "run": s = t.round(a.max)
-        elif a.cmd == "reset": s = reset_mat(t, tuple(a.ring_to) if a.ring_to else None)
-        else: s = loop(t, a.rounds, a.max)
+        try:
+            if a.cmd == "run": s = t.round(a.max)
+            elif a.cmd == "reset": s = reset_mat(t, tuple(a.ring_to) if a.ring_to else None)
+            else: s = loop(t, a.rounds, a.max)
+        except KeyboardInterrupt:   # Ctrl-C or SIGTERM: park, then leave
+            t.say({"event": "interrupted"}); t.park("interrupted", fresh=True); s = {"stop": "interrupted"}
+        except Exception as e:   # a crash must not leave the arm mid-pick; park, then let it propagate
+            t.say({"event": "error", "err": f"{type(e).__name__}: {e}"[:300]}); t.park("exception", fresh=True); raise
+        if s.get("stop") and s["stop"].split(": ")[-1] not in ("all_tidy", "max") and t.in_motion: t.park(s["stop"])   # any stop that left the arm out of rest (a trip's go_home failed, a cap hit mid-motion)
         print(json.dumps({"event": "summary", **{k: v for k, v in s.items() if k != "results"}}), flush=True)
-        return 0 if not s.get("stop") or s.get("stop") in ("all_tidy", "max") else 2
+        return 0 if not s.get("stop") or s["stop"].split(": ")[-1] in CLEAN_ENDS else 2
     finally: pl.close_session()
 
 
-if __name__ == "__main__": sys.exit(main())
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))   # why: kill <pid> takes the same clean exit as Ctrl-C (arm parked)
+    sys.exit(main())

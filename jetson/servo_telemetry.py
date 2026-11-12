@@ -70,6 +70,8 @@ TEMP_WARN_C = 60           # lab choice: amber from here, red at TEMP_HOT_C
 TEMP_HOT_C = 65
 VOLT_WARN_V = 11.0         # lab choice for the 12 V 5 A supply: amber under this, red under VOLT_LOW_V (servos 12 V C018: 6..12.6 V)
 VOLT_LOW_V = 10.0
+STALL_ERR_DEG = 6.0        # stall: commanded minus actual above this ... (assumption: above the 4.7 deg worst loaded sag measured on 11 Nov at a 290 mm reach, tools/tidy.py droop_mm; under the 8 deg motion trip)
+STALL_LOAD_PCT = 50.0      # ... with the servo pushing at least this much of its rated PWM (ASSUMPTION, nothing measured: Present_Load has never been read on the real arm, 'to verify' above)
 BUS_A_MARK = 5.0           # Waveshare bus board continuous rating (Robonine load test, docs/stronger-arm.md)
 JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
 FIELDS = ("pos", "goal", "sag", "vel_dps", "load_pct", "cur_a", "volt_v", "temp_c")   # the numeric ones summarised per pick
@@ -192,7 +194,7 @@ def sag_flag(history, window=20, factor=1.5, floor_deg=1.0):
 # ---------------------------------------------------------------- per-run summaries (one pick, one autoloop cycle) for MLflow
 class Summary:
     """Accumulates samples and reports the extremes: add(sample) per read, .out() -> a plain dict, merge() joins several, metrics() flattens."""
-    def __init__(self): self.n = 0; self.d = {}; self.total_a_max = 0.0; self.volt_min = None; self.flags = {}; self.dt_ms_max = 0.0; self.temp0 = {}
+    def __init__(self): self.n = 0; self.d = {}; self.total_a_max = 0.0; self.volt_min = None; self.flags = {}; self.dt_ms_max = 0.0; self.temp0 = {}; self.run0 = {}
 
     def add(self, s):
         if not s: return
@@ -202,7 +204,10 @@ class Summary:
         self.dt_ms_max = max(self.dt_ms_max, s.get("dt_ms") or 0.0)
         for f in s.get("flags") or []: self.flags[f] = self.flags.get(f, 0) + 1
         for n, x in s["j"].items():
-            e = self.d.setdefault(n, {"temp_max_c": 0, "temp_last_c": 0, "load_abs_max_pct": 0.0, "cur_max_a": 0.0, "sag_abs_max": 0.0, "sag_hold_abs_max": 0.0, "volt_min_v": None})
+            e = self.d.setdefault(n, {"temp_max_c": 0, "temp_last_c": 0, "load_abs_max_pct": 0.0, "cur_max_a": 0.0, "sag_abs_max": 0.0, "sag_hold_abs_max": 0.0, "volt_min_v": None, "stall_s_max": 0.0})
+            stalled = x.get("on") and x.get("sag") is not None and abs(x["sag"]) > STALL_ERR_DEG and abs(x["load_pct"]) >= STALL_LOAD_PCT   # a stall: far from the goal AND pushing hard
+            if stalled: self.run0.setdefault(n, s["t"]); e["stall_s_max"] = max(e["stall_s_max"], s["t"] - self.run0[n])   # seconds of the longest unbroken run, from the sample times
+            else: self.run0.pop(n, None)
             self.temp0.setdefault(n, x["temp_c"])
             e["temp_max_c"] = max(e["temp_max_c"], x["temp_c"]); e["temp_last_c"] = x["temp_c"]
             e["load_abs_max_pct"] = max(e["load_abs_max_pct"], abs(x["load_pct"])); e["cur_max_a"] = max(e["cur_max_a"], x["cur_a"])
@@ -227,7 +232,7 @@ def merge(summaries):
         for n, e in s["j"].items():
             m = out["j"].get(n)
             if m is None: out["j"][n] = dict(e); continue
-            for k in ("temp_max_c", "load_abs_max_pct", "cur_max_a", "sag_abs_max", "sag_hold_abs_max"): m[k] = max(m[k], e[k])
+            for k in ("temp_max_c", "load_abs_max_pct", "cur_max_a", "sag_abs_max", "sag_hold_abs_max", "stall_s_max"): m[k] = max(m.get(k, 0.0), e.get(k, 0.0))
             if e["volt_min_v"] is not None: m["volt_min_v"] = e["volt_min_v"] if m["volt_min_v"] is None else min(m["volt_min_v"], e["volt_min_v"])
             m["temp_last_c"] = e["temp_last_c"]; m["temp_rise_c"] = m.get("temp_rise_c", 0) + e.get("temp_rise_c", 0)
     return out

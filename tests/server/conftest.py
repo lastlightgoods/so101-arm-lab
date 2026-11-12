@@ -106,6 +106,7 @@ def fake(srv, monkeypatch, tmp_path):
     f = FakeSubprocess()
     monkeypatch.setattr(subprocess, "run", f.run); monkeypatch.setattr(subprocess, "Popen", f.popen)
     monkeypatch.setattr(srv, "HERE", str(tmp_path))
+    monkeypatch.setenv("SO101_STOP_FILE", str(tmp_path / "run" / "autoloop.stop"))   # the dashboard STOP writes the loops' stop file: never the real one
     monkeypatch.setattr(srv, "_scanpose", lambda rest: None)
     return f
 
