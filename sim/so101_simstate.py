@@ -1,8 +1,25 @@
 """Publishes the MuJoCo SO-101 simulator's state for the lab dashboard (auto-loaded via so101_simstate.pth).
 After so101_nexus.mujoco.base_env is imported, wraps the env's step()/reset() to write /tmp/so101_sim_state.json
-(<= 30 Hz): joints in LeRobot dataset units (deg, gripper 0-100), object/target/tcp poses, success, episode, mode."""
-import sys, os, json, time, importlib.abc, importlib.machinery
-TARGET = "so101_nexus.mujoco.base_env"; PATH = "/tmp/so101_sim_state.json"
+(<= 30 Hz): joints in LeRobot dataset units (deg, gripper 0-100), object/target/tcp poses, success, episode, mode.
+Each message carries source "SIM" and a session id (<mode>-<pid>) and is also written as the display-only virtual-arm message
+/tmp/so101_virtual_<session>.json (tools/virtual_stage.py, docs/virtual-stage.md), which the dashboard draws as a labelled ghost arm. The old
+/tmp/so101_sim_state.json is kept for one more release."""
+import sys, os, json, time, importlib.abc, importlib.machinery, importlib.util
+TARGET = "so101_nexus.mujoco.base_env"; PATH = "/tmp/so101_sim_state.json"; VDIR = "/tmp"
+def _vs():
+    """tools/virtual_stage.py by path (this file runs inside the simulator's interpreter, not the repo's), or None."""
+    try:
+        spec = importlib.util.spec_from_file_location("so101_virtual_stage", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "virtual_stage.py"))
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+    except Exception: return None
+def publish(d):
+    """Stamp d as a SIM message (source, session) and write the legacy file and the per-session virtual-arm file, both atomically."""
+    d["source"] = "SIM"; d["session"] = f"{d.get('mode') or 'sim'}-{d.get('pid', 0)}"
+    tmp = PATH + ".tmp"; open(tmp, "w").write(json.dumps(d)); os.replace(tmp, PATH)
+    vs = _vs()
+    if vs is not None:
+        objs = [{"kind": k, "frame": "sim_base", "x": d[key][0], "y": d[key][1], "z": d[key][2]} for k, key in (("nut", "obj"), ("target", "target")) if key in d and len(d[key]) >= 3]
+        vs.write(vs.make_message("SIM", d["session"], d["pos"], objs, seq=d.get("step", 0)), VDIR)
 def _patch(mod):
     Env = getattr(mod, "SO101NexusMuJoCoBaseEnv", None)
     if Env is None or getattr(Env, "_so101_state_patched", False): return
@@ -27,7 +44,7 @@ def _patch(mod):
                 if f:
                     try: d[key] = [float(x) for x in np.asarray(f()).ravel()[:3]]
                     except Exception: pass
-            tmp = PATH + ".tmp"; open(tmp, "w").write(json.dumps(d)); os.replace(tmp, PATH)
+            publish(d)
         except Exception: pass
     _step, _reset = Env.step, Env.reset
     def step(self, action, *a, **k):

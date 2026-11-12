@@ -9,7 +9,7 @@ def test_state_has_now_lock_and_derived_online(srv, http):
     srv.state["jetson"].update(online=True, last=time.time())
     s, _ = http.get_json("/api/state")
     assert s["now"] == pytest.approx(time.time(), abs=2) and s["lock"]["locked"] is False and s["jetson"]["online"] is True
-    assert set(s) >= {"jetson", "mac", "training", "datasets", "policies", "procs", "events", "arms", "spotify", "lock", "sim_arm", "now"}
+    assert set(s) >= {"jetson", "mac", "training", "datasets", "policies", "procs", "events", "arms", "spotify", "lock", "sim_arm", "virtual", "now"}
     srv.state["jetson"]["last"] = time.time() - 13   # tegrastats went quiet 13 s ago -> offline even though the loop has not noticed
     s, _ = http.get_json("/api/state")
     assert s["jetson"]["online"] is False and srv.state["jetson"]["online"] is True, "derived in the response, state untouched"

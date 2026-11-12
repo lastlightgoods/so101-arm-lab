@@ -267,7 +267,7 @@ async function refresh(){fetch('/api/hist',{cache:'no-store'}).then(r=>r.json())
  // status
  const kinds=[...new Set(s.procs.map(p=>p.kind))];const badge=$('#badge');
  if(kinds.length){badge.textContent=kinds.map(k=>k.toUpperCase()).join(' + ');badge.className='badge hot'}else if(on){badge.textContent='IDLE · READY';badge.className='badge'}else{badge.textContent='JETSON OFFLINE';badge.className='badge off'}
- window.simArm=s.sim_arm||null;if(s.sim_arm)window.simArmSeen=Date.now()/1000;const realBusy=kinds.length>0;window.simDrive=!!(s.sim_arm&&!realBusy);$('#arm_sub').textContent=window.simDrive?`SIMULATION · ${(s.sim_arm.mode||'').replace('_sim','').toUpperCase()} · ep ${s.sim_arm.ep}${s.sim_arm.success?' · ✓':''}`:($('#arm_sub').dataset.real||'');const sp=s.spotify||{},spOn=!!sp.running&&sp.state==='playing',p0=s.procs[0];window.so101Busy=kinds.length;window.so101Kinds=kinds;
+ $('#arm_sub').textContent=$('#arm_sub').dataset.real||'';const sp=s.spotify||{},spOn=!!sp.running&&sp.state==='playing',p0=s.procs[0];window.so101Busy=kinds.length;window.so101Kinds=kinds;
  const robotLine=kinds.length?`${kinds.map(k=>k.toUpperCase()).join(' + ')} on ${p0.host.toUpperCase()} · ${Math.floor(p0.secs/60)}m${String(p0.secs%60).padStart(2,'0')}s`:'';
  const mmss=x=>`${Math.floor(x/60)}:${String(Math.floor(x%60)).padStart(2,'0')}`;
  $('#deck').classList.toggle('playing',spOn||kinds.length>0);$('#lamp').classList.toggle('on',kinds.includes('record'));
@@ -310,7 +310,7 @@ function armTable(arms){const simDrive=window.simDrive;const f=simDrive?window.s
  $('#joints tbody').innerHTML=JN.map(k=>{const fv=f[k],lv=l[k],u=k==='gripper'?'%':'°';return`<tr><td>${JL[k]}</td><td class="num">${fv==null?'--':fv.toFixed(1)+u}</td><td class="num" style="color:#4fd6ff">${lv==null?'--':lv.toFixed(1)+u}</td></tr>`}).join('');
  const src=(arms.follower||{}).src||'',age=arms.follower?Math.max(0,(Date.now()/1000-arms.follower.rx)):99;const realSub=age>3?'no stream':(src==='lerobot'?'via lerobot · live':src==='idle-poll'?'idle · live':src);$('#arm_sub').dataset.real=realSub;if(!window.simArm)$('#arm_sub').textContent=realSub}
 let lastArms={};
-async function arms(){try{const s=await(await fetch('/api/state',{cache:'no-store'})).json();lastArms=s.arms||{};window.armsNow=lastArms}catch(e){}armTable(lastArms)}
+async function arms(){try{const s=await(await fetch('/api/state',{cache:'no-store'})).json();lastArms=s.arms||{};window.armsNow=lastArms;window.virtualNow=s.virtual||[];window.virtualRx=Date.now()/1000}catch(e){}armTable(lastArms)}
 setInterval(arms,200);
 // tempest (vector web game, self-playing)
 const TP={lv:0,score:0,lives:3,lane:0,px:0,shots:[],foes:[],parts:[],cool:0,kills:0,warp:0,t:0,last:0,dead:0,flash:0,keys:{}};
@@ -734,14 +734,8 @@ async function scenePoll(){let s=null;try{s=await(await fetch('/api/scene',{cach
  window.sceneSeq=(window.sceneSeq||0)+1;return ok}
 window.scenePoll=scenePoll;window.__objs=objs;
 scenePoll();setInterval(scenePoll,500);
-// simulation props: red 25 mm cube + blue 5 cm disc driven by /tmp/so101_sim_state.json (sim frame x fwd, y left, z up -> stage x, -z, y)
-const simCube=new THREE.Mesh(new THREE.BoxGeometry(0.025,0.025,0.025),new THREE.MeshStandardMaterial({color:0xff2a2a,emissive:0x550000,roughness:.5}));simCube.visible=false;scene.add(simCube);
-const simCubeEdges=new THREE.LineSegments(new THREE.EdgesGeometry(simCube.geometry),new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:.6}));simCube.add(simCubeEdges);
-const simDisc=new THREE.Mesh(new THREE.CircleGeometry(0.05,40),new THREE.MeshBasicMaterial({color:0x2b5cff,transparent:true,opacity:.85,side:THREE.DoubleSide}));simDisc.rotation.x=-Math.PI/2;simDisc.visible=false;scene.add(simDisc);
-const simRing=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({length:48},(_,i)=>new THREE.Vector3(Math.cos(i/48*Math.PI*2)*0.05,0.0015,Math.sin(i/48*Math.PI*2)*0.05))),new THREE.LineBasicMaterial({color:0x8fb4ff}));simRing.visible=false;scene.add(simRing);
-const simTcp=new THREE.Mesh(new THREE.SphereGeometry(0.006,12,12),new THREE.MeshBasicMaterial({color:0x7cff6b}));simTcp.visible=false;scene.add(simTcp);
+// sim objects (the sim base frame: x fwd, y left, z up -> stage x, -z, y) are drawn by the virtual ghost below, not here
 const S2W=(p)=>new THREE.Vector3(p[0],p[2],-p[1]);
-let simLabel=label('SIMULATION','#4fd6ff',new THREE.Vector3(0.0,0.42,0));simLabel.scale.set(0.26,0.065,1);simLabel.visible=false;
 let wristCam=null;function attachWristCam(robot){   // WRIST CAM frustum on the follower's gripper_link: from calib.camera.wrist (jetson/calib/wrist_campose.json, cam_calib.py handeye: position_mm + rotation in URDF gripper_link axes, which ARE the link object's local axes; hfov_deg at 4:3) when /api/calib carries one, else the old guess from TheRobotStudio's Wrist_Cam_Mount STL (69 mm off the gripper axis, 24 deg toward the fingertips). Re-attached by the 'calib' event when the wrist pose changes. Frustum -z = optical axis, +y = image up.
  robot=robot||attachWristCam.robot;if(!robot)return;attachWristCam.robot=robot;const W=(window.calib&&window.calib.camera&&window.calib.camera.wrist)||null,v3=a=>Array.isArray(a)&&a.length===3&&a.every(x=>isFinite(+x));const P=W&&v3(W.position_mm)&&W.rotation&&(v3(W.rotation.optical_axis_gripper)||(Array.isArray(W.rotation.quaternion_xyzw)&&W.rotation.quaternion_xyzw.length===4))?W:null;attachWristCam.key=JSON.stringify(P);
  let link=(robot.links&&robot.links.gripper_link)||null;if(!link)robot.traverse(o=>{if(!link&&o.isURDFLink&&/gripper/i.test(o.name))link=o});if(!link)return;
@@ -761,15 +755,35 @@ function load(color,ghost){return new Promise(res=>{const m=new THREE.LoadingMan
  l.loadMeshCb=(path,mgr,done)=>new STLLoader(mgr).load(path,g=>{g.computeVertexNormals();done(new THREE.Mesh(g))},undefined,e=>{console.warn('mesh',path,e);done(new THREE.Mesh(new THREE.BoxGeometry(0.01,0.01,0.01)))});
  l.load('/urdf/so101.urdf',r=>{r.rotation.x=-Math.PI/2;m.onLoad=()=>{wireify(r,color,ghost);scene.add(r);res(r)}})})}
 const smooth={f:{},l:{}},SM=0.3;
-function apply(robot,p,key){if(!robot||!p||!Object.keys(p).length)return false;const off=window.calibOffsets||{};for(const j of JOINTS){const target=j==='gripper'?GRIP[0]+(p[j]||0)/100*(GRIP[1]-GRIP[0]):((p[j]||0)+(+off[j]||0))*Math.PI/180;   // LeRobot zeroes each joint mid-range; arm.joint_offsets_deg (measured) bring lift/elbow/wrist_flex to the URDF zero
+function jointTarget(j,p,off){return j==='gripper'?GRIP[0]+(p[j]||0)/100*(GRIP[1]-GRIP[0]):((p[j]||0)+(+(off||{})[j]||0))*Math.PI/180}   // THE joint -> URDF radians conversion: the real follower, the leader and the virtual ghost all go through it
+window.__jointTarget=jointTarget;
+function apply(robot,p,key,offsets){if(!robot||!p||!Object.keys(p).length)return false;const off=offsets||window.calibOffsets||{};smooth[key]=smooth[key]||{};for(const j of JOINTS){const target=jointTarget(j,p,off);   // LeRobot zeroes each joint mid-range; arm.joint_offsets_deg (measured) bring lift/elbow/wrist_flex to the URDF zero
  smooth[key][j]=(smooth[key][j]??target)+SM*(target-(smooth[key][j]??target));robot.setJointValue(j,smooth[key][j])}return true}
+// ---- virtual ghost arm (docs/virtual-stage.md): a SIM or FAKE run from /api/state "virtual", drawn as a separate violet wire arm under a fixed badge. Display only: it never reads or drives the real arm, and the real arm always draws from arms.follower.
+const GHOST=0xb26bff,GHOST_CSS='#c79bff',VIRT_MAX_AGE=2.5;let ghostBot=null;
+const vBadge=document.createElement('div');vBadge.id='virtbadge';vBadge.style.cssText='position:absolute;bottom:34px;left:10px;z-index:3;display:none;pointer-events:none;padding:6px 14px 7px;border:2px solid '+GHOST_CSS+';border-radius:8px;background:rgba(48,16,92,.88);color:#fff;font:700 30px/1 Rajdhani,sans-serif;letter-spacing:.08em;box-shadow:0 0 18px rgba(178,107,255,.6)';box.appendChild(vBadge);
+const ghostLabel=label('','#e6d2ff',new THREE.Vector3(0,0.3,0),scene,512);ghostLabel.visible=false;ghostLabel.scale.set(0.32,0.04,1);ghostLabel.material.depthTest=false;ghostLabel.renderOrder=20;
+function setGhostLabel(text){if(ghostLabel.userData.text===text)return;ghostLabel.userData.text=text;const c=ghostLabel.material.map.image,x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);x.font='bold 30px Rajdhani,sans-serif';x.fillStyle='#e6d2ff';x.textAlign='center';x.fillText(text,c.width/2,42);ghostLabel.material.map.needsUpdate=true}
+const ghostNut=new THREE.Mesh(new THREE.CylinderGeometry(0.006,0.006,0.005,6),new THREE.MeshBasicMaterial({color:GHOST,wireframe:true,transparent:true,opacity:.9}));ghostNut.name='ghost_nut';ghostNut.visible=false;scene.add(ghostNut);
+const ghostTarget=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({length:48},(_,i)=>new THREE.Vector3(Math.cos(i/48*Math.PI*2)*0.025,0,Math.sin(i/48*Math.PI*2)*0.025))),new THREE.LineDashedMaterial({color:GHOST,dashSize:0.008,gapSize:0.006}));ghostTarget.computeLineDistances();ghostTarget.name='ghost_target';ghostTarget.visible=false;scene.add(ghostTarget);
+const vSeen={};   // session -> {seq, at}: a stream whose seq has not moved for VIRT_MAX_AGE is gone even if the server still lists it
+function virtualLive(){const now=Date.now()/1000,list=window.virtualNow||[];if(now-(window.virtualRx||0)>VIRT_MAX_AGE)return[];const live=[];for(const m of list){if(!m||!m.joints)continue;const v=vSeen[m.session];if(!v||v.seq!==m.seq)vSeen[m.session]={seq:m.seq,at:now};if(now-vSeen[m.session].at<=VIRT_MAX_AGE)live.push(m)}return live}
+function virtualTag(m){return(m.source==='SIM'||m.source==='FAKE')?m.source:'UNVERIFIED VIRTUAL'}   // never blank: anything not SIM / FAKE (REAL included) is shown as unverified
+function ghostObj(m,kind){const o=(m.objects||[]).find(o=>o&&o.kind===kind);if(!o)return null;const x=+o.x,y=+o.y,z=+o.z||0;if(!isFinite(x)||!isFinite(y))return null;return o.frame==='mat_in'?matToWorld(x,y).add(new THREE.Vector3(0,0.002,0)):S2W([x,y,z])}
+function ghostTick(){const live=virtualLive(),m=live[0]||null;window.__virtual={live:live.length,source:m&&virtualTag(m),session:m&&m.session,label:null};
+ if(!m){vBadge.style.display='none';ghostLabel.visible=ghostNut.visible=ghostTarget.visible=false;if(ghostBot)ghostBot.visible=false;box.style.boxShadow='';return}
+ const tag=virtualTag(m),a=window.armsNow||{},realLive=!!(a.follower&&a.follower.pos&&Date.now()/1000-(a.follower.rx||0)<3);
+ vBadge.style.display='block';vBadge.dataset.source=tag;vBadge.dataset.session=m.session||'';vBadge.innerHTML=`${tag}<span style="display:block;font:600 12px/1.3 Rajdhani,sans-serif;letter-spacing:.12em">NOT THE REAL ARM · VIOLET GHOST${live.length>1?` · +${live.length-1} MORE`:''}${realLive?' · REAL ARM ALSO LIVE (ORANGE)':''}</span>`;
+ box.style.boxShadow=`inset 0 0 0 3px ${GHOST_CSS},inset 0 0 70px rgba(178,107,255,.28)`;
+ const text=`${tag} · ${m.session||'no session'}${m.objects&&m.objects.some(o=>o.frame==='sim_base')?' · sim frame':''}`;setGhostLabel(text);window.__virtual.label=text;
+ if(ghostBot){ghostBot.visible=true;apply(ghostBot,m.joints,'g',m.joint_frame==='urdf'?{}:window.calibOffsets);const link=ghostBot.links&&ghostBot.links.gripper_link;const wp=new THREE.Vector3(0,0.2,0);if(link){link.getWorldPosition(wp)}ghostLabel.position.set(wp.x,wp.y+0.07,wp.z)}else ghostLabel.position.set(0,0.3,0);
+ ghostLabel.visible=true;const n=ghostObj(m,'nut'),t=ghostObj(m,'target');ghostNut.visible=!!n;if(n)ghostNut.position.copy(n);ghostTarget.visible=!!t;if(t)ghostTarget.position.copy(t)}
+load(GHOST,true).then(g=>{ghostBot=g;g.name='ghost_arm';g.visible=false;g.traverse(o=>{if(o.isLineSegments&&o.material)o.material.opacity=.9});window.__ghost=g});
 let follower=null,leader=null,t0=performance.now();
 Promise.all([load(0xffb347,false),load(0x4fd6ff,true)]).then(([f,l])=>{follower=f;leader=l;attachWristCam(f);window.__robots={follower,leader}});
 let fixTick=0;function frame(){requestAnimationFrame(frame);const a=window.armsNow||{};if(++fixTick%30===0){if(follower)wireify(follower,0xffb347,false);if(leader)wireify(leader,0x4fd6ff,true)}
- const sim=window.simArm;const simFresh=!!(window.simDrive&&sim&&sim.pos&&(Date.now()/1000-(window.simArmSeen||0))<2.5);
- const hf=apply(follower,simFresh?sim.pos:(a.follower&&a.follower.pos),'f'),hl=apply(leader,a.leader&&a.leader.pos,'l');
- simCube.visible=simDisc.visible=simRing.visible=simTcp.visible=simLabel.visible=simFresh;
- if(simFresh){if(sim.obj){simCube.position.copy(S2W(sim.obj))}if(sim.target){const t=S2W(sim.target);simDisc.position.set(t.x,0.0012,t.z);simRing.position.set(t.x,0,t.z)}if(sim.tcp)simTcp.position.copy(S2W(sim.tcp));simCube.material.emissive.setHex(sim.success?0x225500:0x550000)}
+ const hf=apply(follower,a.follower&&a.follower.pos,'f'),hl=apply(leader,a.leader&&a.leader.pos,'l');
+ ghostTick();
  const tele=(window.so101Kinds||[]).some(k=>k==='teleoperate'||k==='record');if(leader)leader.visible=hl&&(showLeader||tele);if(follower)follower.visible=true;
  ctl.autoRotate=auto&&!hover;ctl.update();
  if(renderer.domElement.width!==Math.round(W()*renderer.getPixelRatio())||renderer.domElement.height!==Math.round(H()*renderer.getPixelRatio())){renderer.setSize(W(),H());cam.aspect=W()/H();cam.updateProjectionMatrix()}

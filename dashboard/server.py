@@ -799,6 +799,20 @@ def scene_reset():
                  markers_seen=None, noted_at=0.0, persisted_at=0.0, writes=0, arm_px=None, arm_err=None,
                  pose=None, pose_H=None, pose_err=None, pose_noted_at=0.0)   # the overhead camera's live pose (scene_pose), the live H it was solved from, the one-line reason it is not tracked
 scene_reset()
+VIRTUAL_PY = os.path.join(os.path.dirname(HERE), "tools", "virtual_stage.py")
+def virtual_arms(sim_arm=None, directory=None, now=None):
+    """The display-only ghost arms for /api/state["virtual"] (docs/virtual-stage.md): fresh /tmp/so101_virtual_<session>.json messages (staleness by file mtime, this
+    machine's clock), plus the legacy sim_arm file as a SIM message when no SIM session is live. A separate key: it never touches state['arms'] or scene_joints()."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("so101_virtual_stage", VIRTUAL_PY); vs = importlib.util.module_from_spec(spec); spec.loader.exec_module(vs)
+        out = vs.read_fresh(directory or os.environ.get("SO101_VIRTUAL_DIR") or vs.DIR, now)
+        if isinstance(sim_arm, dict) and not any(m["source"] == "SIM" for m in out):
+            m = vs.from_legacy_sim(sim_arm)
+            if m: out.append(m)
+        return out
+    except Exception as e:
+        log("virtual stage skipped:", repr(e)); return []
 def scene_joints(now):
     """The follower's latest joints in LeRobot degrees from the arm stream (state['arms']['follower'], what /api/state serves),
     or None: no follower, not in 'deg' mode (no motor calibration on the Jetson), or received more than SCENE_JOINTS_MAX_AGE_S ago."""
@@ -1171,8 +1185,9 @@ class H(http.server.SimpleHTTPRequestHandler):
             try:
                 _sa = json.load(open("/tmp/so101_sim_state.json")); sim_arm = _sa if time.time() - _sa.get("t", 0) < 2.5 else None
             except Exception: pass
+            virtual = virtual_arms(sim_arm)
             try:
-                with lock: body = json.dumps({**state, "lock": LOCK, "sim_arm": sim_arm, "now": time.time(), "jetson": {**state["jetson"], "online": state["jetson"]["online"] and time.time() - state["jetson"]["last"] < 12}}).encode()
+                with lock: body = json.dumps({**state, "lock": LOCK, "sim_arm": sim_arm, "virtual": virtual, "now": time.time(), "jetson": {**state["jetson"], "online": state["jetson"]["online"] and time.time() - state["jetson"]["last"] < 12}}).encode()
             except Exception as e:
                 log("state json error:", repr(e)); body = json.dumps({"error": repr(e)}).encode()
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
