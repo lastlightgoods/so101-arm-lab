@@ -19,8 +19,16 @@ def say_loop():
         if not SAY_Q.empty() and time.time() - t > 2.5: continue            # superseded while waiting
         if text == _last_said["text"] and time.time() - _last_said["t"] < 3: continue   # same line twice in a row
         _last_said.update(text=text, t=time.time())
-        try: subprocess.run(["say", "-r", "190", text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+        try: subprocess.run(say_argv(text), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
         except Exception: pass
+
+
+SAY_DEVICE = os.environ.get("SO101_SAY_DEVICE", "MacBook Pro Speakers")   # why: TC 2026-11-11 "put all voice from this project through the mac speakers" (the default output is often a Bluetooth speaker); "" = the system default
+
+
+def say_argv(text):
+    """macOS `say` on SAY_DEVICE only (no fallback to the default output: a missing device stays silent)."""
+    return ["say"] + (["-a", SAY_DEVICE] if SAY_DEVICE else []) + ["-r", "190", str(text)]
 HERE = os.path.dirname(os.path.abspath(__file__)); HOME = os.path.expanduser("~")
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
 JETSON = os.environ.get("SO101_JETSON", "jetson")
