@@ -581,6 +581,14 @@ class RingMover:
 
     def reach_mm(self, x, y): return math.hypot(x - self.rig.base[0], y - self.rig.base[1]) * IN
 
+    def way_home_hits(self, dest, up_joints):
+        """True when, with the ring standing at dest, the arm's rest pose or its path there from the lift-off pose touches the ring. why: 12 Nov 2026 the ring was
+        set down at (8.72, 3.82); the rest pose's gripper tip (9.02, 3.21, 13 mm up) is inside that footprint, and going home after the release shoved the ring 4 in."""
+        old = self.rig.ring
+        try:
+            self.rig.set_ring(dest); return bool(self.rig.hits(self.pl.REST)) or not self.rig.path_clean(up_joints, self.pl.REST)
+        finally: self.rig.set_ring(old)
+
     GRIP_SIDES_DEG = (0.0, 30.0, -30.0, 60.0, -60.0, 90.0, -90.0)
 
     def plan(self, c, dest):
@@ -601,6 +609,7 @@ class RingMover:
                 if ja is None or jb is None: why.append(f"{rot:+.0f}: no tipped lift"); continue
                 cmd = min(ha, hb); reach = max(self.reach_mm(*a), self.reach_mm(*b)); cmd, bottom = lift_height_mm(reach, cmd)
                 if bottom < HARD_MIN_BOTTOM_MM: why.append(f"{rot:+.0f}: ring bottom {bottom:.0f} mm after the sag at reach {reach:.0f} mm"); continue
+                if self.way_home_hits(dest, self.rig.ik_free(*b, cmd, roll)): raise SystemExit("the set-down spot is in the arm's way home (rest or the path to it would hit the ring there)")
                 return {"grip_in": p, "aim_in": a, "drop_aim_in": b, "roll": roll, "jaw_dir": jd, "hover_mm": hov, "grip_side_deg": rot, "lift_mm": cmd, "bottom_mm": bottom, "reach_mm": reach, "min_bottom_wanted": MIN_BOTTOM_MM}
             except SystemExit as e: why.append(f"{rot:+.0f}: {str(e)[:60]}")
         raise SystemExit("ring lift: no grip side works (" + "; ".join(why)[:300] + ")")

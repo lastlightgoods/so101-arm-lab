@@ -561,7 +561,7 @@ def test_small_colourful_bits_inside_the_ring_are_the_ring_but_a_frog_inside_is_
 def test_the_ring_set_down_moves_rigidly_with_the_ring_and_another_side_is_tried_when_the_base_side_has_no_hover(td, mk):
     """12 Nov 2026: (1) the set-down re-picked the base-facing side at the destination and landed 13 mm off, onto a marker; (2) a vertical hover 133 mm from
     the base had no IK, which the plan did not check, so the move stopped after the spot was chosen."""
-    m = mk([]); mover = td.RingMover(m.t); c, dest = RING, (7.5, 4.8); P = mover.plan(c, dest)
+    m = mk([]); mover = td.RingMover(m.t); c, dest = RING, (6.5, 6.8); P = mover.plan(c, dest)   # clear of the rest pose (>= 90 mm from its tip)
     assert np.allclose(np.subtract(P["drop_aim_in"], P["aim_in"]), np.subtract(dest, c), atol=1e-9), "the jaws move by exactly the ring's displacement"
     assert P["grip_side_deg"] == 0.0 and P["hover_mm"] <= td.RING_HOVER_H_MM
     real_ik = mover.ik
@@ -571,3 +571,11 @@ def test_the_ring_set_down_moves_rigidly_with_the_ring_and_another_side_is_tried
     mover.ik = ik; P2 = mover.plan(c, dest); assert P2["grip_side_deg"] != 0.0 and np.allclose(np.subtract(P2["drop_aim_in"], P2["aim_in"]), np.subtract(dest, c))
     mover.ik = lambda x, y, h_mm, roll=None: (_ for _ in ()).throw(SystemExit("ik failed"))
     with pytest.raises(SystemExit, match="no grip side works"): mover.plan(c, dest)
+
+
+def test_a_ring_spot_in_the_arms_way_home_is_refused(td, mk, pl):
+    """12 Nov 2026: the ring was set down at (8.72, 3.82); the rest pose's gripper tip (9.02, 3.21, 13 mm up) stands inside that footprint and going home after
+    the release shoved the ring 4 in across the mat."""
+    m = mk([]); mover = td.RingMover(m.t); tip = m.rig.points(pl.REST)[-1]
+    with pytest.raises(SystemExit, match="way home|no grip side"): mover.plan(RING, (tip[0] - 0.3, tip[1] + 0.6))
+    P = mover.plan(RING, (6.5, 6.8)); assert P["grip_side_deg"] is not None and m.rig.ring == tuple(RING), "a clear spot still plans, and the check leaves the rig's ring as it was"
