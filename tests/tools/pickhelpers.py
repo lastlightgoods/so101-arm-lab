@@ -134,10 +134,10 @@ def pl(tmp_path, monkeypatch, cc, wc):
     return m
 
 
-def drive(pl, monkeypatch, capsys, arm, argv):
-    """Run pick_loop.main() against `arm`; returns every stdout line parsed as JSON."""
+def drive(pl, monkeypatch, capsys, arm, argv, session=False):
+    """Run pick_loop.main() against `arm`; returns every stdout line parsed as JSON. `session` False adds --no-session (the single lift stage, no final-pose correction); True keeps main's default PickSession (lazy: run_plan is faked, it never connects) and so the split final stage."""
     monkeypatch.setattr(pl, "find_nut", arm.find_nut); monkeypatch.setattr(pl, "api", arm.api); monkeypatch.setattr(pl, "run_plan", arm.run_plan); monkeypatch.setattr(pl, "fetch_scene_objects", lambda: list(arm.scene)); monkeypatch.setattr(pl, "fetch_scene_state", lambda: (list(arm.scene), 0))
-    monkeypatch.setattr(sys, "argv", ["pick_loop.py", *argv]); pl.main()
+    monkeypatch.setattr(sys, "argv", ["pick_loop.py", *argv, *([] if session else ["--no-session"])]); pl.main()
     return [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
 
 
