@@ -321,7 +321,7 @@ class DemoRecorder:
             shutil.rmtree(ep.spool, ignore_errors=True); ep.state = "discarded"; self.counts["empty"] += 1; return {"dataset": None, "episode_index": None, "frames": 0, "health": h}
         ds = self.dataset(kind); root = self.root if keep else self.rejects_root; env = np.asarray(self.cfg.env_vector(), np.float32); idx = ds.meta.total_episodes
         for f in ep.frames:
-            fr = {"action": np.asarray(f["action"], np.float32), "observation.state": np.asarray(f["state"], np.float32), "observation.environment_state": env, "task": TASK}
+            fr = {"action": np.asarray(f["action"], np.float32), "observation.state": np.asarray(f["state"], np.float32), "observation.environment_state": env, "task": ep.meta.get("task") or TASK}  # why: tools/tidy.py records another task into its own dataset (2026-11-11)
             for c, p in f["imgs"].items(): fr[f"observation.images.{c}"] = load_spooled(p, self.cams.shapes[c])
             ds.add_frame(fr)
         ds.save_episode()
@@ -332,7 +332,7 @@ class DemoRecorder:
 
     def sidecar_row(self, idx, kind, ep, h, verdict):
         m = ep.meta
-        return {"episode_index": idx, "dataset": kind, "kept": kind == "main", "task": TASK, "fps": self.fps, "n_frames": len(ep.frames),
+        return {"episode_index": idx, "dataset": kind, "kept": kind == "main", "task": m.get("task") or TASK, "fps": self.fps, "n_frames": len(ep.frames),
                 "configuration": self.cfg.sidecar_labels(self.calib_hashes), "scene": m.get("scene", {}), "teacher": m.get("teacher", {}),
                 "quality": {"tier": verdict.get("tier"), **{k: v for k, v in h.items() if k != "reasons"}, "health_reasons": h["reasons"]},
                 "verdict": {k: v for k, v in verdict.items() if k != "tier"}, "links": m.get("links", {}), "t_open_mono": ep.t_open, "t_end_mono": ep.t_end}
