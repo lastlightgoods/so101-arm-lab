@@ -20,9 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools"); JETSON = os.path.join(ROOT, "jetson")
 STAGES = ("record", "train", "register", "deploy", "evaluate", "report")
 EXP_LOOP, EXP_TRAIN, EXP_DATASETS, EXP_AUTOLOOP = "so101-learn-loop", "so101-act", "so101-datasets", "so101-autoloop"
-# why: measured steps/s of past runs (outputs/train/*.log, docs/learn-loop.md): Mac MPS batch 8 on the real 2-camera lighter data 1.45-1.49 step/s (act_lighter 25k in 4h38m, ft_lighter 8k in 1h34m);
-# Orin Nano CUDA batch 4 ~1.9 step/s (so101-finetune) and it OOMs above that on the shared 8 GB; sim data at 320x240 ran 3.0-4.0 step/s on the Mac (11 Nov 2026)
-RATE = {"mps": (1.45, 8), "cuda": (1.9, 4), "cpu": (0.3, 8)}   # device -> (steps/s, batch it was measured at)
+# why: training rates, evidence and the cost of a Hub job live in tools/learn_loop_train.py (HF_RATE, JETSON_RATE); the Mac is not a training target (TC, 11 Nov 2026)
 CYCLE_S = 86.0          # median real scripted cycle (try + judge + reset) in so101-autoloop, 19 cycles (11 Nov 2026)
 TRIAL_OVERHEAD_S = 45.0  # park + wait for the cameras + judge + scripted reset around the policy's T seconds, an estimate until the first real evaluation
 STEP_RE = re.compile(r"step:\s*([\d.]+)([KM]?)"); LOSS_RE = re.compile(r"loss:\s*([\d.]+)"); RATE_RE = re.compile(r"([\d.]+)\s*step/s")
@@ -39,6 +37,12 @@ class StageError(Exception):
     def __init__(self, msg, code=1): super().__init__(msg); self.code = code
 
 
+def local_procs_real():
+    """Command lines of a tools/autoloop.py or tools/tidy.py running on this machine (they hold the arm through the dashboard and the Jetson)."""
+    r = subprocess.run(["pgrep", "-af", r"tools/(autoloop|tidy)\.py"], capture_output=True, text=True, timeout=10)
+    return [l[:140] for l in r.stdout.splitlines() if l.strip() and "pgrep" not in l]
+
+
 class RealSys:
     """subprocess with the output teed to a log file and the console; run(argv, log) -> return code."""
     def run(self, argv, log=None):
@@ -51,6 +55,9 @@ class RealSys:
             return p.wait()
         finally:
             if f: f.close()
+
+    def capture(self, argv):
+        r = subprocess.run([str(a) for a in argv], capture_output=True, text=True, timeout=7200); return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
 class HybridSys:
@@ -86,14 +93,15 @@ def train_cfg(info, a):
     except ValueError as e: raise StageError(str(e)) from e
     inp = {"observation.state": {"type": "STATE", "shape": list(feats["observation.state"]["shape"])}}
     for c in imgs: h, w, ch = feats[f"observation.images.{c}"]["shape"]; inp[f"observation.images.{c}"] = {"type": "VISUAL", "shape": [ch, h, w]}
-    return {"policy": a.policy, "device": a.device, "batch_size": a.batch, "steps": a.steps, "chunk_size": a.chunk, "fps": info.get("fps"), "images": imgs, "input_features": inp,
+    tl = mod("tools/learn_loop_train.py", "learn_loop_train_for_cfg")
+    return {"policy": a.policy, "device": "cpu" if a.where == "local" else "cuda", "where": a.where, "batch_size": tl.pick(a, "batch"), "steps": tl.pick(a, "steps"), "chunk_size": a.chunk, "fps": info.get("fps"), "images": imgs, "input_features": inp,
             "dropped_features": sorted(k for k in feats if k.startswith("observation.") and k not in inp), "episodes": info.get("total_episodes"), "frames": info.get("total_frames")}
 
 
 def train_argv(cfg, repo, root, out_dir, job, a, binary=None):
     binary = binary or os.path.join(os.path.dirname(sys.executable), "lerobot-train"); base = [binary, f"--dataset.repo_id={repo}", f"--dataset.root={root}", "--policy.push_to_hub=false", f"--policy.device={cfg['device']}",
-                                                                                             f"--output_dir={out_dir}", f"--job_name={job}", f"--steps={cfg['steps']}", f"--batch_size={cfg['batch_size']}", f"--num_workers={a.workers}",
-                                                                                             f"--save_freq={a.save_freq}", "--log_freq=100", "--wandb.enable=false"]
+                                                                                             f"--output_dir={out_dir}", f"--job_name={job}", f"--steps={cfg['steps']}", f"--batch_size={cfg['batch_size']}", f"--num_workers={a.workers or 2}",
+                                                                                             f"--save_freq={a.save_freq or 500}", "--log_freq=100", "--wandb.enable=false"]
     if cfg["policy"] == "smolvla":   # why: the recipe of NEXT_STEPS.md (16 Oct 2026, HF Jobs): base weights, top/wrist renamed to camera1/2, one empty camera; not run from here yet
         return base + ["--policy.path=lerobot/smolvla_base", "--policy.empty_cameras=1", '--rename_map={"observation.images.top": "observation.images.camera1", "observation.images.wrist": "observation.images.camera2"}']
     return base + ["--policy.type=act", f"--policy.chunk_size={cfg['chunk_size']}", f"--policy.n_action_steps={cfg['chunk_size']}", f"--policy.input_features={json.dumps(cfg['input_features'], separators=(',', ':'))}"]
@@ -106,8 +114,7 @@ def resume_argv(out_dir, binary=None):
 
 def estimates(a, kept=None):
     """Seconds per stage from the measured rates above; the numbers docs/learn-loop.md quotes."""
-    rate, at = RATE.get(a.device, RATE["mps"]); sps = rate * (at / a.batch) if a.batch else rate   # throughput scales with samples/s, not steps/s
-    return {"record": a.cycles * CYCLE_S, "train": a.steps / sps, "register": 30.0, "deploy": 90.0, "evaluate": a.trials * (a.trial_s + TRIAL_OVERHEAD_S), "report": 5.0}
+    return {"record": a.cycles * CYCLE_S, "train": mod("tools/learn_loop_train.py", "learn_loop_train_for_est").plan_numbers(a)["wall_s"], "register": 30.0, "deploy": 90.0, "evaluate": a.trials * (a.trial_s + TRIAL_OVERHEAD_S), "report": 5.0}
 
 
 def fmt_s(s): return f"{s / 3600:.1f} h" if s >= 5400 else f"{s / 60:.0f} min" if s >= 90 else f"{s:.0f} s"
@@ -115,8 +122,14 @@ def fmt_s(s): return f"{s / 3600:.1f} h" if s >= 5400 else f"{s / 60:.0f} min" i
 
 # ---------------------------------------------------------------- the loop
 class Loop:
-    def __init__(self, a, sys_=None, transport=None, runtime=None, clock=time.time):
-        self.a, self.sys, self.transport, self.runtime, self.clock = a, sys_ or default_sys(a), transport, runtime, clock
+    StageError = StageError   # for the backends in learn_loop_train.py, which cannot import this file
+
+    def __init__(self, a, sys_=None, transport=None, runtime=None, clock=time.time, jetson=None, fetch=None, local_procs=None, sleep=time.sleep):
+        self.a, self.sys, self.transport, self.runtime, self.clock = a, sys_ or default_sys(a), transport, runtime, clock; self.root = ROOT; self.sleep = sleep
+        tl = mod("tools/learn_loop_train.py", "learn_loop_train_for_loop")   # the seams: ssh to the Jetson, rsync, a look for autoloop/tidy on this machine; fakes in --dry-run, injected in tests
+        if a.dry_run and (jetson is None or fetch is None):
+            ff = mod("tools/learn_loop_fakes.py", "learn_loop_fakes_for_loop"); fj = ff.FakeJetson(os.path.join(os.path.abspath(os.path.expanduser(a.out_dir)) if a.out_dir else os.path.join(ROOT, "outputs", "learn_loop"), a.name, "jetson_home")); jetson = jetson or fj; fetch = fetch or fj.fetch
+        self.jetson = jetson or tl.SshShell(a.host); self.fetch = fetch or tl.rsync_fetch; self.local_procs = local_procs or (lambda: [] if a.dry_run else local_procs_real()); self.sleep = (lambda s: None) if a.dry_run and sleep is time.sleep else sleep
         self.base = os.path.abspath(os.path.expanduser(a.out_dir)) if a.out_dir else os.path.join(ROOT, "outputs", "learn_loop"); self.dir = os.path.join(self.base, a.name); os.makedirs(self.dir, exist_ok=True)
         self.state_path = os.path.join(self.dir, "state.json"); self.state = self.load_state(); self._lt = None; self._tracks = {}; self.out = print
         self.uri = a.mlflow_uri or (("sqlite:///" + os.path.join(self.dir, "mlflow.db")) if a.dry_run and not (os.environ.get("MLFLOW_TRACKING_URI") or os.environ.get("SO101_MLFLOW_URI")) else None); self.env = {}
@@ -137,6 +150,21 @@ class Loop:
                 else: os.environ[k] = v
 
     def sh(self, argv, log=None): return self.sys.run([str(x) for x in argv], log)
+    def capture(self, argv):
+        """(rc, stdout+stderr) of one command through the same seam as sh (RealSys.capture / FakeSys.capture)."""
+        return self.sys.capture([str(x) for x in argv])
+    def tool(self): return mod("tools/so101_policy.py", "so101_policy_for_learn_loop")
+
+    def local_dataset(self, rec):
+        """The dataset as a folder on THIS machine (the Hub upload needs one): the record stage's copy, else rsync it from the Jetson recorder's folder and check the hash."""
+        root = rec.get("dataset_root")
+        if root and os.path.exists(os.path.join(root, "meta", "info.json")): return root
+        if not rec.get("remote_root"): raise StageError("the dataset folder is gone and was never on the Jetson; record again")
+        dst = os.path.join(self.dir, "demos", rec["repo_id"].split("/")[-1]); rc, err = self.fetch(f"{self.a.host}:{rec['remote_root'].replace('~/', '', 1)}", dst)
+        if rc: raise StageError(f"rsync of the dataset from the Jetson failed ({rc}): {err}")
+        h = mod("jetson/demo_recorder.py", "demo_recorder_for_learn_loop").dataset_hash(dst)
+        if h != rec["dataset_hash"]: raise StageError(f"the copy from the Jetson hashes {h[:12]}, the recorder said {rec['dataset_hash'][:12]}; not uploading it")
+        rec["dataset_root"] = dst; self.save(); return dst
 
     # -- state
     def load_state(self):
@@ -166,7 +194,7 @@ class Loop:
         if rid is None:
             r = t.start(f"learnloop-{self.a.name}", tags={"kind": "learn-loop", "name": self.a.name, "dry_run": int(bool(self.a.dry_run))}); rid = r.id
             if rid: self.state["ids"]["parent"] = rid; self.save()
-            r.params({"name": self.a.name, "cycles": self.a.cycles, "trials": self.a.trials, "trial_s": self.a.trial_s, "policy": self.a.policy, "steps": self.a.steps, "batch": self.a.batch, "device": self.a.device})
+            r.params({"name": self.a.name, "cycles": self.a.cycles, "trials": self.a.trials, "trial_s": self.a.trial_s, "policy": self.a.policy, "where": self.a.where})
             return r
         return t.attach(rid)
 
@@ -208,67 +236,84 @@ class Loop:
 
     # ---------------------------------------------------------------- stages
     def stage_record(self):
-        a = self.a; demo_root = os.path.join(self.dir, "demos"); name = a.repo.split("/")[-1]; ds_root = os.path.join(demo_root, name); out = os.path.join(self.dir, "autoloop"); session = a.session or f"ll-{a.name}"; rc = 0
-        dr = mod("jetson/demo_recorder.py", "demo_recorder_for_learn_loop")
-        if a.adopt_dataset: ds_root = os.path.abspath(os.path.expanduser(a.adopt_dataset)); summary = {}
+        a = self.a; demo_root = os.path.join(self.dir, "demos"); name = a.repo.split("/")[-1]; ds_root = os.path.join(demo_root, name); out = os.path.join(self.dir, "autoloop"); session = a.session or f"ll-{a.name}"; rc = 0; remote_root = None
+        dr = mod("jetson/demo_recorder.py", "demo_recorder_for_learn_loop"); summary = {}
+        if a.adopt_dataset: ds_root = os.path.abspath(os.path.expanduser(a.adopt_dataset))
         else:
-            argv = [sys.executable, os.path.join(TOOLS, "autoloop.py"), "--cycles", a.cycles, "--record-demos", "--demo-root", demo_root, "--demo-repo", a.repo, "--session", session, "--out-dir", out, "--radius-mm", a.radius_mm]
-            if a.dry_run: argv += ["--dry-run", "--settle", "0", "--seed", a.seed]
+            argv = [sys.executable, os.path.join(TOOLS, "autoloop.py"), "--cycles", a.cycles, "--record-demos", "--demo-repo", a.repo, "--session", session, "--out-dir", out, "--radius-mm", a.radius_mm]
+            if a.dry_run: argv += ["--demo-root", demo_root, "--dry-run", "--settle", "0", "--seed", a.seed]   # why: a real run records on the Jetson (autoloop's default ~/so101/outputs/demos/<session>); only the dry run writes under this machine's run folder
             if a.stop_file: argv += ["--stop-file", a.stop_file]
             argv += list(a.autoloop_arg or []); os.makedirs(out, exist_ok=True)
             rc = self.sh(argv, os.path.join(self.dir, "record.log"))
             if rc not in (0, 2): raise StageError(f"autoloop exited {rc} (see record.log); repeat the command to record again")
             try: summary = json.load(open(os.path.join(out, f"autoloop_{session}.json")))
             except (OSError, ValueError) as e: raise StageError(f"autoloop wrote no session summary: {e}") from e
-            if a.pull_from: self.pull(a.pull_from, ds_root)
-        info_p = os.path.join(ds_root, "meta", "info.json")
-        if not os.path.exists(info_p): raise StageError(f"no dataset at {ds_root} (meta/info.json missing); with the recorder on the Jetson use --pull-from")
-        info = json.load(open(info_p)); h = dr.dataset_hash(ds_root); demos = summary.get("demos") or {}; kept = int(info.get("total_episodes") or 0)
-        if demos.get("dataset_hash") and demos["dataset_hash"] != h: raise StageError(f"dataset hash changed between the recorder ({demos['dataset_hash'][:12]}) and now ({h[:12]}): {ds_root} was modified")
-        if kept < a.min_kept: raise StageError(f"only {kept} kept episodes in {ds_root}, need --min-kept {a.min_kept}; repeat `record` (--force) to add more, the dataset is appended")
+            if not a.dry_run: remote_root = f"~/so101/outputs/demos/{session}/{name}"
+        if a.jetson_dataset: remote_root = a.jetson_dataset.rstrip("/")
+        demos = summary.get("demos") or {}
+        if remote_root and not os.path.exists(os.path.join(ds_root, "meta", "info.json")):
+            rc2, txt = self.jetson.run(f'cat "$HOME/{remote_root.replace("~/", "", 1)}/meta/info.json"', 60)   # no copy: the recorder's folder on the Jetson is where the Jetson backend trains from
+            if rc2: raise StageError(f"cannot read {remote_root}/meta/info.json on the Jetson ({rc2}): {txt.strip()[-200:]}")
+            info = json.loads(txt); h = demos.get("dataset_hash"); ds_root = None
+            if not h: raise StageError("the recorder reported no dataset hash for the Jetson dataset (autoloop summary demos.dataset_hash)")
+        else:
+            info_p = os.path.join(ds_root, "meta", "info.json")
+            if not os.path.exists(info_p): raise StageError(f"no dataset at {ds_root} (meta/info.json missing)")
+            info = json.load(open(info_p)); h = dr.dataset_hash(ds_root)
+            if demos.get("dataset_hash") and demos["dataset_hash"] != h: raise StageError(f"dataset hash changed between the recorder ({demos['dataset_hash'][:12]}) and now ({h[:12]}): {ds_root} was modified")
+        kept = int(info.get("total_episodes") or 0)
+        if kept < a.min_kept: raise StageError(f"only {kept} kept episodes in {ds_root or remote_root}, need --min-kept {a.min_kept}; repeat `record` (--force) to add more, the dataset is appended")
         base = {k: summary.get(k) for k in ("session", "cycles", "landed", "success_rate", "mean_err_mm", "median_err_mm", "end", "duration_s")}
-        res = {"dataset_root": ds_root, "repo_id": a.repo, "dataset_hash": h, "episodes": kept, "frames": info.get("total_frames"), "fps": info.get("fps"), "rejected": demos.get("rejected"), "autoloop_rc": rc, "baseline": base,
+        res = {"dataset_root": ds_root, "remote_root": remote_root, "repo_id": a.repo, "dataset_hash": h, "episodes": kept, "frames": info.get("total_frames"), "fps": info.get("fps"), "rejected": demos.get("rejected"), "autoloop_rc": rc, "baseline": base,
+               "info": {"fps": info.get("fps"), "total_episodes": info.get("total_episodes"), "total_frames": info.get("total_frames"), "features": info.get("features")},
                "dataset_run": self.find_run(EXP_DATASETS + ("-dry" if (summary.get("dry_run") or a.dry_run) else ""), f"params.dataset_hash = '{h}'"), "autoloop_summary": os.path.join(out, f"autoloop_{session}.json") if not a.adopt_dataset else None}
         p = self.parent(); p.params({"dataset_hash": h, "dataset_repo": a.repo, "record_session": base.get("session") or session}); p.metrics({"episodes_kept": kept, "scripted_success_rate": base.get("success_rate"), "scripted_median_err_mm": base.get("median_err_mm")})
         return res
 
-    def pull(self, src, dst):
-        r = subprocess.run(["rsync", "-a", "--delete", src.rstrip("/") + "/", dst.rstrip("/") + "/"], capture_output=True, text=True, timeout=3600)
-        if r.returncode: raise StageError(f"rsync {src}: {r.stderr.strip()[-300:]}")
-
     def stage_train(self):
-        a = self.a; rec = self.res("record"); info = json.load(open(os.path.join(rec["dataset_root"], "meta", "info.json"))); cfg = train_cfg(info, a)
-        job = a.job or f"act_{a.name}"; out = os.path.join(self.dir, "train", job); log = os.path.join(self.dir, "train.log"); last = os.path.join(out, "checkpoints", "last"); steps_done = 0
-        if a.force and os.path.exists(out): shutil.rmtree(out); self.state['ids'].pop('train_run', None)   # why: --force on train means train again from scratch (a new MLflow run too), not resume
-        done_marker = os.path.join(out, "checkpoints", f"{cfg['steps']:06d}")
-        resume = os.path.islink(last) and not os.path.exists(done_marker)
-        if os.path.exists(out) and not os.path.islink(last): shutil.rmtree(out)   # why: lerobot-train refuses an existing output_dir without --resume; a half-made dir with no checkpoint has nothing to resume
-        argv = resume_argv(out) if resume else train_argv(cfg, rec["repo_id"], rec["dataset_root"], out, job, a)
-        t = self.track(EXP_TRAIN + self.sfx); rid = self.state["ids"].get("train_run"); parent = self.parent()
+        a = self.a; rec = self.res("record"); tl = mod("tools/learn_loop_train.py", "learn_loop_train_run"); cfg = train_cfg(rec["info"], a); where = a.where
+        if where == "local" and not a.dry_run: raise StageError("the Mac is not a training target: use `train --where hf` (a Hugging Face Job, costs money, needs --yes) or `--where jetson`")
+        job = a.job or f"act_{a.name}"; run_dir = os.path.join(self.dir, "train", job); log = os.path.join(self.dir, "train.log"); plan = tl.plan_numbers(a); self.out(f"[train] {tl.plan_text(plan)}")
+        if a.force and os.path.exists(run_dir): shutil.rmtree(run_dir)   # why: --force on train means train again from scratch, not resume
+        if a.force: self.state["ids"].pop("train_run", None); self.state["ids"].pop("hf_job", None); self.state["ids"].pop("jetson_train_pid", None)
+        os.makedirs(run_dir, exist_ok=True)
+        if where == "jetson" and not self.state["ids"].get("jetson_train_pid"): tl.JetsonBackend(self).preflight()   # before any run is created: a refusal leaves no FAILED train run behind
+        if where == "hf": tl.HfBackend(self).gate(rec, job)
+        t = self.track(EXP_TRAIN + self.sfx); rid = self.state["ids"].get("train_run"); parent = self.parent(); host = {"hf": "hf-jobs", "jetson": "jetson"}.get(where, "dry")
         if rid: run = t.attach(rid)
         else:
-            run = t.start(job, tags={"host": "mac" if cfg["device"] == "mps" else "jetson" if cfg["device"] == "cuda" else "other", "family": "nutpick", "source": "learn-loop", "kind": "train", "dataset_hash": rec["dataset_hash"], "dataset_repo": rec["repo_id"],
+            run = t.start(job, tags={"host": host, "family": "nutpick", "source": "learn-loop", "kind": "train", "where": where, "dataset_hash": rec["dataset_hash"], "dataset_repo": rec["repo_id"],
                                      "dataset_run_id": rec.get("dataset_run") or "", "learn_loop": a.name, "learn_loop_run": getattr(parent, "id", "") or "", "record_session": (rec.get("baseline") or {}).get("session") or ""})
             if run.id: self.state["ids"]["train_run"] = run.id; self.save()
-            run.params({"policy": cfg["policy"], "chunk_size": cfg["chunk_size"], "n_action_steps": cfg["chunk_size"], "batch_size": cfg["batch_size"], "steps": cfg["steps"], "device": cfg["device"], "dataset": rec["repo_id"], "dataset_hash": rec["dataset_hash"],
-                        "episodes": cfg["episodes"], "frames": cfg["frames"], "fps": cfg["fps"], "images": ",".join(cfg["images"]), "dropped_features": ",".join(cfg["dropped_features"]), "warm_start": "scratch"})
-        os.makedirs(os.path.dirname(out), exist_ok=True); t0 = time.time(); self.out(f"[train] {'RESUME' if resume else 'lerobot-train'} {cfg['policy']} {cfg['steps']} steps batch {cfg['batch_size']} on {cfg['device']}: eta {fmt_s(estimates(a)['train'])}")
-        rc = 0 if os.path.exists(done_marker) else self.sh(argv, log); wall = time.time() - t0   # why: training finished but the stage did not get to record it; nothing to run
-        ck = os.path.join(last, "pretrained_model"); steps_done = int(os.path.basename(os.path.realpath(last))) if os.path.islink(last) else 0
-        pts, rate = parse_log(open(log).read()) if os.path.exists(log) else ([], None)
+            run.params({"policy": cfg["policy"], "chunk_size": cfg["chunk_size"], "n_action_steps": cfg["chunk_size"], "batch_size": cfg["batch_size"], "steps": cfg["steps"], "device": cfg["device"], "where": where, "dataset": rec["repo_id"], "dataset_hash": rec["dataset_hash"],
+                        "episodes": cfg["episodes"], "frames": cfg["frames"], "fps": cfg["fps"], "images": ",".join(cfg["images"]), "dropped_features": ",".join(cfg["dropped_features"]), "warm_start": "scratch", "est_wall_s": round(plan["wall_s"]), "est_cost_usd": plan["cost_usd"]})
+        t0 = time.time()
+        try:
+            res = tl.HfBackend(self).run(cfg, rec, job, run_dir, log) if where == "hf" else tl.JetsonBackend(self).run(cfg, rec, job, run_dir, log) if where == "jetson" else self.train_local(cfg, rec, job, run_dir, log)
+        except StageError:
+            run.end("FAILED"); self.state["ids"]["train_run_failed"] = run.id; self.save(); raise
+        wall = time.time() - t0; ck = res["checkpoint"]; steps_done = int(res["steps_done"]); pts, rate = parse_log(res.get("log_text") or "")
         if pts:
-            keep = pts[:: max(1, len(pts) // 200)]
-            for s, l in keep: run.metrics({"loss": l}, step=s)
+            for s_, l_ in pts[:: max(1, len(pts) // 200)]: run.metrics({"loss": l_}, step=s_)
             run.metrics({"final_loss": pts[-1][1]}, step=pts[-1][0])
-        if rc != 0 or steps_done < cfg["steps"]:
-            run.end("FAILED"); self.state["ids"]["train_run_failed"] = run.id; self.save()
-            raise StageError(f"lerobot-train exit {rc}, reached step {steps_done} of {cfg['steps']} (see train.log); repeat the command to resume from the last checkpoint" if steps_done else f"lerobot-train exit {rc} before any checkpoint (see train.log)")
-        run.metrics({"steps_done": steps_done, "wall_s": wall, "steps_per_s": rate if rate is not None else (steps_done / wall if wall > 0 else None)}); run.json({"argv": [str(x) for x in argv], "cfg": cfg}, "learn_loop_train.json")
+        run.metrics({"steps_done": steps_done, "wall_s": wall, "steps_per_s": rate if rate is not None else (steps_done / wall if wall > 0 else None)}); run.json({"cfg": cfg, "where": where, **(res.get("extra") or {})}, "learn_loop_train.json")
+        run.tags({k: v for k, v in (res.get("extra") or {}).items() if k in ("hf_job", "hf_repo", "hf_dataset_repo")})
         tc = os.path.join(ck, "train_config.json")
         if os.path.exists(tc): run.artifact(tc, "config")
         run.end("FINISHED"); self.state["ids"].pop("train_run_failed", None)
-        return {"checkpoint": os.path.realpath(ck), "job": job, "steps": steps_done, "final_loss": pts[-1][1] if pts else None, "wall_s": round(wall, 1), "steps_per_s": rate, "device": cfg["device"], "train_run": self.state["ids"].get("train_run"), "images": cfg["images"],
-                "chunk_size": cfg["chunk_size"], "policy": cfg["policy"], "resumed": resume, "cfg": {k: v for k, v in cfg.items() if k != "input_features"}}
+        return {"checkpoint": os.path.realpath(ck), "job": job, "steps": steps_done, "final_loss": pts[-1][1] if pts else None, "wall_s": round(wall, 1), "steps_per_s": rate, "where": where, "train_run": self.state["ids"].get("train_run"), "images": cfg["images"],
+                "chunk_size": cfg["chunk_size"], "policy": cfg["policy"], "resumed": bool(res.get("resumed")), "extra": res.get("extra") or {}, "cfg": {k: v for k, v in cfg.items() if k != "input_features"}}
+
+    def train_local(self, cfg, rec, job, run_dir, log):
+        """--dry-run only: the fake lerobot-train on a local folder, with the resume rules the old Mac path had (the fake writes the same checkpoints/last layout)."""
+        a = self.a; out = os.path.join(run_dir, "out"); last = os.path.join(out, "checkpoints", "last"); done_marker = os.path.join(out, "checkpoints", f"{cfg['steps']:06d}"); resume = os.path.islink(last) and not os.path.exists(done_marker)
+        if os.path.exists(out) and not os.path.islink(last): shutil.rmtree(out)
+        argv = resume_argv(out) if resume else train_argv(cfg, rec["repo_id"], rec["dataset_root"], out, job, a)
+        rc = 0 if os.path.exists(done_marker) else self.sh(argv, log)
+        steps_done = int(os.path.basename(os.path.realpath(last))) if os.path.islink(last) else 0
+        if rc != 0 or steps_done < cfg["steps"]:
+            raise StageError(f"lerobot-train exit {rc}, reached step {steps_done} of {cfg['steps']} (see train.log); repeat the command to resume from the last checkpoint" if steps_done else f"lerobot-train exit {rc} before any checkpoint (see train.log)")
+        return {"checkpoint": os.path.join(last, "pretrained_model"), "log_text": open(log).read() if os.path.exists(log) else "", "steps_done": steps_done, "resumed": resume}
 
     def policy_name(self): return (self.a.policy_name or "so101-nutpick") + self.sfx
 
@@ -279,7 +324,7 @@ class Loop:
         except tool.Fail: mv = None
         if mv is None:
             buf = io.StringIO(); err = io.StringIO()
-            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err): code = tool.main(["register", tr["checkpoint"], "--name", name, "--dataset", rec["repo_id"], "--note", f"learn-loop {a.name}: {rec['episodes']} kept episodes, {tr['steps']} steps, dataset {rec['dataset_hash'][:12]}"])
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err): code = tool.main(["register", tr["checkpoint"], "--name", name, "--dataset", rec["repo_id"], "--note", f"learn-loop {a.name}: {rec['episodes']} kept episodes, {tr['steps']} steps on {tr.get('where')}, dataset {rec['dataset_hash'][:12]}", *sum([[f"--{k.replace('_', '-')}", v] for k, v in (tr.get("extra") or {}).items() if k in ("hf_repo", "hf_job")], [])])
             if code: raise StageError(f"so101-policy register: {(err.getvalue() or buf.getvalue()).strip()[-300:]}")
             m = re.search(r"registered (\S+) v(\d+)\s+run (\w+)", buf.getvalue())
             if not m: raise StageError(f"could not read the registry answer: {buf.getvalue()[-200:]}")
@@ -445,9 +490,12 @@ def build_parser():
     ap.add_argument("--out-dir", default=None, help="default <repo>/outputs/learn_loop"); ap.add_argument("--mlflow-uri", default=None, help="default: $SO101_MLFLOW_URI / $MLFLOW_TRACKING_URI / the Mac's sqlite store; --dry-run uses a private one"); ap.add_argument("--seed", type=int, default=7)
     g = ap.add_argument_group("record"); g.add_argument("--cycles", type=int, default=30, help="autoloop cycles; each TRY the keep rule accepts becomes an episode"); g.add_argument("--repo", default="lastlight/so101-nut-pick"); g.add_argument("--session", default=None)
     g.add_argument("--min-kept", type=int, default=None, help="fail the record stage under this many kept episodes (default 10; 2 with --dry-run)"); g.add_argument("--adopt-dataset", default=None, metavar="PATH", help="use an existing dataset folder instead of recording")
-    g.add_argument("--pull-from", default=None, metavar="HOST:PATH", help="rsync the dataset from here after recording (the recorder on the Jetson, phase 2)"); g.add_argument("--autoloop-arg", action="append", default=[], help="extra argument passed to autoloop.py (repeatable), e.g. --autoloop-arg=--random-target")
-    g = ap.add_argument_group("train"); g.add_argument("--policy", choices=("act", "smolvla"), default="act"); g.add_argument("--device", default="mps", choices=("mps", "cuda", "cpu"), help="mps = the Mac (default, see docs/learn-loop.md); cuda = a CUDA box (SmolVLA needs one)")
-    g.add_argument("--steps", type=int, default=20000); g.add_argument("--batch", type=int, default=8); g.add_argument("--chunk", type=int, default=100); g.add_argument("--workers", type=int, default=2); g.add_argument("--save-freq", type=int, default=2500); g.add_argument("--job", default=None)
+    g.add_argument("--jetson-dataset", default=None, metavar="PATH", help="the dataset folder ON THE JETSON (default: where the recorder writes it, ~/so101/outputs/demos/<session>/<repo name>)"); g.add_argument("--autoloop-arg", action="append", default=[], help="extra argument passed to autoloop.py (repeatable), e.g. --autoloop-arg=--random-target")
+    g = ap.add_argument_group("train (never on the Mac: TC, 11 Nov 2026)"); g.add_argument("--policy", choices=("act", "smolvla"), default="act")
+    g.add_argument("--where", choices=("hf", "jetson", "local"), default="hf", help="hf = a Hugging Face Job (default; costs money, needs --yes); jetson = lerobot-train on the Jetson over ssh (refuses while the arm or cameras are in use); local = --dry-run fakes only")
+    g.add_argument("--yes", action="store_true", help="allow spending money: the Hub upload and the Job launch"); g.add_argument("--hf-user", default="tclastlight", help="Hub namespace for the private dataset and model repos"); g.add_argument("--hf-image", default=mod("tools/learn_loop_train.py", "learn_loop_train_for_parser").IMAGE)
+    g.add_argument("--poll-s", type=float, default=60.0); g.add_argument("--steps", type=int, default=None, help="default 10000 on hf, 20000 on the Jetson"); g.add_argument("--batch", type=int, default=None, help="default 32 on hf, 4 on the Jetson (its ceiling)"); g.add_argument("--chunk", type=int, default=100)
+    g.add_argument("--workers", type=int, default=None); g.add_argument("--save-freq", type=int, default=None); g.add_argument("--job", default=None)
     g = ap.add_argument_group("registry / deploy"); g.add_argument("--policy-name", default=None, help="registered model name (default so101-nutpick)"); g.add_argument("--host", default=os.environ.get("SO101_JETSON", "jetson"))
     g = ap.add_argument_group("evaluate"); g.add_argument("--trials", type=int, default=10); g.add_argument("--trial-s", type=float, default=25.0, help="seconds the policy may run per trial (the recorded episodes are ~15-25 s)"); g.add_argument("--target", type=float, nargs=2, default=[9.0, 6.0], metavar=("X", "Y"))
     g.add_argument("--safe-box", type=float, nargs=4, default=[6.0, 4.0, 13.0, 8.0], metavar=("X0", "Y0", "X1", "Y1")); g.add_argument("--radius-mm", type=float, default=15.0); g.add_argument("--max-rel-deg", type=float, default=2.0, help="lerobot --robot.max_relative_target, degrees per 30 Hz tick (the speed cap)")
@@ -470,13 +518,13 @@ def show_plan(L):
     for s in STAGES:
         st = L.st(s); done = st.get("status") == "done"; tot += 0 if done else est[s]
         L.out(f"  {s:9s} {st.get('status', 'pending'):8s} eta {fmt_s(est[s]):>7s}  {st.get('error') or ''}")
-    L.out(f"  remaining about {fmt_s(tot)}; train on {a.device} {a.steps} steps batch {a.batch} ({RATE.get(a.device, RATE['mps'])[0]} step/s at batch {RATE.get(a.device, RATE['mps'])[1]}); evaluate {a.trials} x {a.trial_s:g} s + {TRIAL_OVERHEAD_S:g} s overhead")
+    L.out(f"  remaining about {fmt_s(tot)}; {mod('tools/learn_loop_train.py', 'learn_loop_train_for_plan').plan_text(mod('tools/learn_loop_train.py', 'learn_loop_train_for_plan').plan_numbers(a))}; evaluate {a.trials} x {a.trial_s:g} s + {TRIAL_OVERHEAD_S:g} s overhead")
 
 
-def main(argv=None, sys_=None, transport=None, runtime=None):
+def main(argv=None, sys_=None, transport=None, runtime=None, **seams):
     a = build_parser().parse_args(argv)
     if a.min_kept is None: a.min_kept = 2 if a.dry_run else 10
-    try: L = Loop(a, sys_=sys_, transport=transport, runtime=runtime)
+    try: L = Loop(a, sys_=sys_, transport=transport, runtime=runtime, **seams)
     except StageError as e: print(f"learn_loop: {e}", file=sys.stderr); return 1
     stages = expand(a.stage)
     if "plan" in stages or "status" in stages: show_plan(L); return 0

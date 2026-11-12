@@ -8,7 +8,7 @@ mlflow = pytest.importorskip("mlflow", reason="the registry stages need mlflow (
 if not shutil.which("rsync"): pytest.skip("rsync not installed", allow_module_level=True)
 LL = load(os.path.join(TOOLS, "learn_loop.py"), "learn_loop_under_test"); FF = load(os.path.join(TOOLS, "learn_loop_fakes.py"), "learn_loop_fakes_under_test"); EV = load(os.path.join(TOOLS, "learn_loop_eval.py"), "learn_loop_eval_under_test")
 PRE = ("record", "train", "register", "deploy")
-DEFAULT = ("--dry-run", "--cycles", "6", "--trials", "3", "--steps", "1000", "--save-freq", "500")
+DEFAULT = ("--dry-run", "--where", "local", "--cycles", "6", "--trials", "3", "--steps", "1000", "--save-freq", "500")
 
 
 def run(tmp, *argv, sys_=None, transport=None, runtime=None, name="t1", extra=DEFAULT):

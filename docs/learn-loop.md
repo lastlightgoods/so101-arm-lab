@@ -38,8 +38,8 @@ State is `<out-dir>/<name>/state.json` (default `outputs/learn_loop/<name>/`, gi
 
 | Stage | Does | Output / link |
 |---|---|---|
-| `record` | runs `autoloop.py --cycles N --record-demos --demo-root <run>/demos --demo-repo lastlight/so101-nut-pick`; only kept episodes are in the main dataset; fails under `--min-kept` (10) kept episodes; hashes the dataset (`demo_recorder.dataset_hash`, must equal the recorder's own hash when it reports one) | dataset path, hash, episode and frame counts, the session's scripted success rate (the baseline), the `dataset-version` run id |
-| `train` | `lerobot-train` ACT: chunk 100, batch 8, 20000 steps, MPS, input features from the dataset (no environment_state); resumes from `checkpoints/last` after a crash | run in `so101-act` (same experiment as the backfilled runs) with params, loss curve, steps/s, tags `dataset_hash`, `dataset_run_id`, `learn_loop_run` |
+| `record` | runs `autoloop.py --cycles N --record-demos --demo-repo lastlight/so101-nut-pick`; the recorder writes on the Jetson (`~/so101/outputs/demos/<session>/so101-nut-pick`, no copy made here; the hash is the recorder's); only kept episodes are in the main dataset; fails under `--min-kept` (10) kept episodes; hashes the dataset (`demo_recorder.dataset_hash`, must equal the recorder's own hash when it reports one) | dataset path, hash, episode and frame counts, the session's scripted success rate (the baseline), the `dataset-version` run id |
+| `train` | `--where hf` (default) or `--where jetson`, never the Mac; see "Where training runs". ACT, chunk 100, input features built from the dataset (no environment_state); tracked in MLflow either way | run in `so101-act` with params, loss curve, steps/s, tags `where`, `dataset_hash`, `dataset_run_id`, `learn_loop_run` (and `hf_job`, `hf_repo`) |
 | `register` | `so101-policy register` into `so101-registry`, name `so101-nutpick` (`-dry` for dry runs), alias `candidate`; adds tags `dataset_hash`, `train_run_id`, `record_session` to the version and its run and the metrics (final loss, steps, episodes, scripted success rate) to the registry run; reuses a version with the same weights and dataset hash instead of making a second one | model version, the train run gets `registry_version` back |
 | `deploy` | `so101-policy deploy name@version` (rsync, sha256 verified, `current` flipped, alias `jetson`), then `so101-policy status` must agree | `~/so101/policies/so101-nutpick/current` on the Jetson |
 | `evaluate` | M trials, below | `eval.json`, an `eval-session` run and one `eval-trial` run per trial, each tagged with the whole chain |
@@ -70,32 +70,42 @@ The policy gets no retry; the scripted pick gets one per cycle. The report says 
 
 What is missing and where it would go: an in-process clamp (FK of the commanded action against the box inside the rollout loop, as the scripted plan check does). That needs a small wrapper around `lerobot-rollout`'s robot (`robot_wrapper.py`) on the Jetson; it was not written because it cannot be tested without the arm. Until it exists the tripwire above plus the speed cap are the envelope, and the first live trials should be run with a hand on STOP (checklist).
 
-## Where training should run: the Mac (MPS)
+## Where training runs: Hugging Face or the Jetson, not the Mac
 
-Evidence from the repo's own logs (`outputs/train/*.log`, `env.sh`, `NEXT_STEPS.md`):
+TC, 11 Nov 2026: "the training should take place on hugging face or the jetson". The Mac is no training target in `learn_loop.py`; `--where local` exists only with `--dry-run`, for the fakes, and is refused otherwise. `train --where hf|jetson`, default `hf`. `plan` and the start of `train` print the same numbers as below.
 
-| Run | Machine | Batch | Steps | Speed | Wall |
-|---|---|---|---|---|---|
-| `act_lighter` (real, 16 episodes, 2 cameras) | Mac MPS | 8 | 25 000 | 1.45 step/s (updt 0.67 s, 12 samples/s) | 4 h 38 min |
-| `ft_lighter` (fine-tune) | Mac MPS | 8 | 8 000 | 1.49 step/s | 1 h 34 min |
-| `act_sim_pick_v1` (sim, 320x240) | Mac MPS | 8 | 20 000 | 3.97 step/s | 1 h 26 min |
-| `act_sim_pick_v4b` | Mac MPS | 8 | 10 000 | 2.98 step/s | 54 min |
-| `so101-finetune` (header comment) | Orin Nano CUDA | 4 | - | ~1.9 step/s (7.6 samples/s) | - |
-| SmolVLA 10k steps | HF Jobs A100 | 32 | 10 000 | - | 61 min, about 2.55 USD |
+| | `--where hf` (default) | `--where jetson` |
+|---|---|---|
+| What | an HF Job: `hf jobs run --flavor a100-large --detach --secrets HF_TOKEN <image> bash -c "lerobot-train ... --policy.push_to_hub=true"` | `lerobot-train` over ssh, CUDA, detached with nohup and polled |
+| Defaults | 10 000 steps, batch 32, save every 2 500 | 20 000 steps, batch 4, 1 worker, save every 2 000 |
+| Speed (measured) | ~3.1 step/s, ACT batch 32 on an A100 (`sim/CLOUD_ROUNDS.md`, 21 Oct 2026) | ~1.9 step/s at batch 4 (`so101-finetune`, `jetson/env.sh`); batch 4 is its ceiling on the shared 8 GB |
+| Time | 10 000 steps: 54 min + 5 min startup (an estimate, never measured) = about 1 h | 20 000 steps: 2.9 h |
+| Cost | $2.50/h: about $2.45; the job `--timeout` (1.5 x the estimate, whole hours) caps it at $5.00 | none, but the Jetson is busy that long |
+| Evidence for the rate | the sim jobs: long 10 801 s = $7.50, v3 4 911 s = $3.41; the SmolVLA job (16 Oct, batch 32, 10k steps) took 61 min = about $2.55 | the `so101-finetune` header comment (one number, not a log); the Mac (not used any more) did 1.45 step/s at batch 8 |
+| Dataset | pushed first to a PRIVATE Hub dataset repo `<hf-user>/so101-nut-pick-<hash8>` with a `v3.0` tag (LeRobot needs it); if the dataset is only on the Jetson it is rsynced to the Mac first and its hash checked against the recorder's | read where the recorder wrote it on the Jetson; nothing copied |
+| Checkpoint back | `hf download <hf-user>/<job>` (the model repo the job pushed to), then `jetson/prep_ckpt.py` on it (cloud checkpoints carry keys our lerobot 0.6.1 rejects), then `register` with `--hf-repo`/`--hf-job` | one rsync of `checkpoints/last/pretrained_model` to the Mac for `register` |
+| Guard | does nothing, uploads nothing, launches nothing without `--yes`; prints the flavour, wall time, cost first. A job already launched (id in `state.json`) is polled by a repeated command without `--yes`, never launched twice | refuses while: `.arms_busy` or `.cams_busy` exist, a `lerobot-*` job runs, a `pick_seq --serve` session or other arm script runs, a configured recorder has an open episode, or `autoloop.py`/`tidy.py` runs on the Mac. While training it holds `.cams_busy` (frees the dashboard's camera memory, the NEXT_STEPS gotcha) and releases it when the process ends |
+| Resume | repeat the command: polls the job; after an ERROR/TIMEOUT `train --force --yes` starts a new one (the model repo keeps the checkpoints it pushed) | repeat the command: relaunches `--resume=true` from `checkpoints/last` |
 
-- The Mac does 12 samples/s at batch 8; the Orin 7.6 at batch 4, and batch 4 is its ceiling (`NEXT_STEPS.md`: the NVML allocator assert at the 8 GB shared memory limit above that, dashboard camera streams must be paused). The Mac is faster per sample and has the headroom.
-- The Jetson is also the box that holds the arm, the cameras and the recorder. Training there blocks the next record or evaluate pass (one 8 GB, CUDA contended with `lerobot-rollout`).
-- The recorded dataset is on the Mac today (the recorder runs in the autoloop process); when the recorder moves to the Jetson (phase 2) `record --pull-from jetson:<path>` rsyncs it to the Mac.
-- SmolVLA does not fit on the Jetson (8 GB) and is untested on MPS; the only measured run is the A100 Job. `--policy smolvla --device cuda` builds the command from the NEXT_STEPS recipe (base weights, top/wrist renamed to camera1/2, one empty camera) for a CUDA host; it has not been run from here. Default is ACT.
+The exact commands, the live ones included:
 
-`--device cuda` trains on a CUDA machine you run the command on (the Jetson itself: run learn_loop there, with `--batch 4 --workers 1`); the code has no remote-train mode and does not ssh to start training.
+```
+tools/learn_loop.py train --name nut1                      # prints the plan, refuses: "not launching ... repeat with --yes"
+tools/learn_loop.py train --name nut1 --yes                # HF: about 1 h, about $2.45 (cap $5.00); needs `hf auth login` and HF_TOKEN in the environment
+tools/learn_loop.py train --name nut1 --where jetson       # Jetson: 2.9 h, free; run `so101-stop` and stop autoloop/tidy first
+```
+
+Things in the HF path that nothing in the repo records and that the first live launch must confirm: the job image (`--hf-image`, default `huggingface/lerobot-gpu`; `hf jobs run --dry-run` prints the resolved configuration without submitting), and that the image's `lerobot-train` accepts the same flags (the earlier jobs were launched by hand and their command line was not kept; NEXT_STEPS.md only has the failure notes: dataset repo needs the `v3.0` tag, SmolVLA needs the camera rename). SmolVLA (`--policy smolvla`) builds the NEXT_STEPS recipe for the HF backend only; it does not fit on the Jetson and has not been launched from here.
+
+Past Mac numbers (`outputs/train/*.log`), for reference only: `act_lighter` 25 000 steps at batch 8 in 4 h 38 min (1.45 step/s), `ft_lighter` 8 000 steps in 1 h 34 min, sim runs 3 to 4 step/s.
 
 ## How long each stage takes
 
 | Stage | Estimate | Evidence |
 |---|---|---|
 | record, N cycles | N x 86 s (30 cycles: 43 min; 100: 2.4 h) | median `cycle_s` of 19 real cycle runs in `so101-autoloop` (86 s, mean 101 s). About half of the tries are kept (`first10b` 5/10, `first10` 3/4), so 30 cycles give 12 to 22 episodes. `act_lighter` learned from 16 episodes (435 episodes seen in 27 epochs); 40 cycles for about 20 episodes is the first target, more is better |
-| train, 20 000 steps, batch 8, MPS | 3.8 h (`plan` prints it) | 1.45 step/s from the logs above; `--steps 8000` is 1.5 h (the `ft_lighter` fine-tune ran 8k steps) |
+| train, HF Job, 10 000 steps batch 32 | about 1 h, about $2.45 (`--steps 20000`: 1.9 h, $4.7) | 3.1 step/s on an A100 (`sim/CLOUD_ROUNDS.md`) + 5 min startup; $2.50/h |
+| train, Jetson, 20 000 steps batch 4 | 2.9 h, free | 1.9 step/s (`so101-finetune`); `--steps 8000` is 1.2 h |
 | register | 30 to 90 s | the checkpoint is 197 MB (`act_lighter`), copied into the artifact store |
 | deploy | about 1 to 2 min | rsync of 197 MB over the LAN, sha256 on both sides |
 | evaluate, M trials of T s | M x (T + ~45 s): 10 x 70 s = 12 min | the 45 s (park, cameras back, settle, judge, scripted reset ~ 86 s cycle minus its pick) is an estimate until the first live run |
@@ -118,16 +128,16 @@ One URI for everything: `--mlflow-uri`, else `SO101_MLFLOW_URI` / `MLFLOW_TRACKI
 Before the first real run:
 
 1. `tools/learn_loop.py all --name smoke --dry-run` passes on the Mac (about 10 s). `ruff` and the suite are green.
-2. The other agents' pieces are on this branch's base: `autoloop --record-demos` without `--dry-run` actually records (phase 2), and the persistent `pick_seq --serve` session. Hooks I need from them, none exist yet: (a) a way to RELEASE the arm port from a `pick_seq --serve` session before `lerobot-rollout` starts and take it back after (the rollout and a resident serial session cannot both hold `/dev/so101_follower`; `jetson_arm_jobs` does not look for `pick_seq`); (b) where the Jetson-side dataset lives, so `--pull-from` can fetch it.
+2. The other agents' pieces are on this branch's base: `autoloop --record-demos` without `--dry-run` actually records (phase 2), and the persistent `pick_seq --serve` session. Hooks I need from them, none exist yet: (a) a way to RELEASE the arm port from a `pick_seq --serve` session before `lerobot-rollout` starts and take it back after (the rollout and a resident serial session cannot both hold `/dev/so101_follower`; `jetson_arm_jobs` does not look for `pick_seq`); (b) none now: the recorder's folder on the Jetson is read as it is (`~/so101/outputs/demos/<session>/<name>`, or `--jetson-dataset`).
 3. On the Jetson: `lerobot-rollout --help | grep max_relative_target` shows the flag (lerobot 0.6.1 has it on `SOFollowerConfig`; the rtc engine's use of it is the thing to confirm), `so101-cams-lock` ok, `so101-cams-check` exit 0, `so101-perf` (max clocks) for the rollout.
 4. `touch ~/so101/outputs/run/autoloop.stop` works as the stop file (the same one the autoloop uses); you know where the physical STOP and the dashboard STOP are. `so101-stop` on the Jetson stops the rollout.
-5. Mac store reachable (`curl -s http://127.0.0.1:5050/health`) or `--mlflow-uri` set.
+5. For `--where hf`: `hf auth whoami` works on the Mac and `HF_TOKEN` is set (the Job gets it with `--secrets HF_TOKEN`); you accept the spend. For `--where jetson`: arm and cameras idle (the command checks and refuses). Mac store reachable (`curl -s http://127.0.0.1:5050/health`) or `--mlflow-uri` set.
 
 Then, in this order, each a separate command so a surprise costs one stage:
 
 1. A throw-away first pass under its own name: `record --name nut-smoke --cycles 4 --min-kept 1` and watch the 4 cycles. Check the dataset hash and the episode count in `outputs/learn_loop/nut-smoke/state.json`. (Do not reuse that name for the real run: a second `record` in the same loop would need `--force` and is not tested to append to the first dataset.)
 2. The real run under a new name: `record --name nut1 --cycles 40` (about an hour). `--min-kept` 10 holds the next stage back if the keep rate is bad.
-3. `train --steps 2000` for a smoke pass on the real data (about 25 min) to see loss fall and steps/s; then `train --force --steps 20000` (about 3.8 h; `--force` starts over, a plain repeat of the command after a crash resumes). It uses the Mac GPU: close other GPU-heavy things.
+3. `train --steps 1000` for a smoke pass on the real data (HF: about 8 min and $0.32 with `--yes`; Jetson: about 9 min) to see the whole path work and the loss fall; then `train --force --yes` for the real one (HF: about 1 h, $2.45, cap $5.00; `--where jetson` instead: 2.9 h, after `so101-stop` and stopping autoloop/tidy). `--force` starts over, a plain repeat after a crash resumes or polls. It uses the Mac GPU: close other GPU-heavy things.
 4. `register`, `deploy`: check `so101-policy status` prints OK and `~/so101/policies/so101-nutpick/current` exists on the Jetson.
 5. First evaluation with a person at STOP: `evaluate --trials 2 --trial-s 15`. Watch the first rollout from start to finish: the arm should leave the nudge pose, reach toward the nut, stay inside the mat. Expect nothing good from an under-trained policy; the point is the guard: you can test the tripwire by touching the stop file during the rollout and checking the arm stops within a second or two.
 6. `evaluate --trials 10 --trial-s 25`, then `report`. Read `report.md`: with 10 trials the interval is wide (5/10 is 24 to 76 percent); the verdict line says when the difference is not distinguishable.
@@ -144,4 +154,4 @@ During any rollout: hand near STOP. A trip prints one JSON line, ends the sessio
 
 ## Files
 
-`tools/learn_loop.py` (CLI, stages, state, report), `tools/learn_loop_eval.py` (`rollout_script`, `RolloutWatch`, `SshTransport`, `PolicyEval`), `tools/learn_loop_fakes.py` (dry-run and test fakes), `tests/tools/test_learn_loop.py`, `tests/tools/test_learn_loop_eval.py`, `tests/tools/learn_loop_helpers.py`, the `so101-learn-loop` function in `env.sh`. Nothing in `autoloop.py`, `pick_loop.py`, `pick_seq.py`, `demo_recorder.py`, `demo_session.py` or the dashboard was changed.
+`tools/learn_loop.py` (CLI, stages, state, report), `tools/learn_loop_train.py` (HF and Jetson training backends, the busy check, the numbers), `tools/learn_loop_eval.py` (`rollout_script`, `RolloutWatch`, `SshTransport`, `PolicyEval`), `tools/learn_loop_fakes.py` (dry-run and test fakes), `tests/tools/test_learn_loop.py`, `tests/tools/test_learn_loop_train.py`, `tests/tools/test_learn_loop_eval.py`, `tests/tools/learn_loop_helpers.py`, the `so101-learn-loop` function in `env.sh`. Nothing in `autoloop.py`, `pick_loop.py`, `pick_seq.py`, `demo_recorder.py`, `demo_session.py` or the dashboard was changed.

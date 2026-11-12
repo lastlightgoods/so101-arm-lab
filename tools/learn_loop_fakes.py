@@ -2,7 +2,7 @@
 """learn_loop_fakes.py - everything `tools/learn_loop.py --dry-run` and tests/tools/test_learn_loop*.py stand in for the hardware with: a tiny LeRobot-shaped dataset,
 a fake `autoloop --record-demos` and `lerobot-train` (FakeSys), a tiny checkpoint, and a fake Jetson rollout (FakeRollout) that moves the FakeWorld's nut and walks the
 follower's read-back joints along a path the RolloutWatch can check. Nothing here opens a camera, a port, an ssh session or a GPU."""
-import hashlib, json, os, random
+import hashlib, json, os, random, re, shutil
 
 IN = 25.4
 HOVER = {"shoulder_pan": 15.0, "shoulder_lift": 17.0, "elbow_flex": 2.0, "wrist_flex": 80.0, "wrist_roll": 0.46}    # tip 11.2, 6.4 in, 39 mm up: inside the safe mat (fixture table)
@@ -46,24 +46,49 @@ def argval(argv, flag, default=None):
 class FakeSys:
     """Stands in for subprocess runs: `run(argv, log)` -> return code. Recognises tools/autoloop.py (writes a tiny kept-only dataset and the session summary) and
     lerobot-train (a tiny checkpoint, a log in LeRobot's format). `fail` = {"record": n, "train": n}: the next n calls of that kind exit 1 (train after writing one checkpoint)."""
-    def __init__(self, kept=8, rejected=2, fail=None, success_rate=0.6, mlflow=None):
+    def __init__(self, kept=8, rejected=2, fail=None, success_rate=0.6, mlflow=None, jetson_home=None, hf_running_polls=1, hf_stage="COMPLETED"):
         self.kept, self.rejected, self.fail, self.sr, self.calls = kept, rejected, dict(fail or {}), success_rate, []
+        self.jetson_home, self.hf_polls, self.hf_stage, self.hf_jobs, self.hf_repos = jetson_home, hf_running_polls, hf_stage, 0, {}
 
     def run(self, argv, log=None):
-        self.calls.append(list(argv)); kind = "record" if any(str(a).endswith("autoloop.py") for a in argv) else "train" if any("lerobot-train" in str(a) for a in argv) else "other"
+        self.calls.append(list(argv)); return self.dispatch(argv, log)[0]
+
+    def capture(self, argv):
+        """(rc, text): the `hf` CLI's answers (upload, repos tag create, jobs run / inspect / logs, download) and every other command as run()."""
+        self.calls.append(list(argv))
+        if str(argv[0]) != "hf": return self.dispatch(argv, None)[0], ""
+        return self.hf(list(map(str, argv)))
+
+    def hf(self, a):
+        if a[1] == "upload": self.hf_repos[a[2]] = a[3]; return 0, "uploaded"
+        if a[1] == "repos": return 0, "tag created"
+        if a[1] == "jobs" and a[2] == "run": self.hf_jobs += 1; self.hf_cmd = a; return 0, f"Job started with ID: {self.hf_jobs:024x}\nhttps://huggingface.co/jobs/x"
+        if a[1] == "jobs" and a[2] == "inspect":
+            if self.hf_polls > 0: self.hf_polls -= 1; return 0, json.dumps([{"status": {"stage": "RUNNING"}}])
+            return 0, json.dumps([{"status": {"stage": self.hf_stage}}])
+        if a[1] == "jobs" and a[2] == "logs": return 0, "INFO ot_train.py:641 step:2500 smpl:80K loss:0.210 lr:1.0e-05\nINFO ot_train.py:641 step:10K smpl:320K loss:0.081 lr:1.0e-05\n"
+        if a[1] == "download":
+            dst = a[a.index("--local-dir") + 1]; make_ckpt(os.path.join(dst, "checkpoints", "010000", "pretrained_model"), steps=10000); return 0, "downloaded"
+        return 1, "unknown hf command"
+
+    def dispatch(self, argv, log):
+        kind = "record" if any(str(a).endswith("autoloop.py") for a in argv) else "train" if any("lerobot-train" in str(a) for a in argv) else "other"
         if self.fail.get(kind, 0) > 0: self.fail[kind] -= 1; part = True
         else: part = False
-        return getattr(self, "do_" + kind)(argv, log, part)
+        return getattr(self, "do_" + kind)(argv, log, part), ""
 
     def do_other(self, argv, log, part): return 0
 
     def do_record(self, argv, log, part):
         if part: return 1
-        root = argval(argv, "--demo-root"); repo = argval(argv, "--demo-repo", "lab/nut"); out = argval(argv, "--out-dir"); session = argval(argv, "--session"); name = repo.split("/")[-1]
+        root = argval(argv, "--demo-root"); repo = argval(argv, "--demo-repo", "lab/nut")
+        if root is None and self.jetson_home: root = os.path.join(self.jetson_home, "so101", "outputs", "demos", argval(argv, "--session"))   # a real run: the recorder writes on the Jetson (autoloop's default --demo-root)
+        if root is None: return 1
+        out = argval(argv, "--out-dir"); session = argval(argv, "--session"); name = repo.split("/")[-1]
         make_dataset(os.path.join(root, name), episodes=self.kept); make_dataset(os.path.join(root, name + "-rejects"), episodes=self.rejected)
-        cycles = int(argval(argv, "--cycles", 10)); os.makedirs(out, exist_ok=True)
+        cycles = int(argval(argv, "--cycles", 10)); os.makedirs(out, exist_ok=True); dh = ld_hash(os.path.join(root, name)) if self.jetson_home else None
         json.dump({"session": session, "cycles": cycles, "landed": int(round(self.sr * cycles)), "success_rate": self.sr, "mean_err_mm": 6.0, "median_err_mm": 5.5, "stops": [], "end": "cycles", "dry_run": "--dry-run" in argv,
-                   "demos": {"kept": self.kept, "rejected": self.rejected, "aborted": 0, "repo_id": repo, "dataset_hash": None}}, open(os.path.join(out, f"autoloop_{session}.json"), "w"))
+                   "demos": {"kept": self.kept, "rejected": self.rejected, "aborted": 0, "repo_id": repo, "dataset_hash": dh}}, open(os.path.join(out, f"autoloop_{session}.json"), "w"))
         if log: open(log, "a").write("fake autoloop done\n")
         self.log_dataset_run(os.path.join(root, name), repo)
         return 0
@@ -99,6 +124,50 @@ class FakeSys:
             if part: break   # a crash after the first checkpoint
         if log: open(log, "a").write("\n".join(lines) + "\n")
         return 1 if part else 0
+
+
+def ld_hash(root):
+    import importlib.util
+    sp = importlib.util.spec_from_file_location("dr_for_fakes_hash", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "jetson", "demo_recorder.py")); m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m); return m.dataset_hash(root)
+
+
+class FakeJetson:
+    """The Jetson's shell for learn_loop_train: run(script, timeout) -> (rc, text), dispatching on the `# ll:` marker of the script, over a fake $HOME folder. Knobs: `busy` (lines the busy script reports),
+    `polls` (status calls that still say RUNNING), `fail_at` (a launch that stops after this many steps, once), `launched` (what was started). fetch(src, dst) is the rsync stand-in."""
+    def __init__(self, home, busy=(), polls=1, fail_at=None):
+        self.home, self.busy, self.polls, self.fail_at, self.launched, self.scripts, self.left = home, list(busy), polls, fail_at, [], [], 0; os.makedirs(home, exist_ok=True)
+
+    def path(self, p): return os.path.join(self.home, p.replace("$HOME/", "").replace("~/", "").lstrip("/"))
+
+    def run(self, script, timeout=120):
+        self.scripts.append(script); first = script.splitlines()[0]
+        if first == "# ll:busy": return 0, "".join(f"BUSY {b}\n" for b in self.busy)
+        if first == "# ll:train-launch":
+            job = re.search(r"train/(\S+)\.log", script).group(1); steps = re.search(r"--steps=(\d+)", script); resume = "--resume=true" in script
+            d = os.path.join(self.home, "so101", "outputs", "train", job); saved = os.path.join(d, "checkpoints", "last", "pretrained_model", "train_config.json")
+            n = int(steps.group(1)) if steps else json.load(open(saved))["steps"]; start = int(os.path.basename(os.path.realpath(os.path.join(d, "checkpoints", "last")))) if resume else 0
+            for s_ in range(start + 500, n + 1, 500):
+                if self.fail_at is not None and s_ > self.fail_at: self.fail_at = None; break
+                make_ckpt(os.path.join(d, "checkpoints", f"{s_:06d}", "pretrained_model"), steps=n); link = os.path.join(d, "checkpoints", "last")
+                if os.path.islink(link): os.remove(link)
+                os.symlink(f"{s_:06d}", link)
+                with open(os.path.join(self.home, "so101", "outputs", "train", job + ".log"), "a") as f: f.write(f"INFO x ot_train.py:641 step:{s_} smpl:1 loss:{max(0.05, 6.0 / (1 + s_ / 100)):.3f} lr:1.0e-05\n")
+            self.launched.append(script); self.left = self.polls; return 0, "PID 4242\n"
+        if first == "# ll:train-status":
+            job = re.search(r'D="\$HOME/so101/outputs/train/([^"]+)"', script).group(1)
+            d = os.path.join(self.home, "so101", "outputs", "train", job); link = os.path.join(d, "checkpoints", "last"); logp = os.path.join(self.home, "so101", "outputs", "train", job + ".log")
+            running = 1 if self.left > 0 else 0; self.left = max(0, self.left - 1)
+            return 0, f"RUNNING {running}\nLAST {os.path.basename(os.path.realpath(link)) if os.path.islink(link) else 'none'}\n---LOG\n" + (open(logp).read() if os.path.exists(logp) else "")
+        m = re.search(r'cat "\$HOME/([^"]+)"', script)
+        if m:
+            p = os.path.join(self.home, m.group(1)); return (0, open(p).read()) if os.path.exists(p) else (1, "no such file")
+        return 1, "unknown script"
+
+    def fetch(self, src, dst):
+        rel = src.split(":", 1)[1] if ":" in src else src; srcp = os.path.join(self.home, rel.replace("$HOME/", "").lstrip("/"))
+        if not os.path.exists(srcp): return 1, f"no {srcp}"
+        if os.path.exists(dst): shutil.rmtree(dst)
+        shutil.copytree(srcp, dst, symlinks=False); return 0, ""
 
 
 class Clock:

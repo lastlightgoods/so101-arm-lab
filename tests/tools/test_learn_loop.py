@@ -12,9 +12,9 @@ from learn_loop_helpers import LL, FF, EV, PRE, run, state, client, events, lrt 
 def test_plan_prints_etas_from_the_measured_rates(tmp_path, capsys):
     assert run(tmp_path, "plan", extra=("--dry-run", "--cycles", "30", "--steps", "20000", "--trials", "10")) == 0
     out = capsys.readouterr().out
-    assert "record" in out and "train" in out and "evaluate" in out and "1.45 step/s at batch 8" in out
+    assert "record" in out and "train" in out and "evaluate" in out and "3.1 step/s measured" in out and "HF Job a100-large" in out
     est = LL.estimates(LL.build_parser().parse_args(["plan", "--name", "x", "--steps", "20000", "--cycles", "30", "--trials", "10"]))
-    assert est["train"] == pytest.approx(20000 / 1.45, rel=0.01) and est["record"] == pytest.approx(30 * 86) and est["evaluate"] == pytest.approx(10 * 70)
+    assert est["train"] == pytest.approx(20000 / 3.1 + 300, rel=0.01) and est["record"] == pytest.approx(30 * 86) and est["evaluate"] == pytest.approx(10 * 70)
 
 
 def test_train_argv_has_the_features_without_environment_state_and_no_machine_paths():
@@ -23,7 +23,7 @@ def test_train_argv_has_the_features_without_environment_state_and_no_machine_pa
     argv = LL.train_argv(cfg, "lab/nut", "/data/nut", "/out/job", "job", a, binary="lerobot-train"); flat = " ".join(argv)
     feats = json.loads(next(x for x in argv if x.startswith("--policy.input_features="))[len("--policy.input_features="):])
     assert "observation.environment_state" not in feats and feats["observation.images.wrist"]["shape"] == [3, 480, 640] and feats["observation.state"] == {"type": "STATE", "shape": [6]}
-    assert "--policy.type=act" in argv and "--policy.device=mps" in argv and "--dataset.repo_id=lab/nut" in argv and "--dataset.root=/data/nut" in argv and "--wandb.enable=false" in argv and "--batch_size=8" in argv
+    assert "--policy.type=act" in argv and "--policy.device=cuda" in argv and "--dataset.repo_id=lab/nut" in argv and "--dataset.root=/data/nut" in argv and "--wandb.enable=false" in argv and "--batch_size=32" in argv
     assert "/Users/" not in flat
     assert LL.resume_argv("/out/job", "lerobot-train") == ["lerobot-train", "--resume=true", "--config_path=/out/job/checkpoints/last/pretrained_model/train_config.json"]
 

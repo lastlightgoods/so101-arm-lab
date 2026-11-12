@@ -12,7 +12,7 @@ def ready(tmp_path):
     assert run(tmp_path, *PRE) == 0; return tmp_path
 
 
-def ev_args(tmp, rt, *extra, name="t1"): return run(tmp, "evaluate", runtime=rt, extra=("--dry-run", "--trials", "6", "--trial-s", "10", "--cycles", "6", "--steps", "1000", "--save-freq", "500", *extra))
+def ev_args(tmp, rt, *extra, name="t1"): return run(tmp, "evaluate", runtime=rt, extra=("--dry-run", "--where", "local", "--trials", "6", "--trial-s", "10", "--cycles", "6", "--steps", "1000", "--save-freq", "500", *extra))
 
 
 def trials(tmp): return __import__("json").load(open(tmp / "ll" / "t1" / "eval.json"))
