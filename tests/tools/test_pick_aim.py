@@ -77,7 +77,7 @@ def test_the_aim_point_moves_the_fixed_jaw_back_from_the_nut_along_the_jaw_direc
 def test_the_closed_loop_lands_the_fixed_jaw_grasp_aim_mm_behind_the_nut_by_default(pl, cc, table, monkeypatch, capsys, tmp_path):
     arm = ShortArm(cc, table, shortfall_mm=7.0)
     out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--state", str(tmp_path / "s.json")]); st = stages(out); rec, = records(out)
-    final = {k: arm.rows[-2][1]["reached"][k] for k in ARM}   # the FINAL grasp (after pregrasp), read back
+    final = {k: arm.rows[-2][2]["reached"][k] for k in ARM}   # the FINAL grasp (after pregrasp), read back
     x, y, _ = pl.fk_mat(cc, table, final); u = pl.jaw_dir_mat(cc, table, final)
     nut = np.array(PROBE_NUT_IN); tip = np.array([x, y]); d_mm = (nut - tip) * 25.4
     aim = pl.GRASP_AIM_MM; assert np.linalg.norm(d_mm) == pytest.approx(aim, abs=1.0), f"the fixed jaw's tip ends {np.linalg.norm(d_mm):.1f} mm from the nut"

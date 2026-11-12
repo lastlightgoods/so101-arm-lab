@@ -44,7 +44,7 @@ def pl(tmp_path, monkeypatch):
 
 def drive(pl, monkeypatch, capsys, arm, argv):
     monkeypatch.setattr(pl, "find_nut", arm.find_nut); monkeypatch.setattr(pl, "api", arm.api); monkeypatch.setattr(pl, "run_plan", arm.run_plan)
-    monkeypatch.setattr(sys, "argv", ["pick_loop.py", "--open-loop", *argv]); pl.main()
+    monkeypatch.setattr(sys, "argv", ["pick_loop.py", "--open-loop", "--grasp-tilt-deg", "0", *argv]); pl.main()
     return [json.loads(l) for l in capsys.readouterr().out.strip().splitlines()]
 
 
@@ -60,7 +60,7 @@ def test_one_run_per_pick_with_params_metrics_tags_and_artifacts(pl, store, tmp_
     assert r1.data.params["state"] == "pick_state.json" and r1.data.params["runs"] == "3"
     m = r1.data.metrics
     assert m["picked"] == 1.0 and m["found_at_landing"] == 1.0 and m["landing_err_mm"] == pytest.approx(out[0]["err_mm"], abs=0.06) and m["before_mm"] > 0 and m["seconds"] >= 0
-    assert {k for k in m if k.startswith("sag_")} == {"sag_hover_nut", "sag_pregrasp", "sag_grasp", "sag_close1", "sag_close2", "sag_lift", "sag_hover_tgt", "sag_place", "sag_open", "sag_lift2", "sag_rest"} and m["sag_grasp"] == 1.5 and m["sag_close1"] == m["sag_close2"] == 0.0
+    assert {k for k in m if k.startswith("sag_")} == {"sag_hover_nut", "sag_pregrasp_up", "sag_pregrasp", "sag_grasp", "sag_close1", "sag_close2", "sag_lift", "sag_hover_tgt", "sag_place", "sag_open", "sag_lift2", "sag_rest"} and m["sag_grasp"] == 1.5 and m["sag_close1"] == m["sag_close2"] == 0.0
     assert p1 == {"plan.json", "waypoints.json", "frames/landing.jpg", "state/pick_state.json"}
     assert by_run[3][0].data.tags["target_in"] == "9.00,6.00" and by_run[2][0].data.tags["target_in"] == "9.00,6.00", "even runs and the last run go to --target"
 
@@ -77,7 +77,7 @@ def test_ssh_failure_marks_the_run_failed_and_still_exits_like_before(pl, store,
     monkeypatch.setenv("SO101_MLFLOW_URI", store); arm = FakeArm()
     def dead(plan, max_deg_s): raise SystemExit("pick_seq produced no waypoint rows")
     monkeypatch.setattr(pl, "find_nut", arm.find_nut); monkeypatch.setattr(pl, "api", arm.api); monkeypatch.setattr(pl, "run_plan", dead)
-    monkeypatch.setattr(sys, "argv", ["pick_loop.py", "--open-loop", "--runs", "2", "--state", str(tmp_path / "s.json")])
+    monkeypatch.setattr(sys, "argv", ["pick_loop.py", "--open-loop", "--grasp-tilt-deg", "0", "--runs", "2", "--state", str(tmp_path / "s.json")])
     with pytest.raises(SystemExit, match="no waypoint rows"): pl.main()
     (r, p), = runs(store, "so101-picks"); assert r.info.status == "FAILED" and p == {"plan.json"} and r.data.params["gain"] == "0.7"
 

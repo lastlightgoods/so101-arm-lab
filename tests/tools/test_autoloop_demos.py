@@ -15,7 +15,7 @@ def portable(x):
     return x
 
 
-GOLDEN_OFF = ("26eb79b28c8aa35fe0375d63a1ee6fc564b414f86adcb1ec376c27ca2fd153d8", 63)   # sha256 of the normalised dry-run output of main's autoloop.py (6 cycles, seed 11, dry-miss 0.3, learned biases {}), before --record-demos existed (regenerated from caa06b5 with portable())
+GOLDEN_OFF = ("62ef6d1d9555f59255291bf8914665daf7d1d748ca238e467da42d03e17f0b5a", 63)   # why: regenerated 11 Nov 2026 for the plan change (grasp at 1.0 mm, the -3 deg wrist tilt, the pregrasp_up waypoint: the dry run reads the plan joints); before that it was 26eb79b2... of the code below. sha256 of the normalised dry-run output of main's autoloop.py (6 cycles, seed 11, dry-miss 0.3, learned biases {}), before --record-demos existed (regenerated from caa06b5 with portable())
 
 
 @pytest.fixture(scope="module")

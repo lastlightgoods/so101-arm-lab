@@ -34,7 +34,7 @@ def test_a_real_plan_inside_the_mat_passes_and_one_at_the_edge_names_the_waypoin
 
 def test_tip_heights_come_from_fk_with_the_arm_fit(autorig, gr, pl):
     r = autorig(); plan = pl.build_plan([9.0, 6.0], [9.0, 6.0], {}); hs = {n: h for n, _, _, h in gr.plan_tips(r.cc, r.table, plan)}
-    assert hs["grasp"] == pytest.approx(0.12 * 25.4, abs=0.3) and hs["hover_nut"] == pytest.approx(1.5 * 25.4, abs=0.3) and "rest" not in hs
+    assert hs["grasp"] == pytest.approx(pl.GRASP_H_IN * 25.4, abs=0.3) and hs["hover_nut"] == pytest.approx(1.5 * 25.4, abs=0.3) and "rest" not in hs
     g = gr.Guard(r.cc, r.table, lim(gr, ceiling_in=1.0), r.ctx); t = g.check_plan(plan)
     assert t.reason == "workspace" and "above the mat" in t.detail["why"], "a 1 in ceiling refuses the 1.5 in hovers"
 

@@ -14,7 +14,7 @@ back again, c2, and the tip height h decides whether the grasp target is lowered
 camera looks for the nut between the jaw tips (jaw check); not there -> ONE more corrected grasp (b + c); still not there -> open over
 the spot and rest, `picked=false, reason="not_in_jaws"`; (e) carry, place, open, lift, rest. `--open-loop` is the single-run plan of before.
 
-  tools/pick_loop.py --runs 4 [--target 9 6] [--open-loop] [--jaw-open 35] [--grasp-aim-mm 10] [--wrist-check] [--no-jaw-check] [--fast-close]
+  tools/pick_loop.py --runs 4 [--target 9 6] [--open-loop] [--jaw-open 35] [--grasp-aim-mm 10] [--grasp-tilt-deg -3] [--wrist-check] [--no-jaw-check] [--fast-close]
                      [--jaw-window 300 300 380 360] [--lost-after 3] [--state jetson/calib/pick_state.json]
   tools/pick_loop.py --reset [--safe-box 6 4 13 8] [--seed N]      # put the nut at a random clear spot inside the safe box
 State (biases, place offset, history) persists in --state so later sessions start where this one ended.
@@ -27,7 +27,9 @@ import cv2, numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DASH = os.environ.get("SO101_DASH", "http://localhost:8765")
 REST = {"shoulder_pan": 0.0, "shoulder_lift": -100.0, "elbow_flex": 95.0, "wrist_flex": 72.0, "wrist_roll": 0.5}
-GRASP_H_IN = 0.12
+# why: at 0.12 in (3 mm by the IK) the jaws closed about 2 mm above the mat over a ~3 mm thick nut and rode over it (11 Nov 2026; a touch-off put mat contact at an
+# IK height of about 0.5 mm); the 16:20 test, grasp and close commanded at 1.0 mm, gripped the nut. The closed loop's lower/raise rule is unchanged.
+GRASP_H_IN = 1.0 / 25.4
 # why: the staged grasp used to re-aim at grasp height, so the readback correction (c2, 2-6.5 mm on 10 Nov) dragged the fixed jaw along the mat
 # into the nut: TC saw it "land a 1/4 in too far back, then slide up to the nut and hit it". The last stage now rises to this height over the
 # corrected point first and comes straight down.
@@ -41,7 +43,19 @@ CLOSE_MID = 20
 # instead. 10 mm (the first value: the nut's ~4 mm radius plus clearance) was too much: TC watched the fixed jaw land "a 1/4 in too far back,
 # then slide up to the nut and hit it" (session first10c, 10 Nov 2026), so 10 - 6.35 = 3.65 -> 4 mm, the fixed jaw's face at the nut's edge.
 GRASP_AIM_MM = 4.0
-WP = [("hover_nut", "nut", 1.5, JAW_OPEN, 1.6, 0.4), ("pregrasp", "nut", PREGRASP_H_IN, JAW_OPEN, 0.6, 0.3), ("grasp", "nut", GRASP_H_IN, JAW_OPEN, 0.9, 0.5),
+# why: at 1.0 mm the front finger (the moving jaw, away from the base) dragged on the mat and pulled the fixed thumb forward (TC, 11 Nov 2026: "the wrist needs to tilt a bit so
+# the front finger doesn't drag"). A -3 deg wrist_flex swings the jaw tips away from the base (~2.8 mm per degree at the grasp), so the front finger rides higher than the fixed
+# thumb; the IK target is shifted back by the tilt's own tip shift so the tilted tip lands where the untilted one would. 16:35 test pick: picked and placed, 5.9 mm from the target.
+GRASP_TILT_DEG = -3.0
+TILT_WPS = ("pregrasp", "grasp", "close1", "close2", "close")   # not hover_nut, lift, hover_tgt, place, open, lift2, rest
+# why: the final stage goes from the stage-2 grasp pose UP to pregrasp, and lifting is the servo's bad side (P-only, I=0: it stops short; the 11:56 sweep on 11 Nov 2026 measured
+# 1.7-4.7 deg of droop on the shoulder, 3 deg on the elbow). A live tilt pick had a pregrasp sag of 4.35 deg, and the commanded pregrasp -> grasp descent is only ~1.4 deg on shoulder_lift
+# and elbow_flex, less than the droop, so the real shoulder move was a reversal from the bad side: the grasp landed 6.4 mm high and 4 mm past the aim. A final move that INCREASES
+# shoulder_lift and elbow_flex landed within 0.04-0.6 deg. pregrasp_up is pregrasp's command with both reduced by APPROACH_DEG: with the arm fit at 5 mat spots it sits 50-63 mm above
+# the mat and 33-40 mm back, the straight joint path down to pregrasp never goes below pregrasp's 10 mm, and 8 deg beats the largest measured droop (4.7 deg).
+APPROACH_DEG = 8.0
+APPROACH_JOINTS = ("shoulder_lift", "elbow_flex")
+WP = [("hover_nut", "nut", 1.5, JAW_OPEN, 1.6, 0.4), ("pregrasp_up", "pregrasp", PREGRASP_H_IN, JAW_OPEN, 0.8, 0.3), ("pregrasp", "nut", PREGRASP_H_IN, JAW_OPEN, 0.6, 0.3), ("grasp", "nut", GRASP_H_IN, JAW_OPEN, 0.9, 0.5),
       ("close1", "nut", GRASP_H_IN, CLOSE_MID, 0.5, 0.4), ("close2", "nut", GRASP_H_IN, 0, 0.6, 0.6),
       ("lift", "nut", 1.5, 0, 0.8, 0.2), ("hover_tgt", "tgt", 1.5, 0, 1.2, 0.3), ("place", "tgt", 0.3, 0, 0.9, 0.5),
       ("open", "tgt", 0.3, JAW_OPEN, 0.5, 0.4), ("lift2", "tgt", 1.5, JAW_OPEN, 0.7, 0.2), ("rest", None, 0, 0, 1.8, 0.3)]
@@ -49,8 +63,9 @@ WP_FAST_CLOSE = ("close", "nut", GRASP_H_IN, 0, 0.6, 0.4)   # --fast-close: the 
 GRIPPER_ONLY = ("close", "close1", "close2", "open")          # why: pure jaw moves say nothing about arm sag; the bias learning skips them
 GRASP_HEIGHT_WPS = ("grasp", "close", "close1", "close2")      # why: the close waypoints sit at the grasp height too, lowered or not (a close at the unlowered height would lift the tip while squeezing)
 ARM = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"]
-STAGES = (("hover_nut",), ("hover_nut", "grasp"), ("pregrasp", "grasp", "close1", "close2", "lift", "hover_tgt", "place", "open", "lift2", "rest"))
-LIFT_STAGE, CARRY_STAGE, ABORT_STAGE = ("pregrasp", "grasp", "close1", "close2", "lift"), ("hover_tgt", "place", "open", "lift2", "rest"), ("hover_nut", "rest")
+NO_LEARN = ("pregrasp_up",)   # why: pregrasp_up is defined from pregrasp's command, not a mat point: its droop is not sag to learn, and it must not change the biases
+STAGES = (("hover_nut",), ("hover_nut", "grasp"), ("pregrasp_up", "pregrasp", "grasp", "close1", "close2", "lift", "hover_tgt", "place", "open", "lift2", "rest"))
+LIFT_STAGE, CARRY_STAGE, ABORT_STAGE = ("pregrasp_up", "pregrasp", "grasp", "close1", "close2", "lift"), ("hover_tgt", "place", "open", "lift2", "rest"), ("hover_nut", "rest")
 SPEED = {"closed": 50.0, "open": 80.0}   # why: the staged runs start each stage from a standstill close to the nut; 50 deg/s settles cleaner for the readback
 JAW_HOLE_MAX = 100.0   # mean grey (0-255) allowed in a ring's hole inside the jaw window: the held nut's hole measured 19-56, the bright jaw edge 204-222 (frames 11 Nov 2026)
 JAW_WINDOW = (300, 300, 380, 360)   # wrist-frame pixels (x0, y0, x1, y1) between the jaw tips after close + lift (diag frames, 10 Nov 2026: the nut's ring sat at about (340, 325))
@@ -222,20 +237,39 @@ def waypoints(fast_close=False):
     return list(WP) if not fast_close else [WP_FAST_CLOSE if w[0] == "close1" else w for w in WP if w[0] != "close2"]
 
 
-def build_plan(nut_in, tgt_in, biases, names=None, jaw_open=JAW_OPEN, grasp_h_in=None, fast_close=False):
+_CALIB = {}
+def calib():
+    """(cam_calib, top_table) of this ROOT, loaded once: build_plan's tilt shift needs them and not every caller has them to hand."""
+    if ROOT not in _CALIB: _CALIB[ROOT] = (cam_calib(), json.load(open(os.path.join(ROOT, "jetson", "calib", "top_table.json"))))
+    return _CALIB[ROOT]
+
+
+def build_plan(nut_in, tgt_in, biases, names=None, jaw_open=JAW_OPEN, grasp_h_in=None, fast_close=False, tilt_deg=0.0, cc=None, table=None):
     """The waypoints of WP (all, or only `names`, in WP order) through /api/ik with the learned biases; `jaw_open` replaces every
-    open-jaw value, `grasp_h_in` the grasp (and close) height (the closed loop lowers it when the readback says the tip sits high)."""
+    open-jaw value, `grasp_h_in` the grasp (and close) height (the closed loop lowers it when the readback says the tip sits high).
+    `tilt_deg` is added to wrist_flex on the TILT_WPS; their IK target is shifted back by the tilt's own tip shift (FK through the arm
+    fit, `cc`/`table` or calib()), so the tilted tip lands on the commanded point; `desired` carries the tilt (the sag learning must not learn it)."""
     def ik(x, y, h):
         r = api(f"/api/ik?x_in={x:.4f}&y_in={y:.4f}&h_in={h:.4f}")
         if not r.get("ok"): raise SystemExit(f"ik failed for ({x:.2f},{y:.2f},{h}): {r.get('err')}")
         return r["joints_deg"]
     want = None if names is None else set(names) | ({"close"} if {"close1", "close2"} & set(names) else set())   # why: a stage naming the two-step close also names its --fast-close stand-in
+    def arm_wp(name, which, h):   # (desired, command) joints of one mat-point or rest waypoint: IK, the tilt's shift, the bias, the clamp
+        tilt = float(tilt_deg or 0.0) if name in TILT_WPS else 0.0; pt = nut_in if which == "nut" else tgt_in
+        j = dict(REST) if which is None else ik(*pt, h)
+        if tilt and which is not None:
+            c, t = (cc, table) if cc is not None and table is not None else calib()
+            for _ in range(2):   # why: the shift barely depends on the pose, so twice is enough (11 Nov 2026); the tilted tip must land on the commanded point
+                x0, y0, _h = fk_mat(c, t, j); x1, y1, _h = fk_mat(c, t, dict(j, wrist_flex=j["wrist_flex"] + tilt)); j = ik(pt[0] - (x1 - x0), pt[1] - (y1 - y0), h)
+            j = dict(j, wrist_flex=j["wrist_flex"] + tilt)
+        b = biases.get(name, {}); cmd = {k: j[k] + b.get(k, 0.0) for k in j}; cmd["wrist_flex"] = max(-93.0, min(93.0, cmd["wrist_flex"])); return j, cmd
     wps = []
     for name, which, h, grip, secs, settle in waypoints(fast_close):
         if want is not None and name not in want: continue
         if name in GRASP_HEIGHT_WPS and grasp_h_in is not None: h = grasp_h_in
-        j = dict(REST) if which is None else ik(*(nut_in if which == "nut" else tgt_in), h)
-        b = biases.get(name, {}); cmd = {k: j[k] + b.get(k, 0.0) for k in j}; cmd["wrist_flex"] = max(-93.0, min(93.0, cmd["wrist_flex"]))
+        if which == "pregrasp":   # pregrasp_up: pregrasp's final command with the approach joints backed off, so the move down to it increases them
+            j, cmd = arm_wp("pregrasp", "nut", h); j, cmd = ({k: v - (APPROACH_DEG if k in APPROACH_JOINTS else 0.0) for k, v in d.items()} for d in (j, cmd))
+        else: j, cmd = arm_wp(name, which, h)
         wps.append({"name": name, "joints": cmd, "desired": j, "gripper": jaw_open if grip == JAW_OPEN else grip, "seconds": secs, "settle": settle, "gripper_only": name in GRIPPER_ONLY})
     return {"waypoints": wps}
 
@@ -314,9 +348,9 @@ def closed_loop_pick(cc, table, nut_in, place_in, biases, a, run, say, wpose=Non
     """The staged pick_seq runs of the closed loop (module docstring). Returns (plan, rows, info): plan and rows span the final stages
     (grasp .. lift, then carry .. rest, or the abort), info carries corr1_mm, corr2_mm, grasp_h_mm, grasp_lowered_mm, final_residual_mm,
     wrist_check, in_jaws, jaw_ring, jaw_retry, jaw_frames and reason ("not_in_jaws" when the nut was not carried) for the record and MLflow."""
-    jaw = getattr(a, "jaw_check", True); fast = getattr(a, "fast_close", False); window = tuple(getattr(a, "jaw_window", None) or JAW_WINDOW)
+    tilt = float(getattr(a, "grasp_tilt_deg", GRASP_TILT_DEG) or 0.0); jaw = getattr(a, "jaw_check", True); fast = getattr(a, "fast_close", False); window = tuple(getattr(a, "jaw_window", None) or JAW_WINDOW)
     def stage(xy, names, grasp_h_in=None):
-        p = build_plan(list(xy), list(place_in), biases, names=names, jaw_open=a.jaw_open, grasp_h_in=grasp_h_in, fast_close=fast); return p, run_plan(p, a.max_deg_s)
+        p = build_plan(list(xy), list(place_in), biases, names=names, jaw_open=a.jaw_open, grasp_h_in=grasp_h_in, fast_close=fast, tilt_deg=tilt, cc=cc, table=table); return p, run_plan(p, a.max_deg_s)
     # (a) hover over the commanded point; the readback says where the tip really went
     _, r1 = stage(nut_in, STAGES[0]); j1 = reached_joints(r1, "hover_nut"); x, y, h = fk_mat(cc, table, j1)
     aim_mm = float(getattr(a, "grasp_aim_mm", GRASP_AIM_MM) or 0.0); u = jaw_dir_mat(cc, table, j1) if aim_mm else None
@@ -372,15 +406,15 @@ def pick_once(cc, table, state, a, run, nut_in, tgt, place_in, off, say, session
         tr.params({"target_in": f"{a.target[0]:.2f},{a.target[1]:.2f}", "alt_in": f"{a.alt[0]:.2f},{a.alt[1]:.2f}", "place_in": f"{place_in[0]:.3f},{place_in[1]:.3f}", "gain": a.gain, "outcome_gain": a.outcome_gain,
                    "max_deg_s": a.max_deg_s, "runs": a.runs, "state": os.path.relpath(a.state, ROOT) if a.state.startswith(ROOT) else a.state, "dash": DASH, "mode": mode, "jaw_open": a.jaw_open, "wrist_check": int(a.wrist_check),
                    "jaw_check": int(a.jaw_check), "fast_close": int(a.fast_close), "jaw_window": ",".join(str(int(v)) for v in a.jaw_window),
-                   "grasp_aim_mm": float(getattr(a, "grasp_aim_mm", GRASP_AIM_MM)) if control == "closed" else None})
+                   "grasp_aim_mm": float(getattr(a, "grasp_aim_mm", GRASP_AIM_MM)) if control == "closed" else None, "grasp_tilt_deg": float(getattr(a, "grasp_tilt_deg", GRASP_TILT_DEG))})
         t0 = time.time(); check_path = os.path.join(ROOT, "outputs", "run", f"wrist_check_{session}_r{run}.jpg"); jaw_path = os.path.join(ROOT, "outputs", "run", f"in_jaws_{session}_r{run}.jpg")
         if a.closed_loop: plan, rows, info = closed_loop_pick(cc, table, nut_in, place_in, state["biases"], a, run, say, wpose, check_path, jaw_path); tr.json(plan, "plan.json")
-        else: plan = build_plan(nut_in, place_in, state["biases"], jaw_open=a.jaw_open, fast_close=a.fast_close); tr.json(plan, "plan.json"); rows = run_plan(plan, a.max_deg_s); info = {}
+        else: plan = build_plan(nut_in, place_in, state["biases"], jaw_open=a.jaw_open, fast_close=a.fast_close, tilt_deg=float(getattr(a, "grasp_tilt_deg", GRASP_TILT_DEG) or 0.0), cc=cc, table=table); tr.json(plan, "plan.json"); rows = run_plan(plan, a.max_deg_s); info = {}
         dt = time.time() - t0
         # learn the servo sag per waypoint: bias += gain * (target - reached), capped; closed loop: on the FINAL stages only (their waypoints are the ones the corrected command drove)
         desired = {w["name"]: w["desired"] for w in plan["waypoints"]}
         for r in rows:
-            if r["wp"] in GRIPPER_ONLY: continue
+            if r["wp"] in GRIPPER_ONLY or r["wp"] in NO_LEARN: continue
             b = state["biases"].setdefault(r["wp"], {})
             for k in ARM: b[k] = max(-6.0, min(6.0, b.get(k, 0.0) + a.gain * (desired[r["wp"]][k] - r["reached"][k])))   # drive DESIRED - reached to zero, not command - reached
             r["max_err_deg"] = round(max(abs(desired[r["wp"]][k] - r["reached"][k]) for k in ARM), 2)
@@ -477,6 +511,7 @@ def parser():
     ap.add_argument("--closed-loop", dest="closed_loop", action="store_true", default=True, help="hover, read back, correct; grasp pose, read back, correct; pick (default)")
     ap.add_argument("--open-loop", dest="closed_loop", action="store_false", help="one pick_seq run of the whole plan, no readback correction")
     ap.add_argument("--grasp-aim-mm", type=float, default=GRASP_AIM_MM, help=f"closed loop: put the nut this far inside the open jaw gap, so the fixed jaw lands beside it, not on it (default {GRASP_AIM_MM:g}; 0 aims the fixed jaw's tip at the nut as before 10 Nov 2026)")
+    ap.add_argument("--grasp-tilt-deg", type=float, default=GRASP_TILT_DEG, help=f"wrist_flex tilt on pregrasp, grasp and close (default {GRASP_TILT_DEG:g}; negative lifts the front finger off the mat; the tip is held on the commanded point; 0 = the vertical gripper of before 11 Nov 2026)")
     ap.add_argument("--jaw-open", type=int, default=JAW_OPEN, help=f"gripper opening for hover/grasp/open/lift2 (default {JAW_OPEN}; 45 flicks the nut away, see docs/pick-loop.md)")
     ap.add_argument("--wrist-check", action="store_true", help="closed loop: at hover, look for the nut in the wrist frame near its predicted pixel and report the offset (check only; annotated JPEG in outputs/run/)")
     ap.add_argument("--no-jaw-check", dest="jaw_check", action="store_false", default=True, help="skip the wrist-camera nut-in-jaws check after the lift (and its one retry); the final stage runs in one session as before")

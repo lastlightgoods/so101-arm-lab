@@ -84,7 +84,7 @@ class Runner:
         self.demo = demo   # a tools/demo_session.DemoSession, or None (the default: nothing below changes)
         self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0; self.tele_rows = []; self.session_tele = []
         self.markers_mm = list((table.get("layout_markers") or {}).values())
-        self.pick_args = argparse.Namespace(jaw_open=pl.JAW_OPEN, max_deg_s=pl.SPEED["closed"], wrist_check=False, grasp_aim_mm=pl.GRASP_AIM_MM)
+        self.pick_args = argparse.Namespace(jaw_open=pl.JAW_OPEN, max_deg_s=pl.SPEED["closed"], wrist_check=False, grasp_aim_mm=pl.GRASP_AIM_MM, grasp_tilt_deg=pl.GRASP_TILT_DEG)
         self.biases = load_biases(os.path.join(getattr(pl, "ROOT", "."), "jetson", "calib", "pick_state.json"))   # read only: the pick loop's learned sag biases; the runner never writes that file
 
     def say(self, d): self.out(json.dumps(d))

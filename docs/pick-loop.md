@@ -53,6 +53,32 @@ open straight forward.
 computed from the hover readback each pick (`jaw_dir_mat`). `--grasp-aim-mm 0` restores the old aim. Every record and MLflow run
 carries `aim_mm`, `jaw_dir` and `aim_in`; the corrections and the final residual are measured against the aim point.
 
+## The wrist tilt (11 Nov 2026)
+
+The grasp height is `GRASP_H_IN` = 1.0 mm by the IK. At 0.12 in (3 mm) the jaws closed about 2 mm above the mat over a ~3 mm thick nut and rode over it; a
+touch-off put mat contact at an IK height of about 0.5 mm. At 1.0 mm (16:20) the jaws gripped the nut, but TC saw the front finger (the moving jaw, on the side
+away from the base) drag on the mat and pull the fixed thumb forward: "the wrist needs to tilt a bit so the front finger doesn't drag".
+
+| what | measured |
+|---|---|
+| tip swing per degree of wrist_flex at the grasp | about 2.8 mm; negative swings the jaw tips away from the base |
+| 16:35 test pick, tilt -3 deg, grasp at 1.0 mm | picked and placed, landed 5.9 mm from the target |
+
+`GRASP_TILT_DEG = -3` is added to wrist_flex on pregrasp, grasp, close1, close2 (and the `--fast-close` close), not on the hovers, lift, place, open or rest. Each tilted
+waypoint's IK target is shifted back by the tilt's own tip shift (forward kinematics through the arm fit, two iterations), so the tilted tip lands where the vertical one
+would; the wrist_flex clamp of 93 deg still applies after the tilt. The plan's `desired` carries the tilt, so the sag learning does not learn it as sag.
+`--grasp-tilt-deg 0` gives the vertical gripper of before; the value is an MLflow param (`grasp_tilt_deg`). `build_plan` takes `tilt_deg` and, for the FK, `cc`/`table`
+(the closed loop and the open loop pass theirs; otherwise `calib()` loads `jetson/calib/top_table.json` once).
+
+The tilt shifts the tip in x/y only by design; with the arm fit it also moves the tip height by a millimetre or two (the 9 Nov fit: about -1 to -3 mm near, about +2 mm far), which the closed loop's raise/lower rule then sees in the readback.
+
+### pregrasp_up
+
+The final stage starts with `pregrasp_up`, a waypoint in joint space: pregrasp's final command (IK, tilt, bias) with `shoulder_lift` and `elbow_flex` each `APPROACH_DEG` = 8 deg lower. Lifting is the servo's bad side (P-only, no integral: it stops short), and
+the 11:56 sweep on 11 Nov 2026 measured 1.7-4.7 deg of droop on the shoulder and 3 deg on the elbow. A tilt pick whose pregrasp sagged 4.35 deg then went down by a commanded ~1.4 deg on both joints, less than the droop, so the real shoulder move was a reversal from the bad side
+and the grasp landed 6.4 mm high and 4 mm past the aim, the fixed thumb on top of the nut. A final move that increases both joints landed within 0.04-0.6 deg. With the arm fit at 5 mat spots `pregrasp_up` sits 50-63 mm above the mat and 33-40 mm back, the straight joint path down to
+pregrasp never goes below pregrasp's 10 mm, and 8 deg beats the largest measured droop. It is skipped by the bias learning (`NO_LEARN`), so it never changes a bias; the guard checks it like every waypoint.
+
 ## Running it
 
 ```
