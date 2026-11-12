@@ -155,8 +155,14 @@ def test_main_dry_run_record_demos_writes_a_dataset_lerobot_loads_back(al, tmp_p
     blob = open(root / "meta" / "lab" / "episodes.jsonl").read(); assert "/Users/" not in blob and "@" not in blob
 
 
-def test_record_demos_needs_dry_run_until_the_camera_tee_exists(al, tmp_path):
-    with pytest.raises(SystemExit, match="phase 2"): al.main(["--record-demos", "--cycles", "1", "--out-dir", str(tmp_path)])
+def test_record_demos_without_dry_run_stops_before_any_arm_motion_when_the_recorder_does_not_answer(al, tmp_path, monkeypatch):
+    # why: 2026-11-11 21:53 the old form of this test (expecting "phase 2" to refuse) ran AFTER phase 2 merged: it pinged the real recorder over ssh,
+    # recorded one real autoloop cycle on the arm and moved the tape ring. Now the recorder is a dead injected transport and the arm session is a tripwire.
+    pl = al.load_pick_loop(); monkeypatch.setattr(al, "load_pick_loop", lambda: pl)
+    def no_arm(*a, **k): raise AssertionError("the arm session must not start")
+    monkeypatch.setattr(pl, "open_session", no_arm); monkeypatch.setattr(pl, "run_plan", no_arm)
+    with pytest.raises(SystemExit, match="does not answer"):
+        al.main(["--record-demos", "--cycles", "1", "--out-dir", str(tmp_path), "--stop-file", str(tmp_path / "none.stop")], demo_transport=lambda op, p, t=30.0: {"ok": False, "err": "no_daemon"})
 
 
 def test_with_the_flag_off_the_dry_run_output_is_what_main_printed_before_the_flag_existed(al, tmp_path, capsys, monkeypatch):
