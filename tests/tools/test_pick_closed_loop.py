@@ -49,13 +49,13 @@ def test_two_readback_corrections_converge_on_an_arm_that_reaches_7mm_short(pl, 
     assert [n for n, _ in arm2.calls] == [["hover_pre", "hover_nut"], ["hover_pre", "hover_nut", "grasp"], FINAL] and records(out2)[0]["picked"] and "jaw_check" not in stages(out2), "--no-jaw-check: the three staged runs of before"
 
 
-@pytest.mark.parametrize("high_mm", [4.0, 7.0, 14.0])   # why: GRASP_H_IN is 1.0 mm since 11 Nov 2026 (was 3.05), so these read 5.0 / 8.0 / 15.0 mm as the 2 / 5 / 12 did
-def test_the_grasp_is_lowered_only_when_the_tip_sits_more_than_6mm_high(pl, cc, table, monkeypatch, capsys, tmp_path, high_mm):
+@pytest.mark.parametrize("high_mm", [1.0, 4.0, 14.0])   # why: GRASP_H_IN is 1.0 mm, so these read 2.0 / 5.0 / 15.0 mm; since 11 Nov 2026 the grasp is lowered above 2.5 mm (was 6), to land at 1 mm
+def test_the_grasp_is_lowered_only_when_the_tip_sits_more_than_2_5mm_high(pl, cc, table, monkeypatch, capsys, tmp_path, high_mm):
     arm = ShortArm(cc, table, shortfall_mm=7.0, high_mm=high_mm)
     out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--grasp-tilt-deg", "0", "--state", str(tmp_path / "s.json")]); st = stages(out); rec, = records(out)
-    h = st["grasp_pose"]["h_mm"]; want = min(h - 3.0, 6.0) if h > 6.0 else 0.0
+    h = st["grasp_pose"]["h_mm"]; want = min(h - 1.0, 6.0) if h > 2.5 else 0.0
     assert h == pytest.approx(pl.GRASP_H_IN * 25.4 + high_mm, abs=0.2) and st["grasp_pose"]["lowered_mm"] == pytest.approx(want, abs=0.06) and rec["grasp_lowered_mm"] == pytest.approx(want, abs=0.06)
-    assert (want == 0.0) == (high_mm == 4.0) and (want == 6.0) == (high_mm == 14.0), "5 mm high -> no change; 8 -> lowered 5; 15 -> capped at 6"
+    assert (want == 0.0) == (high_mm == 1.0) and (want == 6.0) == (high_mm == 14.0), "2 mm high -> no change; 5 -> lowered 4; 15 -> capped at 6"
     low = [h_in for (_, _, h_in) in arm.ik_calls if h_in < 0.2]   # stage 2's grasp, then the lift stage's grasp, close1, close2 (--grasp-tilt-deg 0 here: the lower/raise rule is tested on its own; the tilt changes the tip height by a mm or two)
     assert len(low) == 4 and low[0] == pytest.approx(pl.GRASP_H_IN, abs=1e-4) and all(h == pytest.approx(pl.GRASP_H_IN - want / 25.4, abs=0.005) for h in low[1:]), "the lowering goes through /api/ik for the grasp AND the close steps (h is printed to 0.1 mm, so 0.1 mm of slack)"
     assert pl.rec.runs[0].metrics_["grasp_lowered_mm"] == pytest.approx(want, abs=0.06)

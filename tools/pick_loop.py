@@ -595,7 +595,8 @@ def closed_loop_pick(cc, table, nut_in, place_in, biases, a, run, say, wpose=Non
     def grasp_pose(attempt):   # (b) corrected hover (jaws open), then down to grasp height; read back again, and measure the tip height
         _, r2 = stage(xy1, STAGES[1]); j2 = reached_joints(r2, "grasp"); x, y, h = fk_mat(cc, table, j2)
         c2 = (aim[0] - x, aim[1] - y); xy2 = [xy1[0] + c2[0], xy1[1] + c2[1]]
-        lower = min(h - 3.0, 6.0) if h > 6.0 else (-min(1.0 - h, 5.0) if h < 1.0 else 0.0)   # why: the jaws must reach the mat to get under the nut; the cap keeps the IK target within 3 mm below the mat plane the readback contradicts
+        lower = min(h - 1.0, 6.0) if h > 2.5 else (-min(1.0 - h, 5.0) if h < 1.0 else 0.0)   # why: the jaws must reach the mat to get under the nut; the cap keeps the IK target within 3 mm below the mat plane the readback contradicts
+        # ... and 11 Nov 2026 the old band (accept 1-6 mm) let final grasps sit 3.4-7 mm up over a ~3 mm nut (misses at 5.3, 5.6, 6.7 mm, the jaws closed above it): above 2.5 mm, lower to land at 1 mm
         # ... and a tip that reads below 1 mm is pressing on the mat (10 Nov: -3.4 to -0.8 mm at the longer reaches), which stalls it short and
         # drags it when it moves on: raise the grasp so the readback lands at 1 mm (at most 5 mm). Negative lowered_mm = raised.
         info.update({"corr2_mm": _mm(c2), "grasp_h_mm": round(h, 1), "grasp_lowered_mm": round(lower, 1)})
