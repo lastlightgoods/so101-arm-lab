@@ -136,3 +136,7 @@ and nothing is contacted. `tests/tools/test_autoloop.py` and `test_guardrails.py
    `so101-autoloop --cycles 10 --target 9 6 --session first10`.
 6. **Pass** = at least 9 of the 10 cycles `landed` with `landed_err_mm` <= 15, **and zero trips** (`stops: []`, `end: cycles`). Anything
    else: read the cycle lines and the MLflow runs, fix, and start a new 10.
+
+## Keep-outs (the toy frogs)
+
+Every cycle the runner takes the keep-outs from the scene map and the top frame (`tools/keepout.py`, same rule as tidy). The nut finder never returns a point inside a keep-out and never sees a keep-out object; random targets and reset spots stay at least the keep-out's radius + 40 mm away; a fixed target inside one is refused (`keepout_target`); `guard.check_plan` refuses (`keepout`) any plan whose arm body points (wrist, gripper, tip, with droop) touch a keep-out cylinder on the way between waypoints. `--unattended` stops (`keepout_unknown`) when there is no top frame; attended runs fall back to the size rule and say so once. The keep-out height (60 mm) is an assumption, not measured. The first waypoint's move from wherever the arm currently is (normally rest) is checked only at the waypoint itself.

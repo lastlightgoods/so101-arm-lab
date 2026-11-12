@@ -5,7 +5,7 @@ Pure functions (box_check, fk_mat_mm, plan_tips, motion_check, stopfile_present)
 counters that live across cycles. Every check returns a Trip(reason, detail) or None; a Trip ends the session. Nothing here moves the arm
 or talks to the arm: the dashboard is reached through the callables of a Ctx, so a test (or --dry-run) hands in fakes and a fake clock.
 """
-import dataclasses, os, time
+import dataclasses, importlib.util, math, os, time
 
 MAT_MM = (457.2, 304.8)   # the Fiskars mat, 18 x 12 in (docs/mat-scene.md)
 IN = 25.4
@@ -65,6 +65,49 @@ class Ctx:
 
 
 # ---------------------------------------------------------------- pure functions
+_KO = []
+def keepout_mod():
+    """tools/keepout.py by path (the frogs and anything else that is not a toy), loaded once."""
+    if not _KO:
+        spec = importlib.util.spec_from_file_location("keepout_for_guardrails", os.path.join(os.path.dirname(os.path.abspath(__file__)), "keepout.py"))
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); _KO.append(m)
+    return _KO[0]
+
+
+PART_R_MM, TIP_R_MM, KO_MARGIN_MM = 20.0, 8.0, 5.0   # arm body / jaw tip radius and the height margin: the same numbers as tools/tidy.py (the ring check)
+
+
+def droop_mm(x_in, y_in, base_in):   # tools/tidy.py Rig.droop_mm: the 11 Nov sweep, ~4 mm at 150 mm reach, ~16 at 220, ~24 at 290
+    r = math.hypot(x_in - base_in[0], y_in - base_in[1]) * IN; return max(4.0, 4.0 + (r - 150.0) / 140.0 * 20.0)
+
+
+def body_points(cc, table, joints):
+    """(x_in, y_in, h_mm) along wrist -> gripper -> gripper frame, the tip last (the same chain as tidy.Rig.points)."""
+    import numpy as np
+    fit = table["arm_fit"]; off = fit.get("joint_offsets_deg") or {}; tz = float(fit.get("table_z_mm", 0.0) or 0.0)
+    F = cc.fk_frames({k: float(joints[k]) for k in ARM}, off); chain = [F[n][:3, 3] * 1000.0 for n in ("wrist_link", "gripper_link", "gripper_frame_link")]; out = []
+    for a, b in zip(chain, chain[1:]):
+        for f in np.linspace(0, 1, 5):
+            p = a + f * (b - a); X, Y = cc.arm_to_table(table, float(p[0]), float(p[1])); out.append((X / IN, Y / IN, float(p[2]) - tz))
+    x, y, h = fk_mat_mm(cc, table, joints); out.append((x / IN, y / IN, h)); return out
+
+
+def keepout_hits(cc, table, plan, keepouts, steps=8):
+    """[(waypoint pair, x_in, y_in, h_mm, clearance_mm)] of arm body points that touch a keep-out cylinder (droop included) on the straight joint-space move
+    between consecutive waypoints (and at the first one). Empty when no keep-out."""
+    if not keepouts: return []
+    ko = keepout_mod(); base = tuple(v / IN for v in cc.arm_to_table(table, 0.0, 0.0)); wps = plan["waypoints"]; hits = []
+    for i, w in enumerate(wps):
+        a = w["joints"]; b = wps[i - 1]["joints"] if i else None
+        for f in ([1.0] if b is None else [k / steps for k in range(1, steps + 1)]):
+            j = a if b is None else {k: float(b[k]) + f * (float(a[k]) - float(b[k])) for k in ARM}; pts = body_points(cc, table, j); tx, ty, th = pts[-1]
+            for x, y, h in pts:
+                at_tip = math.dist((x * IN, y * IN, h), (tx * IN, ty * IN, th)) < 15.0
+                for k in ko.point_hits(x, y, h, TIP_R_MM if at_tip else PART_R_MM, keepouts, droop_mm(x, y, base), KO_MARGIN_MM):
+                    hits.append((f"{wps[i - 1]['name'] if i else 'start'}>{w['name']}", round(x, 2), round(y, 2), round(h, 1), round(ko.dist_mm((x, y), (k["x_in"], k["y_in"])) - k["r_mm"], 1)))
+    return hits
+
+
 def stopfile_present(path): return bool(path) and os.path.exists(path)
 
 
@@ -163,11 +206,13 @@ def park_on_exit(guard, ctx, send_rest, in_motion, reason):
 class Guard:
     def __init__(self, cc, table, limits=None, ctx=None):
         self.cc, self.table, self.lim, self.ctx = cc, table, limits or Limits(), ctx
-        self.lost = self.failures = 0; self.healthy = False; self.tries = 0; self.t0 = None
+        self.lost = self.failures = 0; self.healthy = False; self.tries = 0; self.t0 = None; self.keepouts = []   # keepouts: set by the runner every cycle (tools/keepout.py find_keepouts)
         self._low_since = self._hold_since = None; self._noted = set()
 
     def _note(self, ctx, key, msg):
         if key not in self._noted: self._noted.add(key); ctx.note({"note": msg})
+
+    def keepout_mod(self): return keepout_mod()
 
     def trip(self, reason, detail=None, clean=False): return Trip(reason, detail or {}, clean)   # why: the runner loads this module by path, so it builds trips through the Guard
 
@@ -271,6 +316,8 @@ class Guard:
         for name, x, y, h in plan_tips(self.cc, self.table, plan):
             why = box_check(x, y, h, self.lim)
             if why: return Trip("workspace", {"wp": name, "x_in": round(x / IN, 3), "y_in": round(y / IN, 3), "h_mm": round(h, 1), "why": why})
+        if self.keepouts and (hits := keepout_hits(self.cc, self.table, plan, self.keepouts)):
+            return Trip("keepout", {"at": hits[0][0], "x_in": hits[0][1], "y_in": hits[0][2], "h_mm": hits[0][3], "clearance_mm": hits[0][4], "n": len(hits)})   # a plan that passes a keep-out is never run
         return None
 
     def check_waypoint(self, row):

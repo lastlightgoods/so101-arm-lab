@@ -39,14 +39,15 @@ class TripError(Exception):
 def dist_mm(a_in, b_in): return math.hypot(a_in[0] - b_in[0], a_in[1] - b_in[1]) * IN
 
 
-def sample_spot(rng, box_in, others_in, markers_mm, cur_in=None, min_obj=40.0, min_marker=50.0, min_cur=60.0, tries=500):
+def sample_spot(rng, box_in, others_in, markers_mm, cur_in=None, min_obj=40.0, min_marker=50.0, min_cur=60.0, tries=500, avoid=()):
     """A random mat point (inches) inside the safe box, >= min_obj mm from every other object, >= min_marker mm from every marker centre and
-    >= min_cur mm from `cur_in`; None when `tries` draws find none."""
+    >= min_cur mm from `cur_in`, and outside every (centre_in, radius_mm) of `avoid` (the keep-outs); None when `tries` draws find none."""
     x0, y0, x1, y1 = box_in
     for _ in range(tries):
         p = [rng.uniform(x0, x1), rng.uniform(y0, y1)]
         if any(dist_mm(p, o) < min_obj for o in others_in) or any(dist_mm(p, [m[0] / IN, m[1] / IN]) < min_marker for m in markers_mm): continue
         if cur_in is not None and dist_mm(p, cur_in) < min_cur: continue
+        if any(dist_mm(p, c) < r for c, r in avoid): continue
         return [round(p[0], 3), round(p[1], 3)]
     return None
 
@@ -83,12 +84,34 @@ class Runner:
     def __init__(self, pl, cc, table, guard, ctx, cfg, track, rng, out=print, demo=None):
         self.pl, self.cc, self.table, self.guard, self.ctx, self.cfg, self.track, self.rng, self.out = pl, cc, table, guard, ctx, cfg, track, rng, out
         self.demo = demo   # a tools/demo_session.DemoSession, or None (the default: nothing below changes)
-        self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0; self.tele_rows = []; self.session_tele = []
+        self.in_motion = False; self.cycles = []; self.stops = []; self.stages = []; self.cur_in = None; self.frames = []; self.locates = []; self.n = 0; self.tele_rows = []; self.session_tele = []; self.keepouts = []; self._ko_key = None; self.noted = set()
         self.markers_mm = list((table.get("layout_markers") or {}).values())
         self.pick_args = argparse.Namespace(jaw_open=pl.JAW_OPEN, max_deg_s=pl.SPEED["closed"], wrist_check=False, grasp_aim_mm=pl.GRASP_AIM_MM, grasp_tilt_deg=pl.GRASP_TILT_DEG, grasp_roll=self.opt("grasp_roll", "off"))
         self.biases = load_biases(os.path.join(getattr(pl, "ROOT", "."), "jetson", "calib", "pick_state.json"))   # read only: the pick loop's learned sag biases; the runner never writes that file
 
     def say(self, d): self.out(json.dumps(d))
+
+    # -- keep-outs (the toy frogs: tools/keepout.py; TC 2026-11-11 "be careful not to hurt the frogs")
+    def refresh_keepouts(self):
+        """Keep-outs from the scene map + the top frame -> self.keepouts and guard.keepouts, every cycle. A Trip, or None. Fails closed when the run is unattended and the
+        top frame is not available (keep-outs cannot be computed without it); an attended run falls back to the size rule and says so once."""
+        ko = self.guard.keepout_mod(); objs = (self.scene() or {}).get("objects") or []; img = None
+        try:
+            import cv2, numpy as np
+            raw = self.pl.fetch_top(); img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR) if raw else None
+        except (Exception, SystemExit): img = None
+        if img is None and not self.opt("dry_run", False):   # a dry run has no camera: the fake world has no frogs
+            if self.opt("unattended", False): return self.guard.trip("keepout_unknown", {"why": "no top frame: keep-outs (frogs) cannot be computed"})
+            if "ko" not in self.noted: self.noted.add("ko"); self.say({"note": "keep-outs from the size rule only: no top frame"})
+        self.keepouts = self.guard.keepouts = ko.find_keepouts(objs, img, self.cc, self.table)
+        key = tuple((round(k["x_in"], 1), round(k["y_in"], 1)) for k in self.keepouts)
+        if key != self._ko_key: self._ko_key = key; self.say({"event": "keepouts", "keepouts": [{a: (round(v, 2) if isinstance(v, float) else v) for a, v in k.items()} for k in self.keepouts]})
+        if not self.opt("random_target", False) and self.in_keepout(self.cfg.target, 40.0): return self.guard.trip("keepout_target", {"target_in": list(self.cfg.target)})
+        return None
+
+    def in_keepout(self, xy_in, extra_mm=0.0): return any(dist_mm(xy_in, [k["x_in"], k["y_in"]]) < k["r_mm"] + extra_mm for k in self.keepouts)
+
+    def ko_avoid(self): return [([k["x_in"], k["y_in"]], k["r_mm"] + 40.0) for k in self.keepouts]
 
     def tele_merge(self, summaries):
         """One summary from several waypoint/cycle summaries; None when there are none or pick_loop has no servo_tele (a stub in a test)."""
@@ -137,7 +160,13 @@ class Runner:
     def locate(self, last_in):
         """The nut as (mat_in, pixel, area) or None: pick_loop.find_nut_anywhere when it exists, else the overhead search near the last spot and
         the target, else the scene object nearest the last spot."""
-        pl, cc, tab = self.pl, self.cc, self.table; sc = self.scene(); objs = (sc or {}).get("objects") or []
+        got = self._locate(last_in)
+        if got and self.in_keepout(got[0]):   # the dark-blob fallback and the hints can land on a frog: never pick a keep-out
+            self.locates.append({"rejected_in": [round(v, 3) for v in got[0]], "why": "inside a keep-out"}); return None
+        return got
+
+    def _locate(self, last_in):
+        pl, cc, tab = self.pl, self.cc, self.table; sc = self.scene(); ko = self.guard.keepout_mod(); objs = [o for o in ((sc or {}).get("objects") or []) if not ko.is_keepout_object(o, self.keepouts)]
         try:
             fnn = getattr(pl, "find_nut_near", None); cands = self.nutlike(objs)
             if fnn:   # why: 11 Nov 2026 the dark-blob search took fragments of the printed squares for the nut and missed the real one on a light square; the scene map (polled while objects are pending) answers first, the dark blob is its fallback
@@ -234,7 +263,7 @@ class Runner:
     def reset(self, after_in, objs, nut_obj):
         """Put the nut on a new spot; returns {"spot_in", "error"}."""
         others = [[o["x_in"], o["y_in"]] for o in objs if o is not nut_obj]
-        spot = sample_spot(self.rng, self.cfg.safe_box, others, self.markers_mm, after_in, *self.cfg.spot_mm)
+        spot = sample_spot(self.rng, self.cfg.safe_box, others, self.markers_mm, after_in, *self.cfg.spot_mm, avoid=self.ko_avoid())
         if spot is None: return {"spot_in": None, "error": "no free spot in the safe box"}
         try:   # why: never pl.reset_nut here: it saves its history over the pick loop's own state file and samples its own spot, so spot_in would lie
             nut = self.locate(after_in)
@@ -246,7 +275,7 @@ class Runner:
     def target_for(self, objs):
         if not self.cfg.random_target: return list(self.cfg.target)
         others = [[o["x_in"], o["y_in"]] for o in objs]
-        return sample_spot(self.rng, self.cfg.safe_box, others, self.markers_mm, self.cur_in, *self.cfg.spot_mm) or list(self.cfg.target)
+        return sample_spot(self.rng, self.cfg.safe_box, others, self.markers_mm, self.cur_in, *self.cfg.spot_mm, avoid=self.ko_avoid()) or list(self.cfg.target)
 
     def cycle(self, n):
         """One TRY / JUDGE / RESET; returns (record, Trip or None). A TripError from the guarded run_plan ends the cycle where it stands."""
@@ -346,7 +375,7 @@ class Runner:
             try:
                 for n in range(1, cfg.cycles + 1):
                     if cfg.minutes and self.ctx.now() - t0 >= cfg.minutes * 60: end = "minutes"; break
-                    trip = self.guard.check_before_cycle(self.ctx)
+                    trip = self.guard.check_before_cycle(self.ctx) or self.refresh_keepouts()
                     if not trip and self.demo is not None and not self.demo.alive(): trip = self.guard.trip("recorder", {"err": "the demo recorder does not answer"})   # a recording session without a recorder is a wasted session
                     if trip: self.stop(trip, n); end = trip.reason; break
                     rec, trip = self.cycle(n); self.finish_cycle(rec, trip, getattr(parent, "id", None))
@@ -463,7 +492,7 @@ def make_cfg(a, out_dir):
     box = tuple(a.safe_box) if a.safe_box else SAFE_BOX_IN
     return argparse.Namespace(cycles=a.cycles, minutes=a.minutes, target=tuple(a.target), random_target=a.random_target, safe_box=box, radius_mm=a.radius_mm, session=a.session or time.strftime("%Y%m%d-%H%M%S"),
                               dry_run=a.dry_run, max_retries=a.max_retries, settle_s=a.settle, moved_mm=20.0, spot_mm=(40.0, 50.0, 60.0), out_dir=out_dir,
-                              judge_wait_s=a.judge_wait, save_frames=not a.dry_run, start_near=tuple(a.start_near) if a.start_near else None, grasp_roll=a.grasp_roll)
+                              judge_wait_s=a.judge_wait, save_frames=not a.dry_run, start_near=tuple(a.start_near) if a.start_near else None, grasp_roll=a.grasp_roll, unattended=a.unattended)
 
 
 def demo_mods():

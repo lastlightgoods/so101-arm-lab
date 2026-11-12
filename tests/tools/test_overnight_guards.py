@@ -243,3 +243,68 @@ def test_unattended_start_with_a_servo_already_at_60_c_stops(autorig, capsys):
     r = autorig(); r.ctx.fetch_tele = lambda: tele_api(temp=60); s, out = r.run(capsys, cycles=2, require_health=True)
     t, = events(out, "trip"); assert t["reason"] == "servo_hot_start" and t["detail"]["start_limit_c"] == 60.0 and r.arm.calls == []
     r = autorig(); r.ctx.fetch_tele = lambda: tele_api(temp=59); s, _ = r.run(capsys, cycles=1, require_health=True); assert s["end"] == "no_servo_telemetry" and r.arm.calls, "59 C starts; the fake plan rows then carry no telemetry"
+
+
+# ---------------------------------------------------------------- keep-outs in the autoloop (the toy frogs; tools/keepout.py)
+FROG = {"id": 9, "x_in": 11.0, "y_in": 8.5, "w_mm": 55.0, "h_mm": 45.0, "area_mm2": 2200.0}   # measured frogs: 2056 to 2444 mm2 (keepout.py)
+
+
+def with_frog(r, frog=FROG):
+    real = r.world.api_scene
+    r.world.api_scene = lambda: {**real(), "objects": real()["objects"] + [dict(frog)]}
+    return r
+
+
+def mkrunner(r, **kw):
+    import argparse
+    guard = r.gr.Guard(r.cc, r.table, r.gr.Limits(stop_file=r.stop_file), r.ctx); r.guard = guard; r.track = __import__("pickhelpers").Recorder()
+    r.runner = r.al.Runner(r.pl, r.cc, r.table, guard, r.ctx, r.cfg(**kw), r.track, r.rng, out=lambda l: None); return r.runner
+
+
+def test_keepouts_come_from_the_scene_every_cycle_and_reach_the_guard(autorig, capsys):
+    r = with_frog(autorig()); s, out = r.run(capsys, cycles=2)
+    (ev,) = events(out, "keepouts"); assert len(ev["keepouts"]) == 1 and ev["keepouts"][0]["why"] == "big" and ev["keepouts"][0]["h_mm"] == 60.0
+    assert r.guard.keepouts and r.runner.keepouts[0]["x_in"] == 11.0, "logged once while unchanged; the guard has them for check_plan"
+    r2 = autorig(); s2, out2 = r2.run(capsys, cycles=1); assert events(out2, "keepouts") == [] or events(out2, "keepouts")[0]["keepouts"] == []
+
+
+def test_a_frog_is_never_chosen_as_the_nut(autorig):
+    r = with_frog(autorig()); run = mkrunner(r); run.refresh_keepouts()
+    assert run.keepouts, "the frog is a keep-out"
+    seen = []; real = run.nutlike; run.nutlike = lambda objs: (seen.append(list(objs)), real(objs))[1]
+    run.locate(None); assert seen and all(o["x_in"] != FROG["x_in"] for objs in seen for o in objs), "the frog is filtered out of the scene objects the finder sees"
+    run._locate = lambda last: ([11.1, 8.4], None, None)   # a finder (the dark-blob fallback) that landed on the frog anyway
+    assert run.locate(None) is None and run.locates[-1]["why"] == "inside a keep-out"
+    run._locate = lambda last: ([6.0, 8.0], None, None); assert run.locate(None) == ([6.0, 8.0], None, None), "a nut away from the frog is fine"
+
+
+def test_random_targets_and_reset_spots_keep_radius_plus_40_mm_from_the_frog(autorig):
+    r = with_frog(autorig(), {**FROG, "x_in": 9.5, "y_in": 6.0}); run = mkrunner(r, random_target=True); run.refresh_keepouts(); k = run.keepouts[0]; need = k["r_mm"] + 40.0
+    objs = r.world.api_scene()["objects"]
+    for _ in range(60):
+        t = run.target_for(objs); assert r.al.dist_mm(t, [k["x_in"], k["y_in"]]) >= need
+    spots = []
+    run.pick = lambda nut, spot, n: spots.append(list(spot)) or ([], {})
+    run.locate = lambda last: ([6.0, 8.0], None, None)
+    for _ in range(40): run.reset([6.0, 8.0], objs, None)
+    assert len(spots) == 40 and all(r.al.dist_mm(s, [k["x_in"], k["y_in"]]) >= need for s in spots)
+
+
+def test_a_fixed_target_inside_a_frog_is_refused_before_any_motion(autorig, capsys):
+    r = with_frog(autorig(), {**FROG, "x_in": 9.0, "y_in": 6.0}); s, out = r.run(capsys, cycles=2)
+    t, = events(out, "trip"); assert t["reason"] == "keepout_target" and r.arm.calls == []
+
+
+def test_a_route_that_passes_low_over_a_frog_is_refused_and_a_clear_one_is_not(autorig, gr, pl):
+    r = autorig(); g = gr.Guard(r.cc, r.table, lim(gr, ceiling_in=4.6), r.ctx)
+    plan = pl.build_plan([9.0, 6.0], [9.0, 6.0], {}); assert g.check_plan(plan) is None
+    ko = g.keepout_mod(); g.keepouts = ko.find_keepouts([{**FROG, "x_in": 9.0, "y_in": 6.0}], None, r.cc, r.table)
+    t = g.check_plan(plan); assert t.reason == "keepout" and t.detail["n"] >= 1 and t.detail["h_mm"] < 66.0, "the grasp at the frog is a hit"
+    g.keepouts = ko.find_keepouts([{**FROG, "x_in": 15.5, "y_in": 11.0}], None, r.cc, r.table); assert g.check_plan(plan) is None, "a frog far from the whole route"
+    rest = pl.build_plan(None, None, {}, names=("rest",)); g.keepouts = ko.find_keepouts([{**FROG, "x_in": 9.0, "y_in": 6.0}], None, r.cc, r.table); assert g.check_plan(rest) is None, "rest is folded behind the mat edge"
+
+
+def test_unattended_fails_closed_without_a_top_frame_attended_does_not(autorig, capsys):
+    r = autorig(); r.pl.fetch_top = lambda: (_ for _ in ()).throw(OSError("404")); s, out = r.run(capsys, cycles=2, dry_run=False, unattended=True)
+    t, = events(out, "trip"); assert t["reason"] == "keepout_unknown" and r.arm.calls == [] and s["end"] == "keepout_unknown"
+    r2 = autorig(); r2.pl.fetch_top = lambda: b""; s2, out2 = r2.run(capsys, cycles=1, dry_run=False); assert s2["end"] == "cycles" and any("size rule only" in o.get("note", "") for o in out2)
