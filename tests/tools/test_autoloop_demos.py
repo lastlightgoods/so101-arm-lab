@@ -15,7 +15,7 @@ def portable(x):
     return x
 
 
-GOLDEN_OFF = ("be7afb9d0b63e8d622f8993aa34246a5dc48ef291fc5154fa81425b68e1e03c1", 63)   # why: regenerated 11 Nov 2026 for the plan change (grasp at 1.0 mm, the -3 deg wrist tilt, the pregrasp_up waypoint, the tilt's height compensation: the dry run reads the plan joints); before that it was 26eb79b2... of the code below. sha256 of the normalised dry-run output of main's autoloop.py (6 cycles, seed 11, dry-miss 0.3, learned biases {}), before --record-demos existed (regenerated from caa06b5 with portable())   # the scene-first nut search (find_nut_near, the map asked at every hint before any dark search) leaves this output unchanged
+GOLDEN_OFF = ("4dc9e9a5917f33aadeeb3614269a82b42f7f45cfb63bdc673adb6d50dfc150ba", 63)   # why: regenerated 11 Nov 2026 for the grip check (the jaw_check stage line and the pick record carry "gripper" and "camera", and the final-pose correction fields). Before that: regenerated 11 Nov 2026 for the plan change (grasp at 1.0 mm, the -3 deg wrist tilt, the pregrasp_up waypoint, the tilt's height compensation: the dry run reads the plan joints); before that it was 26eb79b2... of the code below. sha256 of the normalised dry-run output of main's autoloop.py (6 cycles, seed 11, dry-miss 0.3, learned biases {}), before --record-demos existed (regenerated from caa06b5 with portable())   # the scene-first nut search (find_nut_near, the map asked at every hint before any dark search) leaves this output unchanged
 
 
 @pytest.fixture(scope="module")
