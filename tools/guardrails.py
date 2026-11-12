@@ -199,7 +199,7 @@ class Guard:
         s = summary_of_tele_api(api, self.lim)
         if s is None:
             self._note(ctx, "tele_stale", "live servo health not checked: /api/tele has no fresh sample (plan rows are the source)")
-            return Trip("no_servo_telemetry", {"why": "no sample in /api/tele younger than %g s before the first pick" % self.lim.tele_max_age_s}) if first else None
+            return Trip("no_servo_telemetry", {"why": f"no sample in /api/tele younger than {self.lim.tele_max_age_s:g} s before the first pick"}) if first else None
         if t := servo_health_trip(s, self.lim): return t
         if first:
             hot = max(((e.get("temp_max_c") or 0, n) for n, e in s["j"].items()), default=(0, None))
