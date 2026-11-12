@@ -285,3 +285,17 @@ def default_routes():
         "/api/scene": scene_none(),
         "/api/scene/background": {"ok": True},
     }
+
+
+def labelled_scene():
+    """GET /api/scene with what each blob is (tools/scene_labels.py): the ring, a frog (keep-out), a nut, a wing nut, a spacer, a toy? and a piece of the ring's wall."""
+    ring = {"x_in": 7.0, "y_in": 8.0, "r_mm": 52.0, "h_mm": 51.0}
+    frog = scene_obj(id=20, x_in=12.5, y_in=3.0, w_mm=61.0, h_mm=54.0, area_mm2=2148.0, color=(220, 110, 30), kind="keep-out", label_src="rules",
+                     keepout={"r_mm": 60.8, "h_mm": 60.0, "why": "colourful", "colour_frac": 0.41})
+    objs = [scene_obj(id=10, x_in=7.0, y_in=8.0, w_mm=109.0, h_mm=109.0, area_mm2=6116.0, kind="ring", keepout=None, label_src="rules"), frog,
+            scene_obj(id=11, x_in=10.9, y_in=7.1, kind="nut", keepout=None, label_src="rules"),
+            scene_obj(id=12, x_in=4.0, y_in=3.5, w_mm=20.0, h_mm=12.0, kind="wing nut", keepout=None, label_src="rules"),
+            scene_obj(id=13, x_in=11.5, y_in=5.0, w_mm=22.0, h_mm=9.0, kind="spacer", keepout=None, label_src="rules"),
+            scene_obj(id=14, x_in=14.0, y_in=7.0, w_mm=24.0, h_mm=12.0, kind="toy?", keepout=None, label_src="rules"),
+            scene_obj(id=15, x_in=7.0, y_in=8.0 + 40 / 25.4, w_mm=30.0, h_mm=30.0, kind="ring wall", keepout=None, label_src="rules")]
+    return scene(objs, ring=ring, keepouts=[{"id": 20, "x_in": 12.5, "y_in": 3.0, **frog["keepout"]}])

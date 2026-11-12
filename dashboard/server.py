@@ -790,6 +790,8 @@ SCENE_BG_MAX_FRAMES = 15
 SCENE_FRAME_MAX_AGE_S = 3.0     # a top frame older than this means the camera is not live (same rule as /cam/top.jpg)
 SCENE_MIN_HITS = 3              # an object must be seen in 3 consecutive detects (~1.5 s) before the map shows it: kills one-frame shadows and flicker
 SCENE_JOINTS_MAX_AGE_S = 2.0    # follower joints older than this (or not in degrees) -> no kinematic arm mask, the edge heuristic alone
+SCENE_LABELS_PY = os.path.join(REPO, "tools", "scene_labels.py")
+SCENE_LABEL_EVERY_S = 0.45      # what-is-it labels (tools/scene_labels.py) are recomputed at most about twice a second; between runs /api/scene serves the cached ones
 SCENE = {}
 _scene_lock = threading.RLock(); _scene_mod = []
 def scene_reset():
@@ -797,7 +799,7 @@ def scene_reset():
     SCENE.clear()
     SCENE.update(res=None, t=0.0, err="no detection yet", scene=None, table_key=None, n=0, live=None, holding=False, calib_ok=None, calib_note=None,
                  markers_seen=None, noted_at=0.0, persisted_at=0.0, writes=0, arm_px=None, arm_err=None,
-                 pose=None, pose_H=None, pose_err=None, pose_noted_at=0.0)   # the overhead camera's live pose (scene_pose), the live H it was solved from, the one-line reason it is not tracked
+                 pose=None, pose_H=None, pose_err=None, pose_noted_at=0.0, labels=None, labels_t=0.0, labels_err=None, label_runs=0, label_ms=None)   # the overhead camera's live pose (scene_pose), the live H it was solved from, the one-line reason it is not tracked
 scene_reset()
 def scene_joints(now):
     """The follower's latest joints in LeRobot degrees from the arm stream (state['arms']['follower'], what /api/state serves),
@@ -837,6 +839,29 @@ def scene_mod():
 def scene_bg_path(): return os.path.join(CALIB_DIR, SCENE_BG_NAME)
 def _table_key(tpath):
     st = os.stat(tpath); return (st.st_mtime_ns, st.st_size)
+_scene_labels_mod = []
+def scene_labels_mod():
+    """tools/scene_labels.py (light: numpy + tools/keepout.py, never tidy), imported on first use."""
+    with _scene_lock:
+        if not _scene_labels_mod:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("so101_scene_labels", SCENE_LABELS_PY)
+            mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); _scene_labels_mod.append(mod)
+        return _scene_labels_mod[0]
+def scene_label_step(res, frame, tab, now):
+    """Labels for the blobs of one detect (kind, keep-out, the ring), cached in SCENE['labels'] and rate-limited to one run per SCENE_LABEL_EVERY_S. Never raises:
+    a failure leaves the objects unlabelled and the reason in SCENE['labels_err']."""
+    if now - SCENE["labels_t"] < SCENE_LABEL_EVERY_S and SCENE["labels"] is not None: return
+    t0 = time.perf_counter()
+    try:
+        objs, ring = scene_labels_mod().label_objects(res.get("objects") or [], frame, cam_calib(), tab)
+        kos = [{"id": o.get("id"), "x_in": o["x_in"], "y_in": o["y_in"], **o["keepout"]} for o in objs if o.get("keepout")]
+        SCENE.update(labels={"by_id": {o.get("id"): {k: o[k] for k in ("kind", "keepout", "label_src")} for o in objs}, "ring": ring, "keepouts": kos}, labels_err=None)
+    except Exception as e:
+        msg = f"{type(e).__name__}: {e}"
+        if SCENE["labels_err"] != msg: log("scene: labels:", msg)
+        SCENE.update(labels=None, labels_err=msg)
+    SCENE.update(labels_t=now, label_runs=SCENE["label_runs"] + 1, label_ms=round((time.perf_counter() - t0) * 1000, 2))
 def scene_get():
     """The MatScene for the current top_table.json, rebuilt when the file changes (our own write-back excepted: see
     scene_persist) with the saved background reloaded. Raises FileNotFoundError / ImportError / ValueError."""
@@ -960,6 +985,7 @@ def scene_step(now=None):
         if SCENE["n"] % SCENE_BG_EVERY == 0: sc.update_background(frame)
         try: scene_heal(sc, res, tab, now, frame)
         except Exception as e: log("scene: heal:", repr(e))
+        scene_label_step(res, frame, tab, now)
         SCENE.update(res=res, t=now, err=None)
     return res
 def scene_loop():
@@ -969,7 +995,7 @@ def scene_loop():
         time.sleep(SCENE_PERIOD_S)
 def api_scene():
     """The latest detect() dict plus ok / age_s / calibration-healing status; ok:false with the reason when there is none."""
-    with _scene_lock: res, t, live = SCENE["res"], SCENE["t"], SCENE["live"]
+    with _scene_lock: res, t, live, labels = SCENE["res"], SCENE["t"], SCENE["live"], SCENE["labels"]
     if res is None or not scene_frame_live():
         err = SCENE["err"] or "no detection yet"
         try:
@@ -977,7 +1003,9 @@ def api_scene():
             elif not scene_frame_live(): err = "top camera not live"
         except Exception as e: err = f"{type(e).__name__}: {e}"
         return {"ok": False, "err": err, "age_s": round(time.time() - t, 2) if res is not None else None}
-    return {**res, "ok": True, "age_s": round(max(0.0, time.time() - t), 2), "background": res.get("background", "missing"),
+    by_id = (labels or {}).get("by_id", {})   # an object newer than the cached labels (< SCENE_LABEL_EVERY_S old) has no kind yet
+    objects = [{**o, **by_id[o.get("id")]} if o.get("id") in by_id else {**o, "kind": None, "keepout": None, "label_src": None} for o in res.get("objects") or []]
+    return {**res, "objects": objects, "ring": (labels or {}).get("ring"), "keepouts": (labels or {}).get("keepouts", []), "ok": True, "age_s": round(max(0.0, time.time() - t), 2), "background": res.get("background", "missing"),
             "calib_live": bool(live), "calib_live_at": live["at"] if live else None, "shift_px": live["shift_px"] if live else None, "holding": bool(SCENE["holding"])}
 def scene_frame_live(now=None):
     f = cam_frames.get("top"); return bool(f) and (time.time() if now is None else now) - f[1] <= SCENE_FRAME_MAX_AGE_S
