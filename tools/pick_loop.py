@@ -116,7 +116,9 @@ def find_nut(cc, table, near_in, radius_px=70, jpeg=None, joints="live"):
     x0, y0 = max(0, int(cu) - radius_px), max(0, int(cv_) - radius_px); roi = g[y0:y0 + 2 * radius_px, x0:x0 + 2 * radius_px]
     keep = arm_cut(cc, table, np.full(g.shape, 255, np.uint8), follower_joints() if joints == "live" else joints)[y0:y0 + 2 * radius_px, x0:x0 + 2 * radius_px]   # why: an arm_cut failure leaves the mask whole (no cut), never breaks the search
     m = ((roi < 60) & (keep > 0)).astype(np.uint8); n, lab, st, cen = cv2.connectedComponentsWithStats(m)
-    cands = [(math.hypot(x0 + cen[i][0] - cu, y0 + cen[i][1] - cv_), int(st[i, cv2.CC_STAT_AREA]), x0 + cen[i][0], y0 + cen[i][1]) for i in range(1, n) if 8 <= st[i, cv2.CC_STAT_AREA] <= 300]
+    H, W = m.shape; whole = lambda i: st[i, cv2.CC_STAT_LEFT] > 0 and st[i, cv2.CC_STAT_TOP] > 0 and st[i, cv2.CC_STAT_LEFT] + st[i, cv2.CC_STAT_WIDTH] < W and st[i, cv2.CC_STAT_TOP] + st[i, cv2.CC_STAT_HEIGHT] < H
+    # why: 11 Nov 2026 16:32 the box's edge cut a strip off a printed dark square at mat (6.74, 5.93) and the search took it for the nut; a nut lies inside the box, not cut by it
+    cands = [(math.hypot(x0 + cen[i][0] - cu, y0 + cen[i][1] - cv_), int(st[i, cv2.CC_STAT_AREA]), x0 + cen[i][0], y0 + cen[i][1]) for i in range(1, n) if 8 <= st[i, cv2.CC_STAT_AREA] <= 300 and whole(i)]
     if not cands: return None
     _, area, u, v = min(cands); X, Y = cc.pixel_to_table(table, u, v)
     return [X / 25.4, Y / 25.4], [u, v], area
