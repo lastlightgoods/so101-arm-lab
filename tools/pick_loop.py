@@ -21,7 +21,7 @@ State (biases, place offset, history) persists in --state so later sessions star
 Every pick is also one MLflow run in experiment `so101-picks` (jetson/labtrack.py: params, landing error, per-waypoint sag, the stage
 corrections, the overhead frame at landing, the jaw-check frames, the plan and the state file); with no tracking server the loop runs as before.
 """
-import argparse, json, math, os, random, subprocess, sys, time, urllib.request
+import argparse, json, math, os, random, subprocess, sys, time, urllib.error, urllib.request
 import cv2, numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -113,9 +113,16 @@ def tele_of(rows):
     except Exception: return None   # why: health numbers are a bonus; a malformed row must never cost the pick
 
 
-def fetch_top():
-    """One fresh overhead JPEG from the dashboard (bytes)."""
-    return urllib.request.urlopen(DASH + f"/cam/top.jpg?t={time.time():f}", timeout=5).read()
+def fetch_top(tries=6, wait_s=0.5, sleep=None):
+    """One fresh overhead JPEG from the dashboard (bytes). The dashboard answers 404 while its newest frame is older than 3 s, so a short
+    feed hiccup is retried (tries x wait_s) before the error is raised. why: 11 Nov 2026 18:2x a 404 right after the place crashed the pick
+    after the arm had finished, before the record and the state were written."""
+    sleep = sleep or time.sleep
+    for i in range(tries):
+        try: return urllib.request.urlopen(DASH + f"/cam/top.jpg?t={time.time():f}", timeout=5).read()
+        except urllib.error.HTTPError as e:
+            if e.code != 404 or i == tries - 1: raise
+            sleep(wait_s)
 
 
 def fetch_wrist():
