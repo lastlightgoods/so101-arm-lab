@@ -585,7 +585,7 @@ def main():
             misses += 1; say({"run": nxt, "miss": misses, "near": [round(v, 3) for v in near], "lost_after": a.lost_after})
             if misses >= a.lost_after: print(json.dumps({"run": nxt, "stop": "lost", "misses": misses, "near": [round(v, 3) for v in near]}), flush=True); break
             time.sleep(1.0); continue   # why: a miss does not spend a run; the scene map updates at ~2 Hz, so look again
-        say({"run": nxt, "nut_source": source, "nut_in": [round(v, 3) for v in found[0]]}); run, misses = nxt, 0; off = state["place_offsets_in"].setdefault(key, [0.0, 0.0]); nut_in = found[0]; place_in = [tgt[0] + off[0], tgt[1] + off[1]]
+        run, misses = nxt, 0; off = state["place_offsets_in"].setdefault(key, [0.0, 0.0]); nut_in = found[0]; place_in = [tgt[0] + off[0], tgt[1] + off[1]]
         rec, landed, picked, stop = pick_once(cc, table, state, a, run, nut_in, tgt, place_in, off, say, session, track, mode, wpose, extra={"nut_source": source})
         if stop: print(json.dumps(stop), flush=True); break
         near = landed[0]

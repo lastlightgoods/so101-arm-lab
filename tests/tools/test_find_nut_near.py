@@ -80,7 +80,7 @@ def test_the_landing_check_uses_it_and_the_record_says_which_search_saw_the_nut(
     r, = pl.rec.runs; assert r.params_["nut_source"] == "dark" and r.params_["landing_source"] == "dark"
     arm2 = ShortArm(cc, table, scene=[{**NUT_OBJ, "x_in": arm.nut_in[0], "y_in": arm.nut_in[1]}])
     out2 = drive(pl, monkeypatch, capsys, arm2, ["--runs", "1", "--state", str(tmp_path / "s2.json")]); rec2, = [o for o in out2 if "picked" in o]
-    assert rec2["nut_source"] == "scene" and [o for o in out2 if o.get("nut_source") == "scene" and "run" in o and "picked" not in o], "the scene map was asked first and said so in a line of its own"
+    assert rec2["nut_source"] == "scene", "the scene map was asked first and the pick record says so"
 
 
 def test_autoloop_locate_uses_it(autorig, capsys):
