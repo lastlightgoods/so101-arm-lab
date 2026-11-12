@@ -79,10 +79,16 @@ def ring_band(img, cc, table, min_px=150, r_mm=(30.0, 65.0), band_r_mm=RING_BAND
     return None
 
 
-def fit_ring_multi(fetch, cc, table, n=5, min_ok=3, min_px=100):
-    """The ring's centre (x_in, y_in) as the median of up to n single-frame fits (fetch() -> a top frame), or None with fewer than min_ok good fits.
-    why: 12 Nov 2026 the band was 200-227 px, near the old 150 px floor, so a frame now and then fell short and stopped a reset; single fits jittered 4 mm."""
-    fits = [f for f in (fit_ring(fetch(), cc, table, min_px) for _ in range(n)) if f is not None]
+def fit_ring_multi(fetch, cc, table, n=6, min_ok=3, min_px=100, gap_s=0.3, sleep=None):
+    """The ring's centre (x_in, y_in) as the median of n single-frame fits taken gap_s apart (fetch() -> a top frame), or None with fewer than min_ok good fits.
+    why: 12 Nov 2026 the band was 200-227 px, near the old 150 px floor, so a frame now and then fell short and stopped a reset; single fits jittered 4 mm;
+    and the dashboard hands the same cached frame to quick repeated calls, so the samples must be spaced to be different frames."""
+    import time as _t
+    sleep = sleep or _t.sleep; fits = []
+    for i in range(n):
+        if i: sleep(gap_s)
+        f = fit_ring(fetch(), cc, table, min_px)
+        if f is not None: fits.append(f)
     if len(fits) < min_ok: return None
     return (float(np.median([f[0] for f in fits])), float(np.median([f[1] for f in fits])))
 
