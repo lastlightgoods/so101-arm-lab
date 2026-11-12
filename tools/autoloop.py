@@ -513,7 +513,7 @@ def build_parser():
     ap.add_argument("--dry-run", action="store_true", help="fake arm and fake dashboard: the whole loop, nothing moves"); ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--max-consecutive-failures", type=int, default=3); ap.add_argument("--max-retries", type=int, default=1); ap.add_argument("--lost-after", type=int, default=3)
     ap.add_argument("--max-minutes", type=float, default=None, help="wall-clock cap for the whole session, checked between cycles (a clean stop); like --minutes, but reported as a guard stop"); ap.add_argument("--max-tries", type=int, default=None, help="cap on cycles attempted, whatever their outcome (a clean stop)")
-    ap.add_argument("--temp-limit", type=float, default=60.0, help="stop when any servo reaches this temperature (C); the servo's own cut is 70"); ap.add_argument("--require-health", action="store_true", help="a plan whose rows carry no servo telemetry is a trip")
+    ap.add_argument("--temp-limit", type=float, default=65.0, help="stop when any servo reaches this temperature (C); the servo's own cut is 70"); ap.add_argument("--require-health", action="store_true", help="a plan whose rows carry no servo telemetry is a trip")
     ap.add_argument("--unattended", action="store_true", help="overnight mode: refuses to start without --max-minutes AND --max-tries, and implies --require-health")
     ap.add_argument("--stop-file", default=None, help="while this file exists the session stops cleanly (default ~/so101/outputs/run/autoloop.stop)")
     ap.add_argument("--max-err-deg", type=float, default=8.0); ap.add_argument("--margin-mm", type=float, default=20.0); ap.add_argument("--ceiling-in", type=float, default=4.0)

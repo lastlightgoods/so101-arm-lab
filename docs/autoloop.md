@@ -97,7 +97,7 @@ frame rate. So:
 
 | trip | when | source of the number |
 |---|---|---|
-| `servo_hot` | any servo >= `--temp-limit` (60 C) | servo cut is 70 C (Max_Temperature_Limit); 60 is the lab amber mark, an assumption |
+| `servo_hot` | any servo >= `--temp-limit` (65 C); also no start at 60 C or more (`servo_hot_start`) | servo cut 70 C and idle 52 to 57 C, both read from the real arm on 11 Nov 22:30 |
 | `servo_current` | one arm joint >= 2.7 A, or all servos > 5.0 A | STS3215 stall 2.7 A at 12 V (docs/stronger-arm.md); 5 A supply and board rating. The gripper is exempt |
 | `servo_voltage` | supply < 10.0 V | lab choice (servo_telemetry.VOLT_LOW_V) |
 | `servo_stall` | position error > 6 deg with load >= 50 % for >= 3 s | 6 deg: above the 4.7 deg worst loaded sag, below the 8 deg motion trip; 50 %: assumption, never measured on the arm |

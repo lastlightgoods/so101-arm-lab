@@ -13,7 +13,7 @@ def lim(gr, **kw): return gr.Limits(stop_file="", **kw)
 
 
 def summ(**per_joint):
-    """A Summary.out()-shaped dict: summ(shoulder_lift={"temp_max_c": 61}, total_a_max=1.0)."""
+    """A Summary.out()-shaped dict: summ(shoulder_lift={"temp_max_c": 66}, total_a_max=1.0)."""
     top = {k: per_joint.pop(k) for k in ("total_a_max", "volt_min", "flags") if k in per_joint}
     j = {n: {"temp_max_c": 40, "load_abs_max_pct": 10.0, "cur_max_a": 0.5, "stall_s_max": 0.0, **e} for n, e in per_joint.items()}
     return {"n": 5, "total_a_max": 1.0, "volt_min": 11.9, "flags": {}, "j": j, **top}
@@ -21,10 +21,10 @@ def summ(**per_joint):
 
 # ---------------------------------------------------------------- (a) heat, current, supply, error bits, stall: the thresholds
 def test_heat_trips_at_the_limit_and_not_below_and_the_limit_is_a_flag(gr):
-    assert gr.servo_health_trip(summ(shoulder_lift={"temp_max_c": 59}), lim(gr)) is None
-    t = gr.servo_health_trip(summ(shoulder_lift={"temp_max_c": 60}), lim(gr)); assert t.reason == "servo_hot" and t.detail == {"joint": "shoulder_lift", "temp_c": 60, "limit_c": 60.0} and not t.clean
-    assert gr.servo_health_trip(summ(gripper={"temp_max_c": 61}), lim(gr)).reason == "servo_hot", "the gripper is checked for heat"
-    assert gr.servo_health_trip(summ(elbow_flex={"temp_max_c": 64}), lim(gr, temp_limit_c=65.0)) is None
+    assert gr.servo_health_trip(summ(shoulder_lift={"temp_max_c": 64}), lim(gr)) is None
+    t = gr.servo_health_trip(summ(shoulder_lift={"temp_max_c": 65}), lim(gr)); assert t.reason == "servo_hot" and t.detail == {"joint": "shoulder_lift", "temp_c": 65, "limit_c": 65.0} and not t.clean
+    assert gr.servo_health_trip(summ(gripper={"temp_max_c": 66}), lim(gr)).reason == "servo_hot", "the gripper is checked for heat"
+    assert gr.servo_health_trip(summ(elbow_flex={"temp_max_c": 66}), lim(gr, temp_limit_c=70.0)) is None
 
 
 def test_one_arm_joint_at_stall_current_trips_and_the_gripper_is_exempt(gr):
@@ -72,10 +72,10 @@ def test_stall_run_is_measured_by_the_servo_summary_across_waypoints():
 
 def test_every_waypoint_row_is_checked_for_motion_then_health(gr):
     g = gr.Guard(None, None, lim(gr))
-    assert g.check_waypoint({"wp": "lift", "max_err_deg": 1.0, "tele": summ(shoulder_lift={"temp_max_c": 59})}) is None
-    assert g.check_waypoint({"wp": "lift", "max_err_deg": 1.0, "tele": summ(shoulder_lift={"temp_max_c": 61})}).reason == "servo_hot"
-    assert g.check_waypoint({"wp": "lift", "max_err_deg": 9.0, "tele": summ(shoulder_lift={"temp_max_c": 61})}).reason == "motion", "motion first"
-    rows = [{"wp": "a", "max_err_deg": 1.0}, {"wp": "b", "max_err_deg": 1.0, "tele": summ(shoulder_lift={"temp_max_c": 61})}]
+    assert g.check_waypoint({"wp": "lift", "max_err_deg": 1.0, "tele": summ(shoulder_lift={"temp_max_c": 64})}) is None
+    assert g.check_waypoint({"wp": "lift", "max_err_deg": 1.0, "tele": summ(shoulder_lift={"temp_max_c": 66})}).reason == "servo_hot"
+    assert g.check_waypoint({"wp": "lift", "max_err_deg": 9.0, "tele": summ(shoulder_lift={"temp_max_c": 66})}).reason == "motion", "motion first"
+    rows = [{"wp": "a", "max_err_deg": 1.0}, {"wp": "b", "max_err_deg": 1.0, "tele": summ(shoulder_lift={"temp_max_c": 66})}]
     assert g.check_rows(rows).reason == "servo_hot"
 
 
@@ -95,8 +95,8 @@ def tele_api(temp=40, cur=0.5, volt=11.9, status=0, total=1.0, age=0.4, joint="s
 
 def test_live_tele_summary_reads_heat_current_voltage_and_status_bits(gr):
     l = lim(gr)
-    assert gr.servo_health_trip(gr.summary_of_tele_api(tele_api(temp=59), l), l) is None
-    assert gr.servo_health_trip(gr.summary_of_tele_api(tele_api(temp=60), l), l).reason == "servo_hot"
+    assert gr.servo_health_trip(gr.summary_of_tele_api(tele_api(temp=64), l), l) is None
+    assert gr.servo_health_trip(gr.summary_of_tele_api(tele_api(temp=65), l), l).reason == "servo_hot"
     assert gr.servo_health_trip(gr.summary_of_tele_api(tele_api(cur=2.7), l), l).reason == "servo_current"
     assert gr.servo_health_trip(gr.summary_of_tele_api(tele_api(volt=9.9), l), l).reason == "servo_voltage"
     t = gr.servo_health_trip(gr.summary_of_tele_api(tele_api(status=1 << 5), l), l); assert t.reason == "servo_error" and t.detail["flags"] == ["shoulder_lift:overload"]
@@ -104,7 +104,7 @@ def test_live_tele_summary_reads_heat_current_voltage_and_status_bits(gr):
 
 
 def test_between_picks_a_hot_servo_in_the_dashboard_stream_ends_the_session(autorig, gr, capsys):
-    r = autorig(); r.ctx.fetch_tele = lambda: tele_api(temp=61); s, out = r.run(capsys, cycles=5)
+    r = autorig(); r.ctx.fetch_tele = lambda: tele_api(temp=66); s, out = r.run(capsys, cycles=5)
     t, = events(out, "trip"); assert t["reason"] == "servo_hot" and s["cycles"] == 0 and r.arm.calls == [], "caught before the arm moves"
 
 
@@ -123,7 +123,7 @@ def inject(r, tele, when=2):
     r.row_hook = hook
 
 
-@pytest.mark.parametrize("tele,reason", [(summ(shoulder_lift={"temp_max_c": 60}), "servo_hot"), (summ(elbow_flex={"cur_max_a": 2.7}), "servo_current"),
+@pytest.mark.parametrize("tele,reason", [(summ(shoulder_lift={"temp_max_c": 65}), "servo_hot"), (summ(elbow_flex={"cur_max_a": 2.7}), "servo_current"),
                                          (summ(shoulder_lift={"stall_s_max": 3.0}), "servo_stall"), (summ(volt_min=9.0), "servo_voltage"), (summ(flags={"elbow_flex:overload": 1}), "servo_error")])
 def test_autoloop_stops_on_a_servo_row_and_goes_to_rest(autorig, capsys, tele, reason):
     r = autorig(); inject(r, tele); s, out = r.run(capsys, cycles=5)
@@ -229,3 +229,17 @@ def test_tidy_unattended_refuses_without_caps_before_touching_anything():
     a = m.build_parser().parse_args(["loop", "--max-tries", "9", "--max-minutes", "120", "--unattended", "--temp-limit", "58"])
     assert (a.max_tries, a.max_minutes, a.unattended, a.temp_limit) == (9, 120.0, True, 58.0)
     assert m.CLEAN_ENDS == ("all_tidy", "max", "max_tries", "max_minutes")
+
+
+# ---------------------------------------------------------------- fail closed: a missing telemetry feed stops an unattended run before it moves
+def test_unattended_start_without_a_fresh_feed_stops_before_the_arm_moves(autorig, capsys):
+    for api in (lambda: {"rows": [], "n": 0, "age": None}, lambda: tele_api(age=60.0), lambda: (_ for _ in ()).throw(OSError("down"))):
+        r = autorig(); r.ctx.fetch_tele = api; s, out = r.run(capsys, cycles=3, require_health=True)
+        t, = events(out, "trip"); assert t["reason"] == "no_servo_telemetry" and s["cycles"] == 0 and r.arm.calls == []
+    r = autorig(); r.ctx.fetch_tele = lambda: {"rows": [], "n": 0, "age": None}; s, _ = r.run(capsys, cycles=1); assert s["end"] == "cycles", "without --require-health a missing feed is only noted"
+
+
+def test_unattended_start_with_a_servo_already_at_60_c_stops(autorig, capsys):
+    r = autorig(); r.ctx.fetch_tele = lambda: tele_api(temp=60); s, out = r.run(capsys, cycles=2, require_health=True)
+    t, = events(out, "trip"); assert t["reason"] == "servo_hot_start" and t["detail"]["start_limit_c"] == 60.0 and r.arm.calls == []
+    r = autorig(); r.ctx.fetch_tele = lambda: tele_api(temp=59); s, _ = r.run(capsys, cycles=1, require_health=True); assert s["end"] == "no_servo_telemetry" and r.arm.calls, "59 C starts; the fake plan rows then carry no telemetry"

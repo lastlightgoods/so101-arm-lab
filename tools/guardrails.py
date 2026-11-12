@@ -39,8 +39,9 @@ class Limits:
     poll_s: float = 1.0              # perception polling step
     stop_file: str = STOP_FILE
     # -- servo health (jetson/servo_telemetry.py numbers: pick_seq attaches a summary to every waypoint row; /api/tele has the live ones)
-    temp_limit_c: float = 60.0       # hot servo: STS3215 cuts itself at 70 C (Max_Temperature_Limit, factory); 60 = the lab's amber mark (servo_telemetry.TEMP_WARN_C) and tidy's old --temp-limit, 10 C of margin. ASSUMPTION: no real-arm temperature has been measured yet
-    cur_limit_a: float = 2.7         # one ARM joint at its stall current: STS3215 at 12 V stalls at 2.7 A (datasheet figure in docs/stronger-arm.md; servo_telemetry.MODELS). The gripper is exempt: it stalls on the object by design. Counts->A uses 6.5 mA/count, unverified on the arm
+    temp_limit_c: float = 65.0       # hot servo: the servos' firmware cut is 70 C on all six (read from the real arm, verify_telemetry 11 Nov 22:30) so 65 keeps 5 C; it is also the red mark (servo_telemetry.TEMP_HOT_C). The old 60 was 3 to 8 C ABOVE the idle temperatures measured after 5 h of picks (52 to 57 C), i.e. it would have stopped every long run. A rise-rate rule is not built: no heating curve has been measured
+    temp_start_c: float = 60.0       # an unattended run does not START with a servo at or above this (idle 52 to 57 C measured after a long day): it would have no headroom for the night. Checked once, before the first pick, from /api/tele
+    cur_limit_a: float = 2.7         # one ARM joint at its stall current: STS3215 at 12 V stalls at 2.7 A (datasheet figure in docs/stronger-arm.md; servo_telemetry.MODELS). The arm joints' own protection is set at 19.5 A (read from the real arm), so it will never save a stalled joint: this software trip is the only one. The gripper is exempt: it stalls on the object by design. Counts->A uses 6.5 mA/count, unverified on the arm
     bus_limit_a: float = 5.0         # all servos together: the 12 V 5 A supply / Waveshare board rating (servo_telemetry.BUS_A_MARK); Robonine measured 3.28 A peak for this arm under 300 g
     volt_min_v: float = 10.0         # supply sag: below this the 12 V rail is browning out (servo_telemetry.VOLT_LOW_V, lab choice; the servos run 6 to 12.6 V)
     stall_s: float = 3.0             # stall = position error above servo_telemetry.STALL_ERR_DEG with load above STALL_LOAD_PCT for this long (both are assumptions, see there); 3 s is longer than any settle in a plan (<= 0.7 s)
@@ -186,13 +187,24 @@ class Guard:
         return None
 
     def check_tele(self, ctx):
-        """Live servo health from /api/tele between picks (heat, current, supply, error bits at rest). Quiet when the dashboard has no fresh sample."""
+        """Live servo health from /api/tele between picks (heat, current, supply, error bits at rest). Between picks of a running session the stream is quiet by design
+        (the plan rows are the source then), so a missing sample is only noted. FAIL CLOSED before the first pick of a run with require_health: no fresh sample (feed down,
+        Jetson on old files) is a trip, and a servo already at temp_start_c is a trip."""
         if not ctx.fetch_tele: return None
+        first = self.tries == 0 and self.lim.require_health
         try: api = ctx.fetch_tele()
-        except Exception as e: self._note(ctx, "tele", f"live servo health not checked: {type(e).__name__}: {e}"); return None
+        except Exception as e:
+            self._note(ctx, "tele", f"live servo health not checked: {type(e).__name__}: {e}")
+            return Trip("no_servo_telemetry", {"err": f"{type(e).__name__}: {e}"[:160]}) if first else None
         s = summary_of_tele_api(api, self.lim)
-        if s is None: self._note(ctx, "tele_stale", "live servo health not checked: /api/tele has no fresh sample (plan rows are the source)"); return None
-        return servo_health_trip(s, self.lim)
+        if s is None:
+            self._note(ctx, "tele_stale", "live servo health not checked: /api/tele has no fresh sample (plan rows are the source)")
+            return Trip("no_servo_telemetry", {"why": "no sample in /api/tele younger than %g s before the first pick" % self.lim.tele_max_age_s}) if first else None
+        if t := servo_health_trip(s, self.lim): return t
+        if first:
+            hot = max(((e.get("temp_max_c") or 0, n) for n, e in s["j"].items()), default=(0, None))
+            if hot[0] >= self.lim.temp_start_c: return Trip("servo_hot_start", {"joint": hot[1], "temp_c": hot[0], "start_limit_c": self.lim.temp_start_c})
+        return None
 
     def poll_state(self, ctx=None):
         """(state dict or None, Trip or None): the STOP-liveness check. The panel must answer within panel_s and report the Jetson up."""

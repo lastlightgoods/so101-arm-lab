@@ -425,13 +425,13 @@ def hot(mk, **kw):
     m = mk([toy(5.0, 3.5), toy(5.0, 8.0), toy(6.0, 4.5)], **kw); real = m.t.pl.run_plan; n = [0]
     def run(plan, max_deg_s):
         rows = real(plan, max_deg_s); n[0] += 1
-        return [{**r, "tele": {"n": 3, "total_a_max": 1.0, "volt_min": 11.9, "flags": {}, "j": {"shoulder_lift": {"temp_max_c": 60, "load_abs_max_pct": 10.0, "cur_max_a": 0.5, "stall_s_max": 0.0}}}} for r in rows] if n[0] >= 2 else rows
+        return [{**r, "tele": {"n": 3, "total_a_max": 1.0, "volt_min": 11.9, "flags": {}, "j": {"shoulder_lift": {"temp_max_c": 65, "load_abs_max_pct": 10.0, "cur_max_a": 0.5, "stall_s_max": 0.0}}}} for r in rows] if n[0] >= 2 else rows
     m.t.pl.run_plan = run; return m
 
 
 def test_a_hot_servo_in_a_plan_row_stops_the_pick_and_sends_the_arm_home(mk):
     m = hot(mk); s = m.t.round()
-    assert s["stop"] == "servo_hot" and s["picked"] == 1 and [o for o in m.out if o.get("event") == "trip"][0]["detail"]["temp_c"] == 60 and m.w.names[-1] == "rest" and m.t.in_motion is False
+    assert s["stop"] == "servo_hot" and s["picked"] == 1 and [o for o in m.out if o.get("event") == "trip"][0]["detail"]["temp_c"] == 65 and m.w.names[-1] == "rest" and m.t.in_motion is False
 
 
 def test_max_tries_stops_the_round_cleanly_between_picks(td, mk):
