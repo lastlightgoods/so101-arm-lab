@@ -65,11 +65,55 @@ def test_the_jaw_check_never_raises(pl, cc, table, monkeypatch, capsys, tmp_path
     assert pl.jaw_check(b"not a jpeg")["in_jaws"] is None and pl.jaw_check(b"")["in_jaws"] is None and "no wrist frame" in pl.jaw_check(b"")["note"]
     assert pl.jaw_check(None)["in_jaws"] is None, "jpeg None fetches, the fetch raises, the check answers unknown"
     assert pl.jaw_check(jaw_frame(ring=True), window=(300, 300, 380, 360))["in_jaws"] is True and pl.jaw_check(jaw_frame(ring=False))["in_jaws"] is False
-    away = pl.jaw_check(jaw_frame(ring=True, uv=(340, 372))); assert away["in_jaws"] is False and away["note"] == "ring outside the jaw window", "a ring on the mat just below the jaws is not a held nut"
+    away = pl.jaw_check(jaw_frame(ring=True, uv=(340, 372))); assert away["in_jaws"] is False and away["ring"] is None, "a ring on the mat just below the jaws is not a held nut"
     assert pl.jaw_check(jaw_frame(ring=True), window=(0, 0, 10, 10))["in_jaws"] is False, "a window too small for the template: not found, no crash"
     out_path = str(tmp_path / "x" / "jaw.jpg"); assert pl.jaw_check(jaw_frame(ring=True, jpeg=False), out_path=out_path)["frame"] == out_path and os.path.isfile(out_path), "a decoded frame is accepted too"
     (tmp_path / "afile").write_text("x"); bad = pl.jaw_check(jaw_frame(ring=True), out_path=str(tmp_path / "afile" / "y.jpg"))
     assert bad["in_jaws"] is True and bad["frame"] is None and "failed" in bad["note"], "an unwritable artifact path is caught, not raised; the verdict stands"
+
+
+FIX = os.path.join(os.path.dirname(__file__), "fixtures", "jaw_check"); WIN = (300, 300, 380, 360)
+
+
+def real_frame(name):
+    """A real wrist frame (annotations inpainted away, 11 Nov 2026) pasted back at its place in a mat-grey 640x480 canvas: the fixture is the bottom-centre 320x240 crop."""
+    import cv2, numpy as np
+    img = np.full((480, 640, 3), 110, np.uint8); img[240:480, 160:480] = cv2.imread(os.path.join(FIX, name + ".jpg")); return img
+
+
+def test_jaw_check_finds_the_held_nut_in_a_real_frame(pl, tmp_path):
+    jc = pl.jaw_check(real_frame("held_162056"), window=WIN); x, y = jc["ring"]["uv"]
+    assert jc["in_jaws"] is True and WIN[0] <= x <= WIN[2] and WIN[1] <= y <= WIN[3], "11 Nov 2026 16:20: the disc's best ring was a false one on the jaw edge at (357, 366), below the window; the window's own best is the held nut"
+
+
+@pytest.mark.parametrize("name", ["empty_162056_retry", "empty_114716", "empty_114716_retry"])
+def test_jaw_check_says_empty_on_closed_empty_jaws(pl, name):
+    jc = pl.jaw_check(real_frame(name), window=WIN); assert jc["in_jaws"] is False and jc["ring"] is None, "the nut lies on the mat beyond the tips; the bright jaw edge is no ring (hole too bright)"
+
+
+def test_jaw_check_takes_the_weaker_ring_inside_the_window(pl):
+    import cv2
+    img = jaw_frame(ring=False, jpeg=False)
+    cv2.circle(img, (330, 322), 15, (130, 130, 130), -1); cv2.circle(img, (330, 322), 6, (90, 90, 90), -1)   # the held nut: a weaker ring inside the window
+    cv2.circle(img, (357, 368), 14, (255, 255, 255), -1); cv2.circle(img, (357, 368), 6, (10, 10, 10), -1)   # a stronger one just below it
+    import numpy as np; img = np.clip(img + np.random.default_rng(3).normal(0, 22, img.shape), 0, 255).astype(np.uint8)   # noise costs the low-contrast ring more score than the strong one
+    disc = pl.wrist_mod().find_ring(img, (340, 330), radius_px=50); assert disc["uv"][1] > 360, "setup: the disc search takes the outside ring"
+    jc = pl.jaw_check(img, window=WIN); assert jc["in_jaws"] is True and abs(jc["ring"]["uv"][0] - 330) <= 2 and abs(jc["ring"]["uv"][1] - 322) <= 2
+
+
+def test_find_ring_rect_and_hole_max_are_opt_in(pl):
+    wm = pl.wrist_mod(); img = real_frame("held_162056"); base = wm.find_ring(img, (340, 330), radius_px=50)
+    assert wm.find_ring(img, (340, 330), radius_px=50, rect=None, hole_max=None) == base and base["uv"] == [357.0, 365.0], "defaults leave the disc search as it was"
+    assert wm.find_ring(img, (340, 330), radius_px=50, rect=(0, 0, 10, 10)) is None
+
+
+def test_jaw_check_writes_the_raw_frame_beside_the_annotated_one(pl, tmp_path):
+    import cv2, numpy as np
+    img = real_frame("held_162056"); out = str(tmp_path / "run" / "in_jaws_x_r1.jpg"); jc = pl.jaw_check(img, window=WIN, out_path=out); raw = str(tmp_path / "run" / "in_jaws_x_r1_raw.jpg")
+    assert jc["frame"] == out and os.path.isfile(out) and os.path.isfile(raw)
+    r, a = cv2.imread(raw), cv2.imread(out); assert r.shape == img.shape and np.abs(r.astype(int) - img).mean() < 3, "the raw file is the camera's pixels"
+    assert not (((a[..., 2] > 200) & (a[..., 0] < 60)) | ((a[..., 1] > 200) & (a[..., 0] < 60))).sum() == 0, "the annotated file has its yellow/red drawings"
+    assert (((r[..., 1].astype(int) + r[..., 2]) // 2 - r[..., 0]) > 60).sum() == 0, "the raw file has none"
 
 
 # ---------------------------------------------------------------- 2A(ii) the two-step close

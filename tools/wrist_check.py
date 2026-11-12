@@ -61,10 +61,10 @@ def backproject_pixel(cc, table, wpose, uv, joints, height_mm=0.0):
     return None if s <= 0 else (o + s * d) * 1000.0
 
 
-def find_ring(gray, near_uv, radius_px=RING_SEARCH_PX, r_range=RING_R_PX, min_score=RING_MIN_SCORE):
+def find_ring(gray, near_uv, radius_px=RING_SEARCH_PX, r_range=RING_R_PX, min_score=RING_MIN_SCORE, rect=None, hole_max=None):
     """The bright ring with a dark centre nearest `near_uv`: {"uv", "r_px", "score", "dist_px"} or None. A mean-free annulus template
     (ring +1, hole -1, surroundings 0) is correlated (TM_CCOEFF_NORMED) over the ROI at every radius in r_range; a dark blob (the
-    gripper's shadow) anti-correlates, a uniform mat square scores ~0, so only a ring can pass min_score."""
+    gripper's shadow) anti-correlates, a uniform mat square scores ~0, so only a ring can pass min_score. `rect` (x0, y0, x1, y1), when given, also masks every ring centre outside it (None: the disc alone); `hole_max`, when given, drops rings whose hole is brighter than that mean grey level (a nut's hole is dark, a bright jaw edge is not)."""
     g = (gray if gray.ndim == 2 else cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)).astype(np.float32); h, w = g.shape; u, v = float(near_uv[0]), float(near_uv[1])
     pad = r_range[1] + 6; x0, y0 = int(max(0, u - radius_px - pad)), int(max(0, v - radius_px - pad)); x1, y1 = int(min(w, u + radius_px + pad)), int(min(h, v + radius_px + pad))
     if x1 - x0 < 2 * pad or y1 - y0 < 2 * pad: return None
@@ -76,6 +76,8 @@ def find_ring(gray, near_uv, radius_px=RING_SEARCH_PX, r_range=RING_R_PX, min_sc
         m = cv2.matchTemplate(roi, t, cv2.TM_CCOEFF_NORMED)
         ys, xs = np.mgrid[:m.shape[0], :m.shape[1]]; cu = xs + c + x0; cv_ = ys + c + y0; dist = np.hypot(cu - u, cv_ - v)
         sc = m - 0.002 * dist; sc[dist > radius_px] = -9.0   # why: among rings prefer the one where the model says the nut is, mildly (0.16 over the full radius)
+        if hole_max is not None: kh = (d < 0.35 * r).astype(np.float32); sc[cv2.matchTemplate(roi, kh / kh.sum(), cv2.TM_CCORR) > hole_max] = -9.0   # why: on the closed jaws the bright jaw edge scored 0.40-0.42 as a ring (11 Nov 2026, hole mean grey 204-222); the held nut's hole is 19-56
+        if rect is not None: sc[(cu < rect[0]) | (cu > rect[2]) | (cv_ < rect[1]) | (cv_ > rect[3])] = -9.0   # why: jaw_check wants the best ring inside the jaw window, not the best in a disc that a false ring on the jaw edge can win (11 Nov 2026)
         i = np.unravel_index(int(np.argmax(sc)), sc.shape)
         if m[i] >= min_score and (best is None or sc[i] > best[0]): best = (float(sc[i]), {"uv": [float(cu[i]), float(cv_[i])], "r_px": r, "score": round(float(m[i]), 3), "dist_px": round(float(dist[i]), 1)})
     return best[1] if best else None

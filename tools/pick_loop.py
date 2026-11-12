@@ -52,6 +52,7 @@ ARM = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"
 STAGES = (("hover_nut",), ("hover_nut", "grasp"), ("pregrasp", "grasp", "close1", "close2", "lift", "hover_tgt", "place", "open", "lift2", "rest"))
 LIFT_STAGE, CARRY_STAGE, ABORT_STAGE = ("pregrasp", "grasp", "close1", "close2", "lift"), ("hover_tgt", "place", "open", "lift2", "rest"), ("hover_nut", "rest")
 SPEED = {"closed": 50.0, "open": 80.0}   # why: the staged runs start each stage from a standstill close to the nut; 50 deg/s settles cleaner for the readback
+JAW_HOLE_MAX = 100.0   # mean grey (0-255) allowed in a ring's hole inside the jaw window: the held nut's hole measured 19-56, the bright jaw edge 204-222 (frames 11 Nov 2026)
 JAW_WINDOW = (300, 300, 380, 360)   # wrist-frame pixels (x0, y0, x1, y1) between the jaw tips after close + lift (diag frames, 10 Nov 2026: the nut's ring sat at about (340, 325))
 SAFE_BOX = (6.0, 4.0, 13.0, 8.0)   # --reset drops the nut inside this (mat inches): reachable, clear of the markers and of the mat edges
 MAT_IN = (18.0, 12.0)
@@ -295,11 +296,12 @@ def jaw_check(jpeg=None, window=JAW_WINDOW, out_path=None, min_score=None):
         if img is None: res["note"] = "no wrist frame; carrying unchecked"; return res
         x0, y0, x1, y1 = res["window"]; cu, cv_ = (x0 + x1) / 2.0, (y0 + y1) / 2.0; wm = wrist_mod()
         kw = {"min_score": min_score} if min_score is not None else {}
-        ring = wm.find_ring(img, (cu, cv_), radius_px=math.hypot(x1 - x0, y1 - y0) / 2.0, **kw)
-        inside = ring is not None and x0 <= ring["uv"][0] <= x1 and y0 <= ring["uv"][1] <= y1   # why: find_ring searches a disc; the jaw gap is a rectangle, so a ring just outside it is a nut on the mat, not one held
+        ring = wm.find_ring(img, (cu, cv_), radius_px=math.hypot(x1 - x0, y1 - y0) / 2.0, rect=(x0, y0, x1, y1), hole_max=JAW_HOLE_MAX, **kw)   # why: the best ring INSIDE the rectangle; the disc's best was a false ring on the jaw edge at (357, 366) and hid the held nut at (335, 330) (11 Nov 2026 16:20)
+        inside = ring is not None and x0 <= ring["uv"][0] <= x1 and y0 <= ring["uv"][1] <= y1   # why: the jaw gap is a rectangle, so a ring just outside it is a nut on the mat, not one held (kept as a guard)
         res.update({"in_jaws": bool(inside), "ring": ring if inside else None})
         if ring and not inside: res["note"] = "ring outside the jaw window"
         if out_path:
+            raw = os.path.splitext(out_path)[0] + "_raw.jpg"; os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True); cv2.imwrite(raw, img)   # why: the annotated frame has circles drawn on it and cannot be a test fixture; keep the camera's pixels beside it (11 Nov 2026)
             out = img.copy(); cv2.rectangle(out, (x0, y0), (x1, y1), (0, 255, 255), 1)
             text = f"jaw window {x0}-{x1} x {y0}-{y1}  " + (f"nut in jaws: ring ({ring['uv'][0]:.0f},{ring['uv'][1]:.0f}) r{ring['r_px']} score {ring['score']:.2f}" if inside else "nut NOT in jaws")
             os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True); cv2.imwrite(out_path, wm.annotate(out, (cu, cv_), ring, text)); res["frame"] = out_path
