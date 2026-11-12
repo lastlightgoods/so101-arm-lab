@@ -45,6 +45,7 @@ def find_keepouts(objs, img_bgr, cc, table, ring=None, ring_r_mm=52.0, wall_in_m
             d = dist_mm((o["x_in"], o["y_in"]), ring)
             if max(w, h) >= RING_BLOB_MM and d < RING_CENTRE_MM: continue                                          # the ring itself
             if ring_r_mm - wall_in_mm < d < ring_r_mm + wall_out_mm and area < BIG_AREA_MM2: continue             # a piece of its wall
+            if d < ring_r_mm and area < BIG_AREA_MM2: continue   # inside the ring only a big blob is a keep-out: 12 Nov 2026 the tape roll's tan cardboard core (hue 26-36, 40 mm2, 28 mm in) read as colourful and stopped a round; a frog inside is caught by size (2056-2444 mm2)
         cf = colour_frac(hsv, o, cc, table) if hsv is not None else None
         why = "colourful" if (cf is not None and cf >= COLOUR_FRAC) else ("big" if area >= BIG_AREA_MM2 else None)
         if why: out.append({"x_in": float(o["x_in"]), "y_in": float(o["y_in"]), "r_mm": 0.5 * math.hypot(w, h) + MARGIN_MM, "h_mm": HEIGHT_MM, "why": why,

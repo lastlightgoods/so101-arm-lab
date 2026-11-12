@@ -548,3 +548,11 @@ def test_a_ring_spot_keeps_clear_of_the_markers_and_an_explicit_ring_to_is_check
     assert all(s is None or np.hypot(s[0] * 25.4 - 381.0, s[1] * 25.4 - 101.6) >= td.RING_R_MM + td.RING_MARKER_MM for s in spots) and any(spots)
     m = mk([]); m.t.markers_mm = markers; out = td.reset_mat(m.t, (11.5, 4.3))
     assert out["ok"] is False and out["stop"].startswith("--ring-to spot refused") and m.w.names == [], "refused before any motion"
+
+
+def test_small_colourful_bits_inside_the_ring_are_the_ring_but_a_frog_inside_is_still_a_keepout(td, cc, table):
+    """12 Nov 2026: the tape roll's tan cardboard core rim (40 mm2, 28 mm from the centre, 44 % saturated) became a keep-out and stopped a round."""
+    import cv2
+    ring = (9.0, 6.0); img = cv2.imdecode(np.frombuffer(World(cc, table, None, None, [], frogs=[(9.0, 6.0 + 28 / 25.4)]).frame(ring), np.uint8), cv2.IMREAD_COLOR)
+    core = toy(9.0, 6.0 + 28 / 25.4, 8, 5, 40); assert td.ko.find_keepouts([core], img, cc, table, ring) == [], "a small colourful blob inside the ring is part of the ring"
+    k = td.ko.find_keepouts([frog(9.0, 6.0 + 10 / 25.4)], img, cc, table, ring); assert len(k) == 1 and k[0]["why"] in ("big", "colourful"), "a frog-sized blob inside the ring still is one"
