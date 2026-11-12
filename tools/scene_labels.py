@@ -14,6 +14,7 @@ IN = 25.4
 RING_R_MM, RING_H_MM = 52.0, 51.0                  # outer radius; 2 in tape (TC, 11 Nov 2026)
 RING_WALL_IN_MM, RING_WALL_OUT_MM = 20.0, 10.0     # a blob centred this far inside / outside the ring's outer radius is the ring's own wall, not a toy
 TOY_AREA_MM2, TOY_LONG_MM = 90.0, 22.0             # a nut reads ~12 x 10 mm, area ~88 (docs/mat-scene.md)
+KIND_LONG_MAX_MM = 30.0   # longest blob toy_kind still names: lying spacers read 22-24 mm and wing nuts 24 mm (12 Nov 00:1x: at the old 22 mm cut both supervised picks got "unknown", a 4 mm aim and no wrist turn, and pushed the spacers instead of gripping them)
 BLUE_ROWS = 5 / 6                                  # the bottom sixth of the frame holds the camera's own blue tape
 DET_MATCH_MM = 15.0
 KINDS = ("nut", "wing nut", "spacer", "toy?", "ring", "ring wall", "keep-out")
@@ -41,13 +42,38 @@ def blue_pixels(img):
     b, g, r = [img[:, :, i].astype(int) for i in range(3)]; m = ((b - r) > 60) & ((b - g) > 25) & (b > 90); m[int(img.shape[0] * BLUE_ROWS):, :] = False; return np.nonzero(m)
 
 
-def ring_band(img, cc, table, min_px=150, r_mm=(30.0, 65.0)):
-    """(ys, xs, (cx, cy, r_px)) of the ring's blue band: the largest connected blue region whose least-squares circle is ring-sized (r_mm) and whose pixels lie on
-    that circle (an annulus, not a filled blob). Other blue things on the mat (the toy frogs) are separate regions and fail one test or the other. None when none passes."""
+RING_BAND_R_MM = 40.5   # the blue band's image radius in mat mm: free fits on frames with the most band 39.4-42.0 (11-12 Nov 2026)
+RING_ARC_FULL_DEG = 200.0   # a band covering less of the circle is fitted at RING_BAND_R_MM (the top camera sees ~100-110 deg of it)
+
+
+def arc_span_deg(xs, ys, cx, cy):
+    """How much of the circle around (cx, cy) the points cover, in degrees (360 minus the largest angular gap)."""
+    if len(xs) < 3: return 0.0
+    a = np.sort(np.degrees(np.arctan2(np.asarray(ys, float) - cy, np.asarray(xs, float) - cx))); return float(360.0 - np.max(np.diff(np.r_[a, a[0] + 360.0])))
+
+
+def fit_circle_r(xs, ys, r, cx, cy, iters=25):
+    """Centre of the circle of KNOWN radius r through the points (Gauss-Newton on the geometric distance), started at (cx, cy) on the arc's concave side."""
+    xs, ys = np.asarray(xs, float), np.asarray(ys, float)
+    for _ in range(iters):
+        dx, dy = cx - xs, cy - ys; d = np.maximum(np.hypot(dx, dy), 1e-9); res = d - r; J = np.c_[dx / d, dy / d]
+        step = np.linalg.lstsq(J, -res, rcond=None)[0]; cx, cy = cx + step[0], cy + step[1]
+        if math.hypot(*step) < 1e-3: break
+    return float(cx), float(cy)
+
+
+def ring_band(img, cc, table, min_px=150, r_mm=(30.0, 65.0), band_r_mm=RING_BAND_R_MM):
+    """(ys, xs, (cx, cy, r_px)) of the ring's blue band: the largest connected blue region whose pixels lie on a ring-sized circle (an annulus, not a filled blob).
+    The top camera sees only ~100-110 deg of the band, and a free circle through so short an arc drifts (12 Nov 00:5x: radius 31-37 mm and the centre 0.2 in off
+    between frames under dim light). So a band covering less than RING_ARC_FULL_DEG is fitted at the measured radius band_r_mm; a fuller band keeps the free fit.
+    Other blue things on the mat (the toy frogs) are separate regions and fail the annulus test. None when none passes."""
     b, g, r = [img[:, :, i].astype(int) for i in range(3)]; m = ((b - r) > 60) & ((b - g) > 25) & (b > 90); m[int(img.shape[0] * BLUE_ROWS):, :] = False
     for ys, xs in ko().blue_components(m, min_px):
         cx, cy, rp = fit_circle(xs, ys)
         if rp <= 0: continue
+        if arc_span_deg(xs, ys, cx, cy) < RING_ARC_FULL_DEG:   # a short arc: known radius, centre only
+            u0, v0 = cc.table_to_pixel(table, *cc.pixel_to_table(table, cx, cy)); ppm = abs(cc.table_to_pixel(table, *(np.add(cc.pixel_to_table(table, cx, cy), (10.0, 0.0))))[0] - u0) / 10.0
+            rp = band_r_mm * ppm; cx, cy = fit_circle_r(xs, ys, rp, cx, cy)
         X, Y = cc.pixel_to_table(table, cx, cy); X2, Y2 = cc.pixel_to_table(table, cx + rp, cy); rmm = math.hypot(X2 - X, Y2 - Y)
         if r_mm[0] <= rmm <= r_mm[1] and float(np.median(np.abs(np.hypot(xs - cx, ys - cy) - rp))) < 0.2 * rp: return ys, xs, (cx, cy, rp)
     return None
@@ -67,7 +93,7 @@ def fit_ring(jpeg, cc, table, min_px=150, r_mm=(30.0, 65.0)):
 def toy_kind(o):
     """(kind, aim_mm) from the scene map's size and aspect: nut (round, ~10-12 mm), wing nut (longer, ratio 1.3-1.8), spacer (a standing ~6 mm one or a lying cylinder, ratio >= 1.8), unknown (too big)."""
     w, h = float(o.get("w_mm") or 0), float(o.get("h_mm") or 0); long_, short = max(w, h), max(min(w, h), 1e-6)
-    if long_ > TOY_LONG_MM or long_ <= 0: return "unknown", 4.0
+    if long_ > KIND_LONG_MAX_MM or long_ <= 0: return "unknown", 4.0
     if long_ <= 8.0 or long_ / short >= 1.8: return "spacer", 5.0
     if long_ / short >= 1.3: return "wing nut", 4.0
     return "nut", 4.0

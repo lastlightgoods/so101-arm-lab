@@ -56,9 +56,9 @@ def test_every_blob_gets_its_kind_and_the_frog_is_a_keepout(sl, cc, table):
 
 
 def test_a_toy_sized_blob_that_fits_no_kind_is_toy_question_mark(sl, cc, table):
-    img = frame(cc, table); objs = [toy(7.0, 8.0, 24, 12, 228), toy(8.0, 3.0, 40, 30, 600)]
+    img = frame(cc, table); objs = [toy(7.0, 8.0, 34, 12, 300), toy(8.0, 3.0, 40, 30, 600)]   # 12 Nov: 24 x 12 mm is a spacer now (KIND_LONG_MAX_MM 30); longer than 30 mm stays toy?
     for i, o in enumerate(objs): o["id"] = i
-    out, _ = sl.label_objects(objs, img, cc, table); assert [o["kind"] for o in out] == ["toy?", "toy?"], "24 x 12 mm (live 11 Nov 2026) is longer than a nut, the toy rules say unknown"
+    out, _ = sl.label_objects(objs, img, cc, table); assert [o["kind"] for o in out] == ["toy?", "toy?"], "longer than any toy (> 30 mm): the toy rules say unknown"
 
 
 def test_a_big_steel_blob_is_a_keepout_and_a_frog_on_the_ring_wall_still_is(sl, cc, table):
@@ -75,7 +75,7 @@ def test_no_frame_means_size_rules_only_and_no_ring(sl, cc, table):
 
 
 def test_a_frame_with_no_ring_gives_ring_none_and_no_ring_labels(sl, cc, table):
-    img = frame(cc, table, ring=None); out, ring = sl.label_objects([toy(9.0, 6.0 + 40 / IN, 30, 30, 620)], img, cc, table)
+    img = frame(cc, table, ring=None); out, ring = sl.label_objects([toy(9.0, 6.0 + 40 / IN, 34, 30, 620)], img, cc, table)   # longer than KIND_LONG_MAX_MM: no kind, toy?
     assert ring is None and out[0]["kind"] == "toy?"
 
 

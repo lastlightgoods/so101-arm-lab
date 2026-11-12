@@ -519,3 +519,21 @@ def test_carries_and_spots_keep_clear_of_keepouts(td):
     assert not ko.segment_clear((5.0, 6.0), (11.0, 6.0), k, 62.0) and ko.segment_clear((5.0, 1.0), (11.0, 1.0), k, 62.0) and ko.inside_ring(k, (8.2, 6.0)) and not ko.inside_ring(k, (12.0, 6.0))
     rng = random.Random(3); spots = [td.sample_spread_spot(rng, (5.5, 3.0, 12.5, 9.0), [], [], (3.0, 3.0), None, avoid=[((8.0, 6.0), 90.0)]) for _ in range(50)]
     assert all(s is None or np.hypot(s[0] - 8.0, s[1] - 6.0) * 25.4 >= 90.0 for s in spots) and any(s is not None for s in spots)
+
+
+def test_lying_spacers_and_wing_nuts_up_to_30_mm_get_a_kind_not_unknown(td):
+    """12 Nov 00:1x: two lying spacers read 22-24 mm long; at the old 22 mm cut they were "unknown" (4 mm aim, no wrist turn) and both picks pushed them away."""
+    assert td.toy_kind(toy(1, 1, 24, 10)) == ("spacer", 5.0) and td.toy_kind(toy(1, 1, 22, 12)) == ("spacer", 5.0) and td.toy_kind(toy(1, 1, 24, 14))[0] == "wing nut"
+    assert td.toy_kind(toy(1, 1, 32, 12))[0] == "unknown", "longer than any toy: still unknown"
+
+
+def test_a_short_arc_of_the_band_still_gives_a_steady_centre(td, cc, table):
+    """12 Nov 00:5x: the camera sees ~100 deg of the blue band; a free circle through it drifted 0.2 in and came out 31-37 mm, so the fit gave up and stopped
+    the run. Below 200 deg of arc the centre is fitted at the measured band radius (40.5 mm)."""
+    import cv2
+    for ring, start in (((9.0, 6.0), 200), ((7.5, 5.0), 230), ((10.0, 7.0), 160)):
+        w, h = table.get("image_size") or [640, 360]; img = np.full((h, w, 3), 190, np.uint8); u, v = cc.table_to_pixel(table, ring[0] * 25.4, ring[1] * 25.4)
+        ppm = abs(cc.table_to_pixel(table, ring[0] * 25.4 + 10, ring[1] * 25.4)[0] - u) / 10.0; R = int(round(40.5 * ppm))
+        cv2.ellipse(img, (int(round(u)), int(round(v))), (R, R), 0, start, start + 100, (200, 60, 40), 4)   # a 100 deg arc, 4 px thick, BGR blue
+        got = td.fit_ring(cv2.imencode(".png", img)[1].tobytes(), cc, table)
+        assert got is not None and np.hypot(got[0] - ring[0], got[1] - ring[1]) * 25.4 < 2.5, (ring, got)
