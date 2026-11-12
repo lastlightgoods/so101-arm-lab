@@ -7,7 +7,7 @@ import json, math
 import numpy as np, pytest
 from pickhelpers import ARM, PROBE_NUT_IN, ShortArm, drive
 
-TILTED = ("pregrasp", "grasp", "close1", "close2"); UNTILTED = ("hover_nut", "lift", "hover_tgt", "place", "open", "lift2", "rest")
+TILTED = ("pregrasp", "grasp", "close1", "close2"); UNTILTED = ("hover_pre", "hover_nut", "lift", "hover_tgt", "place", "open", "lift2", "rest")
 SPOTS = [PROBE_NUT_IN, (8.0, 5.0), (14.0, 8.0), (10.0, 4.5), (12.5, 9.0)]
 def stages(out): return {o["stage"]: o for o in out if "stage" in o}
 def records(out): return [o for o in out if "picked" in o]
@@ -46,7 +46,7 @@ def test_untilted_waypoints_are_unchanged_by_the_tilt(pl, plans):
 def test_tilt_zero_is_exactly_the_plan_before_the_tilt(pl, plans):
     p = plans(0.0); arm = plans.arm; hs = {w[0]: w[2] for w in pl.waypoints()}
     for n, w in p.items():
-        if n == "pregrasp_up": continue
+        if n in pl.BACKOFF: continue   # why: the back-off waypoints are another waypoint's command minus degrees (test_pan_approach below), not a mat point
         if n == "rest": assert w["joints"] == pl.REST; continue
         x, y = (PROBE_NUT_IN if next(v[1] for v in pl.WP if v[0] == n) == "nut" else (9.0, 6.0))
         assert w["joints"] == w["desired"] == arm.api(f"/api/ik?x_in={x:.4f}&y_in={y:.4f}&h_in={hs[n]:.4f}")["joints_deg"], n
@@ -109,7 +109,7 @@ def test_the_autoloop_runner_passes_the_default_tilt_to_build_plan(autorig, monk
 # ---------------------------------------------------------------- pregrasp_up
 def test_pregrasp_up_comes_right_before_pregrasp_with_the_approach_joints_8_deg_lower(pl):
     assert pl.APPROACH_DEG == 8.0 and pl.STAGES[2][:2] == ("pregrasp_up", "pregrasp") and pl.LIFT_STAGE[:2] == ("pregrasp_up", "pregrasp")
-    assert [w[0] for w in pl.WP][:3] == ["hover_nut", "pregrasp_up", "pregrasp"]
+    assert [w[0] for w in pl.WP][:4] == ["hover_pre", "hover_nut", "pregrasp_up", "pregrasp"]   # why: hover_pre (the pan back-off, 12 Nov 2026) now leads the plan
 
 
 @pytest.mark.parametrize("nut", SPOTS)
@@ -119,7 +119,8 @@ def test_pregrasp_up_is_defined_in_joint_space_from_pregrasps_command(pl, plans,
     for fld in ("joints", "desired"):
         up, pre = p["pregrasp_up"][fld], p["pregrasp"][fld]
         assert up["shoulder_lift"] == pytest.approx(pre["shoulder_lift"] - 8.0, abs=1e-9) and up["elbow_flex"] == pytest.approx(pre["elbow_flex"] - 8.0, abs=1e-9)
-        assert all(up[k] == pre[k] for k in ARM if k not in ("shoulder_lift", "elbow_flex"))
+        assert up["shoulder_pan"] == pytest.approx(pre["shoulder_pan"] - pl.PAN_APPROACH_DEG, abs=1e-9)   # why: pregrasp_up also takes the pan back-off now (12 Nov 2026)
+        assert all(up[k] == pre[k] for k in ARM if k not in ("shoulder_lift", "elbow_flex", "shoulder_pan"))
     assert p["pregrasp_up"]["gripper"] == p["pregrasp"]["gripper"] == 35 and p["pregrasp_up"]["gripper_only"] is False
 
 
@@ -139,3 +140,44 @@ def test_pregrasp_up_does_not_change_the_biases_and_is_not_gripper_only(pl, cc, 
     # a bias under that name (an old state file cannot have one, but still) is not applied or written back
     arm2 = ShortArm(cc, table); s2 = tmp_path / "s2.json"; json.dump({"biases": {"pregrasp_up": {"shoulder_lift": 4.0}}, "place_offsets_in": {}, "history": []}, open(s2, "w"))
     drive(pl, monkeypatch, capsys, arm2, ["--runs", "1", "--state", str(s2)]); assert json.load(open(s2))["biases"]["pregrasp_up"] == {"shoulder_lift": 4.0}
+
+
+# ---------------------------------------------------------------- the pan back-off (12 Nov 2026)
+STAGE_NAMES = lambda pl: (("stage 1", pl.STAGES[0]), ("stage 2", pl.STAGES[1]), ("stage 3", pl.STAGES[2]), ("lift stage", pl.LIFT_STAGE), ("abort stage", pl.ABORT_STAGE))
+BACKED = {"hover_pre": "hover_nut", "pregrasp_up": "pregrasp"}
+
+
+def test_every_nut_side_arrival_is_preceded_by_its_back_off_in_every_stage(pl):
+    assert pl.PAN_APPROACH_DEG == 3.0 and set(pl.BACKOFF) == set(BACKED) and set(pl.NO_LEARN) == set(BACKED)
+    for label, st in STAGE_NAMES(pl):
+        for back, tgt in BACKED.items():
+            if tgt in st and (tgt != "hover_nut" or label != "stage 3"): assert st[st.index(tgt) - 1] == back, f"{label}: {back} comes right before {tgt}"
+    assert pl.STAGES[0] == ("hover_pre", "hover_nut") and pl.STAGES[1] == ("hover_pre", "hover_nut", "grasp") and pl.ABORT_STAGE == ("hover_pre", "hover_nut", "rest")
+
+
+@pytest.mark.parametrize("nut", SPOTS)
+def test_the_back_off_is_exactly_minus_pan_approach_deg_on_pan_and_the_targets_other_joints(pl, plans, nut):
+    b = {"hover_nut": {"shoulder_pan": 0.4, "elbow_flex": -0.3}, "pregrasp": {"shoulder_pan": 0.3}}; p = plans(-3.0, nut, biases=b)
+    for back, tgt in BACKED.items():
+        for fld in ("joints", "desired"):
+            a, t = p[back][fld], p[tgt][fld]; d = pl.PAN_APPROACH_DEG; assert a["shoulder_pan"] == pytest.approx(t["shoulder_pan"] - d, abs=1e-9)
+            drop = {"shoulder_lift": 8.0, "elbow_flex": 8.0} if back == "pregrasp_up" else {}
+            assert all(a[k] == pytest.approx(t[k] - drop.get(k, 0.0), abs=1e-9) for k in ARM if k != "shoulder_pan"), f"{back}.{fld} keeps {tgt}'s other joints"
+        assert p[back]["gripper"] == p[tgt]["gripper"] and p[back]["gripper_only"] is False
+
+
+def test_hover_pre_is_at_the_hover_height_with_open_jaws_and_the_final_moves_increase_pan(pl, cc, table, plans):
+    p = plans(-3.0); hs = {w[0]: w[2] for w in pl.WP}; assert hs["hover_pre"] == hs["hover_nut"] == 1.5 and p["hover_pre"]["gripper"] == p["hover_nut"]["gripper"] == 35
+    assert p["hover_nut"]["joints"]["shoulder_pan"] - p["hover_pre"]["joints"]["shoulder_pan"] == pytest.approx(3.0)
+    assert p["pregrasp"]["joints"]["shoulder_pan"] - p["pregrasp_up"]["joints"]["shoulder_pan"] == pytest.approx(3.0)
+    assert p["grasp"]["joints"]["shoulder_pan"] >= p["pregrasp"]["joints"]["shoulder_pan"] - 0.05, "pregrasp -> grasp is not a pan reversal (same nut point)"
+    for back in BACKED: assert [w for w in pl.WP if w[0] == back][0][4:] in ((1.6, 0.4), (0.8, 0.3)), "seconds/settle: the long rest -> hover move rides on hover_pre, pregrasp_up is as before"
+
+
+def test_back_offs_never_change_biases_and_survive_the_jaw_retry_and_abort_paths(pl, cc, table, monkeypatch, capsys, tmp_path):
+    from pickhelpers import jaw_frame, frame_feed
+    arm = ShortArm(cc, table); st = tmp_path / "s.json"; json.dump({"biases": {"hover_pre": {"shoulder_pan": 4.0}}, "place_offsets_in": {}, "history": []}, open(st, "w"))
+    monkeypatch.setattr(pl, "fetch_wrist", frame_feed(jaw_frame(ring=False))); drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--state", str(st)])
+    saved = json.load(open(st))["biases"]; assert saved["hover_pre"] == {"shoulder_pan": 4.0} and "pregrasp_up" not in saved and "hover_nut" in saved
+    names = [n for n, _ in arm.calls]; assert names[0] == ["hover_pre", "hover_nut"] and names.count(["hover_pre", "hover_nut", "grasp"]) == 2, "the retry re-approaches from the same side"
+    assert names[-1] == ["hover_pre", "hover_nut", "rest"] and [w["name"] for w in arm.plans[-1]["waypoints"]] == ["hover_pre", "hover_nut", "rest"]

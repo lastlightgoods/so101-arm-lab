@@ -79,6 +79,16 @@ the 11:56 sweep on 11 Nov 2026 measured 1.7-4.7 deg of droop on the shoulder and
 and the grasp landed 6.4 mm high and 4 mm past the aim, the fixed thumb on top of the nut. A final move that increases both joints landed within 0.04-0.6 deg. With the arm fit at 5 mat spots `pregrasp_up` sits 50-63 mm above the mat and 33-40 mm back, the straight joint path down to
 pregrasp never goes below pregrasp's 10 mm, and 8 deg beats the largest measured droop. It is skipped by the bias learning (`NO_LEARN`), so it never changes a bias; the guard checks it like every waypoint.
 
+### The pan back-off (`hover_pre`, and `pregrasp_up`'s pan)
+
+The `shoulder_pan` servo has stiction: every move stops short in the direction it was moving. The live pick of 11 Nov 2026 17:17 (closed loop, -3 deg tilt) read back, on pan mostly: stage 1 hover commanded 9.280 in, reached 8.830 (11 mm short); stage 2 grasp pose after c1
+commanded 9.728, reached 9.613 (3 mm short); stage 3 final grasp after c2 commanded 9.393, reached 9.548: the arm moved 1.6 mm of a 5.6 mm correction, about 4 mm (roughly 1 deg at ~230 mm reach) short, and the grasp landed 7.5 mm off the aim. The readback corrections c1 and c2 assume the
+next arrival behaves like the last, which only holds when every arrival at a pan target comes from the same side. Pan has no gravity side, so the plan picks one: every nut-side target is approached from `PAN_APPROACH_DEG` = 3 deg lower pan, so the last pan move is always an increase (3 deg beats the ~1 deg stiction band).
+
+- stages 1 and 2 start with `hover_pre`: hover_nut's command (IK, bias) with `shoulder_pan` 3 deg lower, same height, jaws as at the hover (it carries the long move from rest, 1.6 s; `hover_nut` then takes 0.5 s). The abort stage opens over the spot the same way (`hover_pre`, `hover_nut`, `rest`);
+- `pregrasp_up` also takes the 3 deg off pan, so `pregrasp_up` -> `pregrasp` increases pan, shoulder_lift and elbow_flex together;
+- `hover_pre` and `pregrasp_up` are in `NO_LEARN` (table `BACKOFF`): they never change a bias. The guard checks both like every waypoint; with the 9 Nov arm fit the 3 deg is 17-20 mm sideways at the hover, so a nut within about 1 in of the mat's bottom edge (hover_pre) or of the left edge / 2 in of the top edge (pregrasp_up) can now trip the workspace check where the nut itself passes.
+
 ## Running it
 
 ```

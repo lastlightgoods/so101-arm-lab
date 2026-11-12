@@ -6,7 +6,7 @@ import cv2, numpy as np, pytest
 from pickhelpers import ARM, FIXTURE_TABLE, PROBE_FRAME, PROBE_JOINTS, PROBE_NUT_IN, SEED, TOOLS, WRIST_POSE, ShortArm, drive, mat_to_base, solve_joints, tip_of
 
 LIFT = ["pregrasp_up", "pregrasp", "grasp", "close1", "close2", "lift"]; CARRY = ["hover_tgt", "place", "open", "lift2", "rest"]; FINAL = LIFT + CARRY
-ALL = ["hover_nut", *FINAL]; GRIPPER_ONLY = {"close1", "close2", "open"}
+ALL = ["hover_pre", "hover_nut", *FINAL]; GRIPPER_ONLY = {"close1", "close2", "open"}
 
 
 def stages(out): return {o["stage"]: o for o in out if "stage" in o}
@@ -22,7 +22,7 @@ def test_two_readback_corrections_converge_on_an_arm_that_reaches_7mm_short(pl, 
     out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--target", "9", "6", "--grasp-aim-mm", "0", "--state", str(state)])   # the corrections alone: the aim is test_pick_aim.py's
     for o in out: print(json.dumps(o))   # the transcript, visible with pytest -s
     st = stages(out); rec, = records(out)
-    assert [n for n, _ in arm.calls] == [["hover_nut"], ["hover_nut", "grasp"], LIFT, CARRY], "four staged pick_seq runs: the jaw check (no frame here: unknown, carry) splits the final stage after the lift"
+    assert [n for n, _ in arm.calls] == [["hover_pre", "hover_nut"], ["hover_pre", "hover_nut", "grasp"], LIFT, CARRY], "four staged pick_seq runs: the jaw check (no frame here: unknown, carry) splits the final stage after the lift"
     assert all(v == 50.0 for _, v in arm.calls), "closed loop defaults to 50 deg/s"
     c1, c2 = st["hover"]["corr1_mm"], st["grasp_pose"]["corr2_mm"]
     assert 6.0 < math.hypot(*c1) < 8.0, f"the first correction is the 7 mm shortfall: {c1}"
@@ -46,7 +46,7 @@ def test_two_readback_corrections_converge_on_an_arm_that_reaches_7mm_short(pl, 
     assert r.params_["mode"] == "closed" and r.params_["jaw_open"] == 35 and r.params_["max_deg_s"] == 50.0 and r.params_["wrist_check"] == 0 and r.params_["jaw_check"] == 1
     assert "plan.json" in r.files and "waypoints.json" in r.files and "frames/landing.jpg" in r.files
     capsys.readouterr(); arm2 = ShortArm(cc, table, shortfall_mm=7.0); out2 = drive(pl, monkeypatch, capsys, arm2, ["--runs", "1", "--no-jaw-check", "--state", str(tmp_path / "s2.json")])   # (the transcript echo above is drained first)
-    assert [n for n, _ in arm2.calls] == [["hover_nut"], ["hover_nut", "grasp"], FINAL] and records(out2)[0]["picked"] and "jaw_check" not in stages(out2), "--no-jaw-check: the three staged runs of before"
+    assert [n for n, _ in arm2.calls] == [["hover_pre", "hover_nut"], ["hover_pre", "hover_nut", "grasp"], FINAL] and records(out2)[0]["picked"] and "jaw_check" not in stages(out2), "--no-jaw-check: the three staged runs of before"
 
 
 @pytest.mark.parametrize("high_mm", [4.0, 7.0, 14.0])   # why: GRASP_H_IN is 1.0 mm since 11 Nov 2026 (was 3.05), so these read 5.0 / 8.0 / 15.0 mm as the 2 / 5 / 12 did
@@ -73,13 +73,13 @@ def test_open_loop_is_one_run_of_the_whole_plan_at_80(pl, cc, table, monkeypatch
 
 
 def test_jaws_open_to_35_by_default_and_follow_the_flag(pl, cc, table, monkeypatch, capsys, tmp_path):
-    assert pl.JAW_OPEN == 35 and [g for _, _, _, g, _, _ in pl.WP if g] == [35, 35, 35, 35, 20, 35, 35]
+    assert pl.JAW_OPEN == 35 and [g for _, _, _, g, _, _ in pl.WP if g] == [35, 35, 35, 35, 35, 20, 35, 35]
     arm = ShortArm(cc, table); out = drive(pl, monkeypatch, capsys, arm, ["--runs", "2", "--state", str(tmp_path / "s.json")])
     grips = {w["name"]: w["gripper"] for p in arm.plans for w in p["waypoints"]}
-    assert grips == {"hover_nut": 35, "pregrasp_up": 35, "pregrasp": 35, "grasp": 35, "close1": 20, "close2": 0, "lift": 0, "hover_tgt": 0, "place": 0, "open": 35, "lift2": 35, "rest": 0}
+    assert grips == {"hover_pre": 35, "hover_nut": 35, "pregrasp_up": 35, "pregrasp": 35, "grasp": 35, "close1": 20, "close2": 0, "lift": 0, "hover_tgt": 0, "place": 0, "open": 35, "lift2": 35, "rest": 0}
     assert [r["run"] for r in records(out)] == [1, 2] and all(r["picked"] for r in records(out)) and len(arm.calls) == 8, "two closed-loop picks, four stages each; the second starts from the learned biases"
     arm2 = ShortArm(cc, table); drive(pl, monkeypatch, capsys, arm2, ["--runs", "1", "--jaw-open", "30", "--state", str(tmp_path / "s2.json")])
-    assert {w["gripper"] for p in arm2.plans for w in p["waypoints"] if w["name"] in ("hover_nut", "grasp", "open", "lift2")} == {30} and pl.rec.runs[-1].params_["jaw_open"] == 30
+    assert {w["gripper"] for p in arm2.plans for w in p["waypoints"] if w["name"] in ("hover_pre", "hover_nut", "grasp", "open", "lift2")} == {30} and pl.rec.runs[-1].params_["jaw_open"] == 30
 
 
 def test_closed_loop_refuses_a_table_without_an_arm_fit(pl, cc, table, monkeypatch, capsys, tmp_path):

@@ -55,7 +55,14 @@ TILT_WPS = ("pregrasp", "grasp", "close1", "close2", "close")   # not hover_nut,
 # the mat and 33-40 mm back, the straight joint path down to pregrasp never goes below pregrasp's 10 mm, and 8 deg beats the largest measured droop (4.7 deg).
 APPROACH_DEG = 8.0
 APPROACH_JOINTS = ("shoulder_lift", "elbow_flex")
-WP = [("hover_nut", "nut", 1.5, JAW_OPEN, 1.6, 0.4), ("pregrasp_up", "pregrasp", PREGRASP_H_IN, JAW_OPEN, 0.8, 0.3), ("pregrasp", "nut", PREGRASP_H_IN, JAW_OPEN, 0.6, 0.3), ("grasp", "nut", GRASP_H_IN, JAW_OPEN, 0.9, 0.5),
+# why: the shoulder_pan servo has stiction: every move stops short in the direction it was moving (live pick 11 Nov 2026 17:17, closed loop with the -3 deg tilt): stage 1 hover commanded 9.280 reached 8.830 in (11 mm short);
+# stage 2 grasp pose after c1 commanded 9.728 reached 9.613 (3 mm short); stage 3 final grasp after c2 commanded 9.393 reached 9.548: the arm moved 1.6 mm of a 5.6 mm correction, about 4 mm (~1 deg at ~230 mm reach) short, and the
+# final grasp landed 7.5 mm off the aim. The readback corrections c1, c2 assume the next arrival behaves like the last one, which only holds if every arrival at a pan target comes from the SAME side. Pan has no gravity side, so
+# the back-off picks one: every nut-side target is approached from PAN_APPROACH_DEG lower pan (the last pan move always increases), 3 deg beating the ~1 deg stiction band with margin (~16 mm sideways at 300 mm reach).
+PAN_APPROACH_DEG = 3.0
+# back-off waypoint -> (the waypoint whose command it copies, degrees taken off each joint): never a mat point, never learned (NO_LEARN)
+BACKOFF = {"pregrasp_up": ("pregrasp", {**{k: APPROACH_DEG for k in APPROACH_JOINTS}, "shoulder_pan": PAN_APPROACH_DEG}), "hover_pre": ("hover_nut", {"shoulder_pan": PAN_APPROACH_DEG})}
+WP = [("hover_pre", "nut", 1.5, JAW_OPEN, 1.6, 0.4), ("hover_nut", "nut", 1.5, JAW_OPEN, 0.5, 0.4), ("pregrasp_up", "pregrasp", PREGRASP_H_IN, JAW_OPEN, 0.8, 0.3), ("pregrasp", "nut", PREGRASP_H_IN, JAW_OPEN, 0.6, 0.3), ("grasp", "nut", GRASP_H_IN, JAW_OPEN, 0.9, 0.5),
       ("close1", "nut", GRASP_H_IN, CLOSE_MID, 0.5, 0.4), ("close2", "nut", GRASP_H_IN, 0, 0.6, 0.6),
       ("lift", "nut", 1.5, 0, 0.8, 0.2), ("hover_tgt", "tgt", 1.5, 0, 1.2, 0.3), ("place", "tgt", 0.3, 0, 0.9, 0.5),
       ("open", "tgt", 0.3, JAW_OPEN, 0.5, 0.4), ("lift2", "tgt", 1.5, JAW_OPEN, 0.7, 0.2), ("rest", None, 0, 0, 1.8, 0.3)]
@@ -63,9 +70,9 @@ WP_FAST_CLOSE = ("close", "nut", GRASP_H_IN, 0, 0.6, 0.4)   # --fast-close: the 
 GRIPPER_ONLY = ("close", "close1", "close2", "open")          # why: pure jaw moves say nothing about arm sag; the bias learning skips them
 GRASP_HEIGHT_WPS = ("grasp", "close", "close1", "close2")      # why: the close waypoints sit at the grasp height too, lowered or not (a close at the unlowered height would lift the tip while squeezing)
 ARM = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"]
-NO_LEARN = ("pregrasp_up",)   # why: pregrasp_up is defined from pregrasp's command, not a mat point: its droop is not sag to learn, and it must not change the biases
-STAGES = (("hover_nut",), ("hover_nut", "grasp"), ("pregrasp_up", "pregrasp", "grasp", "close1", "close2", "lift", "hover_tgt", "place", "open", "lift2", "rest"))
-LIFT_STAGE, CARRY_STAGE, ABORT_STAGE = ("pregrasp_up", "pregrasp", "grasp", "close1", "close2", "lift"), ("hover_tgt", "place", "open", "lift2", "rest"), ("hover_nut", "rest")
+NO_LEARN = tuple(BACKOFF)   # why: pregrasp_up and hover_pre are defined from another waypoint's command, not mat points: their droop is not sag to learn, and they must not change the biases
+STAGES = (("hover_pre", "hover_nut"), ("hover_pre", "hover_nut", "grasp"), ("pregrasp_up", "pregrasp", "grasp", "close1", "close2", "lift", "hover_tgt", "place", "open", "lift2", "rest"))
+LIFT_STAGE, CARRY_STAGE, ABORT_STAGE = ("pregrasp_up", "pregrasp", "grasp", "close1", "close2", "lift"), ("hover_tgt", "place", "open", "lift2", "rest"), ("hover_pre", "hover_nut", "rest")
 SPEED = {"closed": 50.0, "open": 80.0}   # why: the staged runs start each stage from a standstill close to the nut; 50 deg/s settles cleaner for the readback
 JAW_HOLE_MAX = 100.0   # mean grey (0-255) allowed in a ring's hole inside the jaw window: the held nut's hole measured 19-56, the bright jaw edge 204-222 (frames 11 Nov 2026)
 JAW_WINDOW = (300, 300, 380, 360)   # wrist-frame pixels (x0, y0, x1, y1) between the jaw tips after close + lift (diag frames, 10 Nov 2026: the nut's ring sat at about (340, 325))
@@ -312,8 +319,8 @@ def build_plan(nut_in, tgt_in, biases, names=None, jaw_open=JAW_OPEN, grasp_h_in
     for name, which, h, grip, secs, settle in waypoints(fast_close):
         if want is not None and name not in want: continue
         if name in GRASP_HEIGHT_WPS and grasp_h_in is not None: h = grasp_h_in
-        if which == "pregrasp":   # pregrasp_up: pregrasp's final command with the approach joints backed off, so the move down to it increases them
-            j, cmd = arm_wp("pregrasp", "nut", h); j, cmd = ({k: v - (APPROACH_DEG if k in APPROACH_JOINTS else 0.0) for k, v in d.items()} for d in (j, cmd))
+        if name in BACKOFF:   # pregrasp_up / hover_pre: the target's final command with the approach joints backed off, so the move on to the target increases them
+            tgt_wp, drop = BACKOFF[name]; j, cmd = arm_wp(tgt_wp, "nut", h); j, cmd = ({k: v - drop.get(k, 0.0) for k, v in d.items()} for d in (j, cmd))
         else: j, cmd = arm_wp(name, which, h)
         wps.append({"name": name, "joints": cmd, "desired": j, "gripper": jaw_open if grip == JAW_OPEN else grip, "seconds": secs, "settle": settle, "gripper_only": name in GRIPPER_ONLY})
     return {"waypoints": wps}

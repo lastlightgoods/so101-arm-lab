@@ -159,7 +159,7 @@ def test_a_plan_outside_the_box_never_calls_run_plan(autorig, capsys):
     r = autorig()
     s, out = r.run(capsys, cycles=3, target=(0.5, 6.0))
     names = [n for n, _ in r.arm.calls]   # the hover and the grasp pose go (the nut is inside the mat); the final stage carries the bad place target and is refused whole
-    assert names[:2] == [["hover_nut"], ["hover_nut", "grasp"]] and not any("place" in n for n in names) and s["end"] == "workspace"
+    assert names[:2] == [["hover_pre", "hover_nut"], ["hover_pre", "hover_nut", "grasp"]] and not any("place" in n for n in names) and s["end"] == "workspace"
     t, = events(out, "trip"); assert t["reason"] == "workspace" and t["detail"]["x_in"] < 0.79 and t["rest"] is True and names[-1] == ["rest"], "refused mid-pick: the arm hovers, so it goes to rest"
     assert len(events(out, "cycle")) == 1 and events(out, "cycle")[0]["trip"] == "workspace"
 
@@ -176,7 +176,7 @@ def test_the_stop_file_appearing_mid_cycle_stops_before_the_next_run_plan(autori
         rows = orig(plan, max_deg_s); open(r.stop_file, "w").close(); return rows
     r.pl.run_plan = drop_file   # the first stage runs, then the file appears; the second stage must not start
     s, out = r.run(capsys, cycles=3)
-    st, = events(out, "stop"); assert [n for n, _ in r.arm.calls][0] == ["hover_nut"] and len(r.arm.calls) == 2 and s["end"] == "stop_file"
+    st, = events(out, "stop"); assert [n for n, _ in r.arm.calls][0] == ["hover_pre", "hover_nut"] and len(r.arm.calls) == 2 and s["end"] == "stop_file"
     assert st["reason"] == "stop_file" and st["rest"] is True and r.arm.calls[-1][0] == ["rest"], "stopped over the nut: it goes home, through the unguarded run_plan"
 
 
