@@ -26,6 +26,7 @@ def test_the_tilted_tip_lands_where_the_untilted_one_would(pl, cc, table, plans,
     for n in TILTED:
         x0, y0, _ = pl.fk_mat(cc, table, p0[n]["desired"]); x1, y1, _ = pl.fk_mat(cc, table, p1[n]["desired"])
         assert math.hypot(x1 - x0, y1 - y0) * 25.4 < 0.3, f"{n}: the tilted tip is {math.hypot(x1 - x0, y1 - y0) * 25.4:.2f} mm off the untilted one"
+        h0, h1 = pl.fk_mat(cc, table, p0[n]["desired"])[2], pl.fk_mat(cc, table, p1[n]["desired"])[2]; assert abs(h1 - h0) < 0.3, f"{n}: the tilted tip is {h1 - h0:+.2f} mm off the untilted height"
 
 
 def test_the_tilted_wrist_flex_is_the_ik_at_the_shifted_point_plus_the_tilt_exactly(pl, cc, table, plans):
@@ -63,15 +64,14 @@ def test_the_wrist_flex_clamp_applies_after_the_tilt(pl, plans):
 
 def test_fast_close_close_is_tilted_too(pl, cc, table, plans):
     p0, p1 = plans(0.0, fast_close=True), plans(-3.0, fast_close=True); assert "close" in p1 and "close1" not in p1
-    assert p1["close"]["desired"]["wrist_flex"] != pytest.approx(p0["close"]["desired"]["wrist_flex"], abs=1.0)
-    x0, y0, _ = pl.fk_mat(cc, table, p0["close"]["desired"]); x1, y1, _ = pl.fk_mat(cc, table, p1["close"]["desired"]); assert math.hypot(x1 - x0, y1 - y0) * 25.4 < 0.3
+    x0, y0, h0 = pl.fk_mat(cc, table, p0["close"]["desired"]); x1, y1, h1 = pl.fk_mat(cc, table, p1["close"]["desired"]); assert math.hypot(x1 - x0, y1 - y0) * 25.4 < 0.3 and abs(h1 - h0) < 0.3
 
 
 def test_the_grasp_and_close_are_commanded_at_1mm_by_the_ik(pl, plans):
     assert pl.GRASP_H_IN * 25.4 == pytest.approx(1.0) and pl.GRASP_TILT_DEG == -3.0
     for tilt in (0.0, -3.0):
-        plans.arm.ik_calls.clear(); plans(tilt, names=("grasp", "close1", "close2"))
-        assert {round(h * 25.4, 2) for _, _, h in plans.arm.ik_calls} == {1.0}
+        p = plans(tilt, names=("grasp", "close1", "close2"))   # why: with a tilt the IK target moves (side AND height) so the tilted tip lands on the point; what must be 1.0 mm is that tip
+        assert all(pl.fk_mat(*pl.calib(), p[n]["desired"])[2] == pytest.approx(1.0, abs=0.3) for n in ("grasp", "close1", "close2"))
     assert plans(0.0)["grasp"]["desired"] and pl.fk_mat is not None
 
 

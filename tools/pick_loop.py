@@ -260,7 +260,8 @@ def build_plan(nut_in, tgt_in, biases, names=None, jaw_open=JAW_OPEN, grasp_h_in
         if tilt and which is not None:
             c, t = (cc, table) if cc is not None and table is not None else calib()
             for _ in range(2):   # why: the shift barely depends on the pose, so twice is enough (11 Nov 2026); the tilted tip must land on the commanded point
-                x0, y0, _h = fk_mat(c, t, j); x1, y1, _h = fk_mat(c, t, dict(j, wrist_flex=j["wrist_flex"] + tilt)); j = ik(pt[0] - (x1 - x0), pt[1] - (y1 - y0), h)
+                # ... in height too: xy alone left the tilted tip -2.8 mm (8, 5) to +1.75 mm (14, 8) off the commanded height (arm fit), and the grasp height is what made the 11 Nov misses
+                x0, y0, h0 = fk_mat(c, t, j); x1, y1, h1 = fk_mat(c, t, dict(j, wrist_flex=j["wrist_flex"] + tilt)); j = ik(pt[0] - (x1 - x0), pt[1] - (y1 - y0), h - (h1 - h0) / 25.4)
             j = dict(j, wrist_flex=j["wrist_flex"] + tilt)
         b = biases.get(name, {}); cmd = {k: j[k] + b.get(k, 0.0) for k in j}; cmd["wrist_flex"] = max(-93.0, min(93.0, cmd["wrist_flex"])); return j, cmd
     wps = []
