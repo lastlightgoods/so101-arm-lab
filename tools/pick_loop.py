@@ -344,6 +344,7 @@ def build_plan(nut_in, tgt_in, biases, names=None, jaw_open=JAW_OPEN, grasp_h_in
 
 
 PLAN_TIMEOUT_S = 180
+PICK_SEQ_ARGS = ""   # why: extra pick_seq flags, set by tools/autoloop.py --record-demos to "--tick-sink PATH" before the session starts, empty otherwise (2026-11-12); --serve writes one sink file (with its header line) per plan, like --plan runs
 SERVE_CMD = "cd ~/so101 && source env.sh >/dev/null 2>&1; exec ~/so101/.venv/bin/python pick_seq.py --serve --idle-s 60"
 SESSION = None   # why: 12 Nov 2026 a pick_seq session costs 5.4 s of start-up and a closed-loop pick has 3-5 stages; main() / autoloop set this to a PickSession (--session, default on), run_plan then reuses one connection
 
@@ -358,7 +359,7 @@ class PickSession:
     {"plan_done": n} come back on stdout. `argv` / `popen` are for tests. A session that never completed a plan (old pick_seq without --serve, arm busy) is `broken`: run_plan uses
     the scp+ssh path from then on. One that ran plans and then ended (60 s idle timeout, ssh drop) is simply restarted for the next plan."""
     def __init__(self, argv=None, timeout=PLAN_TIMEOUT_S, popen=subprocess.Popen):
-        self.argv = argv or ["ssh", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3", "jetson", SERVE_CMD]
+        self.argv = argv or ["ssh", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3", "jetson", SERVE_CMD + ((" " + PICK_SEQ_ARGS) if PICK_SEQ_ARGS else "")]
         self.timeout, self.popen, self.proc, self.buf, self.served, self.broken, self.starts = timeout, popen, None, b"", 0, False, 0
 
     def _start(self):
@@ -431,7 +432,7 @@ def run_plan(plan, max_deg_s, session=None):
 def run_plan_ssh(plan, max_deg_s):
     p = "/tmp/pick_plan.json"; open("/tmp/pick_plan_local.json", "w").write(json.dumps(plan))
     subprocess.run(["scp", "-q", "/tmp/pick_plan_local.json", f"jetson:{p}"], check=True)
-    out = subprocess.run(["ssh", "-o", "ConnectTimeout=8", "jetson", f"cd ~/so101 && source env.sh >/dev/null 2>&1; ~/so101/.venv/bin/python pick_seq.py --plan {p} --correct 0 --max-deg-s {max_deg_s}"], capture_output=True, text=True, timeout=PLAN_TIMEOUT_S)
+    out = subprocess.run(["ssh", "-o", "ConnectTimeout=8", "jetson", f"cd ~/so101 && source env.sh >/dev/null 2>&1; ~/so101/.venv/bin/python pick_seq.py --plan {p} --correct 0 --max-deg-s {max_deg_s}{(' ' + PICK_SEQ_ARGS) if PICK_SEQ_ARGS else ''}"], capture_output=True, text=True, timeout=PLAN_TIMEOUT_S)
     rows = []
     for line in out.stdout.splitlines():
         try: d = json.loads(line)

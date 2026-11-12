@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """demo_recorder.py - turns scripted picks into LeRobot v3.0 training episodes (docs/scripted-demos.md, plan docs 51/51A/51B).
 
-PHASE 1: everything here runs against fakes. Nothing opens a camera, the servo port or the network.
+This module opens no camera, no servo port and no network: the camera source and the tick file are handed in (fakes in the tests).
 
     pick_seq.py --tick-sink  ->  /dev/shm/so101_ticks.jsonl  ->  TickBuffer   (per-tick action sent + state read before it, 40 Hz, time.monotonic())
     CameraSource.frame_at(cam, t)                                              (latest frame of each camera; FakeCameraSource in phase 1)
@@ -18,8 +18,8 @@ meta/lab/frames/episode_NNNNNN.json, and an episode whose cadence or cameras mis
 Idle gaps (the Mac thinking between two staged pick_seq runs) have no fresh tick (older than max_tick_age_s); those boundaries are DROPPED,
 not recorded, so a policy does not learn to wait.
 
-TODO(phase 2, hardware): a real CameraSource (lerobot OpenCVCamera async readers, opened ONCE per session so the locked exposure holds) that also
-re-serves 15 fps JPEG to the dashboard, a resident process that calls pump() at 30 Hz and a control socket for open/end/commit. See docs/scripted-demos.md.
+PHASE 2 (docs/scripted-demos.md): the camera source is jetson/demo_cams.CamdCameraSource (a reader of jetson/camd.py, the camera owner), and the resident process is
+jetson/demo_recorderd.py (pump() every 1/30 s, a control socket for open / end / commit / abort). Frames from that source arrive as JPEG bytes and are spooled as they are.
 """
 import bisect, dataclasses, hashlib, importlib.util, json, math, os, shutil, signal, sys, tempfile, time
 import numpy as np
@@ -89,6 +89,11 @@ class TickBuffer:
         if self._t and tick["t_mono"] < self._t[-1]: raise ValueError("ticks must arrive in time order")
         self.ticks.append(tick); self._t.append(tick["t_mono"])
 
+    def trim(self, before_t):
+        """Drop ticks older than `before_t` (the resident recorder keeps only the last seconds while no episode is open)."""
+        i = bisect.bisect_left(self._t, before_t)
+        if i: del self.ticks[:i], self._t[:i]
+
     def at(self, t):
         """The newest tick with t_mono <= t, or None."""
         i = bisect.bisect_right(self._t, t); return self.ticks[i - 1] if i else None
@@ -128,6 +133,14 @@ def synth_plan_ticks(buf, ps, plan, rows, max_deg_s, t, cur, correct_wrist_clamp
             prev_state = {j: cur[j] + (tgt[j] - cur[j]) * e + (got[j] - tgt[j]) * e for j in ps.J}; t += secs / n
         settle = float(wp.get("settle", 0.3)); tl = t - secs / n; times.extend(tl + k / FPS for k in range(1, int((t + settle - tl) * FPS))); t += settle; cur = got   # why: the resident recorder wakes every 1/30 s whether or not a tick arrives
     return t, cur, times
+
+
+def load_spooled(path, shape):
+    """A spooled frame back as (H, W, 3) uint8 RGB: .npy as saved, .jpg decoded with OpenCV (a frame that does not decode, or has the wrong size, is a black frame of `shape`: the episode's health already rejected it)."""
+    if path.endswith(".npy"): return np.load(path)
+    import cv2
+    im = cv2.imdecode(np.fromfile(path, np.uint8), cv2.IMREAD_COLOR)
+    return np.zeros(shape, np.uint8) if im is None or im.shape != tuple(shape) else cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
 
 
 # ---------------------------------------------------------------- features
@@ -242,7 +255,12 @@ class DemoRecorder:
             if tk is None or b - tk["t_mono"] > self.max_tick_age: ep.dropped_idle += 1; continue
             k = len(ep.frames); imgs = {}; cam_age = {}
             for c in self.cams.names:
-                img, tc = self.cams.frame_at(c, b); p = os.path.join(ep.spool, f"f{k:05d}_{c}.npy"); np.save(p, np.ascontiguousarray(img, dtype=np.uint8)); imgs[c] = p; cam_age[c] = b - tc
+                img, tc = self.cams.frame_at(c, b); cam_age[c] = b - tc
+                if isinstance(img, (bytes, bytearray)):   # why: the real source hands over the JPEG camd received; spooling it as is costs ~40 KB a frame instead of 0.9 MB of raw pixels (2026-11-11)
+                    p = os.path.join(ep.spool, f"f{k:05d}_{c}.jpg")
+                    with open(p, "wb") as f: f.write(img)
+                else: p = os.path.join(ep.spool, f"f{k:05d}_{c}.npy"); np.save(p, np.ascontiguousarray(img, dtype=np.uint8))
+                imgs[c] = p
             ep.frames.append({"action": [float(tk["action"][f"{m}.pos"]) for m in MOTORS], "state": [float(tk["state"][f"{m}.pos"]) for m in MOTORS], "imgs": imgs,
                               "t_sample": b, "tick_seq": tk["seq"], "tick_t": tk["t_mono"], "tick_age_s": b - tk["t_mono"], "cam_age_s": cam_age, "wp": tk.get("wp"), "late_s": max(0.0, now - b)})
             n += 1
@@ -287,7 +305,7 @@ class DemoRecorder:
         ds = self.dataset(kind); root = self.root if keep else self.rejects_root; env = np.asarray(self.cfg.env_vector(), np.float32); idx = ds.meta.total_episodes
         for f in ep.frames:
             fr = {"action": np.asarray(f["action"], np.float32), "observation.state": np.asarray(f["state"], np.float32), "observation.environment_state": env, "task": TASK}
-            for c, p in f["imgs"].items(): fr[f"observation.images.{c}"] = np.load(p)
+            for c, p in f["imgs"].items(): fr[f"observation.images.{c}"] = load_spooled(p, self.cams.shapes[c])
             ds.add_frame(fr)
         ds.save_episode()
         row = self.sidecar_row(idx, kind, ep, h, verdict)   # why after save_episode: a crash in between leaves an episode without a row, which reconcile_sidecar() repairs; the other order would leave a row for an episode that does not exist
@@ -307,6 +325,22 @@ class DemoRecorder:
         cols = {k: [f[k] for f in ep.frames] for k in ("t_sample", "tick_seq", "tick_t", "tick_age_s", "wp")}
         cols["cam_age_s"] = {c: [f["cam_age_s"][c] for f in ep.frames] for c in self.cams.names}
         with open(os.path.join(d, f"episode_{idx:06d}.json"), "w") as f: json.dump(cols, f)
+
+    def have(self, kind):
+        root = self.root if kind == "main" else self.rejects_root; return os.path.exists(os.path.join(root, "meta", "info.json"))
+
+    def append_link(self, kind, row):
+        """links.jsonl row for an episode (the MLflow cycle run id, known only after the cycle run exists)."""
+        append_jsonl(os.path.join(sidecar_dir(self.root if kind == "main" else self.rejects_root), "links.jsonl"), row)
+
+    def summary(self):
+        """What the session's dataset-version run needs, as plain data (so a remote recorder can return the same): hashes, sidecar rows, the text of info.json and episodes.jsonl, the features."""
+        def one(kind):
+            root = self.root if kind == "main" else self.rejects_root
+            if not self.have(kind): return {"hash": None, "rows": [], "info": None, "episodes": None}
+            rd = lambda rel: open(os.path.join(root, rel)).read() if os.path.exists(os.path.join(root, rel)) else None
+            return {"hash": dataset_hash(root), "rows": read_sidecar(root), "info": rd("meta/info.json"), "episodes": rd("meta/lab/episodes.jsonl")}
+        return {"main": one("main"), "rejects": one("rejects"), "features": self.features, "counts": dict(self.counts)}
 
     def status(self):
         ep = self.ep

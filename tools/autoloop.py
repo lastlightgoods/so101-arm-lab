@@ -4,7 +4,8 @@ outcome from the overhead camera, put the nut somewhere new, repeat, with tools/
 
   tools/autoloop.py --cycles 10 [--minutes 60] [--target 9 6 | --random-target] [--safe-box X0 Y0 X1 Y1] [--radius-mm 15] [--session NAME] [--dry-run]
 
---record-demos (default OFF; --dry-run only until the camera tee exists, docs/scripted-demos.md) records each TRY as a LeRobot training episode via tools/demo_session.py.
+--record-demos (default OFF, docs/scripted-demos.md) records each TRY as a LeRobot training episode via tools/demo_session.py: on fakes with --dry-run, otherwise through the
+resident recorder on the Jetson (jetson/demo_recorderd.py over ssh; pick_seq gets --tick-sink only then).
 
 One cycle: guard.before -> TRY (closed-loop pick to the target, tools/pick_loop.py) -> JUDGE (/api/scene after a short settle) -> RESET
 (a closed-loop pick to a spot sampled with the box rules; never pick_loop.reset_nut, which writes the pick state file) -> guard.after. One JSON line per cycle,
@@ -452,6 +453,31 @@ def make_cfg(a, out_dir):
                               judge_wait_s=a.judge_wait, save_frames=not a.dry_run, start_near=tuple(a.start_near) if a.start_near else None, grasp_roll=a.grasp_roll)
 
 
+def demo_mods():
+    return (load(os.path.join(ROOT, "jetson", "demo_recorder.py"), "demo_recorder_for_autoloop"), load(os.path.join(ROOT, "jetson", "lab_config.py"), "lab_config_for_autoloop"),
+            load(os.path.join(ROOT, "tools", "demo_session.py"), "demo_session_for_autoloop"))
+
+
+def make_real_demo(a, cfg, lt, pl, transport=None):
+    """--record-demos on the real arm: a DemoSession whose recorder is the resident jetson/demo_recorderd.py (RemoteRecorder over `transport`; ssh unless a test injects one).
+    Preflight BEFORE any arm motion: the daemon answers, takes the dataset configuration, sees all three camera streams and no .cams_busy / .arms_busy.
+    Sets pick_loop.PICK_SEQ_ARGS so every pick_seq run writes its tick sink where the daemon reads (only when recording)."""
+    _, lc, ds = demo_mods(); lab = lc.LabConfig.from_file(a.lab_config) if a.lab_config else lc.LabConfig()
+    if a.lighting_tag: lab.lighting_tag = a.lighting_tag
+    name = a.demo_repo.split("/")[-1]; root = (a.demo_root or f"~/so101/outputs/demos/{cfg.session}").rstrip("/") + "/" + name
+    rec = ds.RemoteRecorder(transport or ds.ssh_transport(a.demo_host), root, a.demo_repo, lab, rejects_root=root + "-rejects", vcodec=a.demo_vcodec or "libsvtav1")
+    hint = "start it on the Jetson: nohup ~/so101/.venv/bin/python ~/so101/demo_recorderd.py serve > ~/so101/outputs/run/demo_recorderd.log 2>&1 &   (docs/scripted-demos.md, phase 2)"
+    if not rec.alive(): raise SystemExit(f"--record-demos: the demo recorder does not answer; {hint}")
+    st = rec.status()
+    if not st.get("ok"): raise SystemExit(f"--record-demos: recorder status failed: {st.get('err')}")
+    if st.get("cams_missing"): raise SystemExit(f"--record-demos: no fresh frames from camera(s) {st['cams_missing']}; is camd running (camd.py serve) and .cams_busy absent? docs/scripted-demos.md")
+    if st.get("busy"): raise SystemExit(f"--record-demos: hardware flags set on the Jetson {st['busy']} (a lerobot job or cam_lock owns the hardware)")
+    try: rec.configure()
+    except ds.RecorderError as e: raise SystemExit(f"--record-demos: {e}") from e
+    pl.PICK_SEQ_ARGS = f"--tick-sink {a.demo_tick_sink}"
+    return ds.DemoSession(rec, cfg.session, demo_mods()[0], track=lt.LabTrack("so101-datasets"), radius_mm=cfg.radius_mm, fake=None, repo_root=ROOT)
+
+
 def make_dry_demo(a, cfg, lt, pl_unused=None):
     """--record-demos --dry-run: the whole recording path on fakes (virtual clock, ticks synthesised from each plan with pick_seq's own easing, synthetic cameras).
     Returns a tools/demo_session.DemoSession writing real LeRobot datasets under --demo-root."""
@@ -479,9 +505,10 @@ def build_parser():
     ap.add_argument("--settle", type=float, default=1.0, help="seconds to wait before judging the landing or a reset")
     ap.add_argument("--start-near", type=float, nargs=2, default=None, metavar=("X", "Y"), help="where the first cycle looks for the nut (mat inches); without it the first search has no hint and the whole-mat fallback can take the parked arm's shadow for the nut")
     ap.add_argument("--judge-wait", type=float, default=4.0, help="after the settle, wait up to this long while the map still has objects pending confirmation"); ap.add_argument("--table", default=None, help="top_table.json (default jetson/calib/top_table.json)")
-    ap.add_argument("--record-demos", action="store_true", help="record each TRY as a LeRobot training episode: kept (landed, no trip, jaw held, healthy recording) or rejected into a separate dataset. OFF by default; --dry-run only until the camera tee exists")
-    ap.add_argument("--demo-vcodec", default=None, help="video codec for the demo datasets (dry run default h264; the Jetson recorder defaults to libsvtav1)")
-    ap.add_argument("--demo-root", default=None, help="folder for the demo datasets (default <out-dir>/demos/<session>)"); ap.add_argument("--demo-repo", default="lastlight/so101-nut-pick", help="repo id of the kept-episode dataset; the rejects go to <repo>-rejects")
+    ap.add_argument("--record-demos", action="store_true", help="record each TRY as a LeRobot training episode: kept (landed, no trip, jaw held, healthy recording) or rejected into a separate dataset. OFF by default. With --dry-run everything is fake and local; without it the resident recorder on the Jetson (jetson/demo_recorderd.py, over ssh) records")
+    ap.add_argument("--demo-vcodec", default=None, help="video codec for the demo datasets (dry run default h264; the Jetson recorder defaults to libsvtav1; h264 if its CPU cannot keep up)")
+    ap.add_argument("--demo-host", default="jetson", help="ssh host of the resident recorder (real runs)"); ap.add_argument("--demo-tick-sink", default="/dev/shm/so101_ticks.jsonl", help="where pick_seq writes its tick sink and the recorder reads it (real runs; must match demo_recorderd.py --ticks)")
+    ap.add_argument("--demo-root", default=None, help="folder for the demo datasets (default <out-dir>/demos/<session>; on the Jetson, for a real run: ~/so101/outputs/demos/<session>)"); ap.add_argument("--demo-repo", default="lastlight/so101-nut-pick", help="repo id of the kept-episode dataset; the rejects go to <repo>-rejects")
     ap.add_argument("--lab-config", default=None, help="JSON of jetson/lab_config.LabConfig fields (default: the stock-v1 labels)"); ap.add_argument("--lighting-tag", default=None, help="lighting label stored with every episode (vary it between sessions)")
     ap.add_argument("--pick-session", dest="pick_session", action="store_true", default=True, help="one persistent pick_seq --serve ssh for all plans (saves ~5 s of start-up per stage); falls back to scp+ssh per stage (default)")
     ap.add_argument("--no-pick-session", dest="pick_session", action="store_false", help="one scp+ssh+pick_seq start per stage, as before 12 Nov 2026")
@@ -489,9 +516,8 @@ def build_parser():
     return ap
 
 
-def main(argv=None):
+def main(argv=None, demo_transport=None):
     a = build_parser().parse_args(argv)
-    if a.record_demos and not a.dry_run: raise SystemExit("--record-demos needs the Jetson recorder and the camera tee (phase 2, docs/scripted-demos.md); until then it runs only with --dry-run")
     gr = load_guardrails(); pl = load_pick_loop(); cc = pl.cam_calib(); out_dir = a.out_dir or os.path.join(ROOT, "outputs", "run")
     tpath = a.table or os.path.join(ROOT, "jetson", "calib", "top_table.json")
     if a.dry_run and not os.path.exists(tpath): tpath = os.path.join(ROOT, "tests", "calib", "fixtures", "top_table_real.json")
@@ -509,6 +535,7 @@ def main(argv=None):
     else:
         get = lambda path, t: json.load(urllib.request.urlopen(pl.DASH + path, timeout=t))
         ctx = gr.Ctx(lambda: get("/api/state", gr.Limits().panel_s), lambda: get("/api/scene", 5), time.time, time.sleep, lambda d: print(json.dumps(d), flush=True), arm_jobs=jetson_arm_jobs); track = lt.LabTrack(EXPERIMENT)
+        if a.record_demos: demo = make_real_demo(a, cfg, lt, pl, demo_transport)   # why: before open_session, so the persistent pick_seq is started with --tick-sink
     if not a.dry_run and a.pick_session: pl.open_session(True)   # why: lazy, nothing connects until the first plan; the guarded run_plan wraps pl.run_plan, which uses it, so the guard still sees every plan and row
     guard = gr.Guard(cc, table, lim, ctx); s = Runner(pl, cc, table, guard, ctx, cfg, track, rng, out=lambda l: print(l, flush=True), demo=demo).run()
     return 0 if all(x["clean"] for x in s["stops"]) else 2
