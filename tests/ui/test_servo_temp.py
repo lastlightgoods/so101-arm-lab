@@ -105,3 +105,35 @@ def test_the_ghost_arm_is_never_tinted(stub, stage):
     assert page.eval("(()=>{let n=0;window.__ghost.traverse(o=>{if(o.isLineSegments&&o.material.color.getHex()!==0xb26bff)n++});return n})()") == 0
     assert stub.posts == []
     page.check()
+
+
+def overlaps(a, b, gap=0):
+    return a["x"] < b["x"] + b["w"] + gap and b["x"] < a["x"] + a["w"] + gap and a["y"] < b["y"] + b["h"] + gap and b["y"] < a["y"] + a["h"] + gap
+
+
+def test_deoverlap_pushes_colliding_rects_apart_and_leaves_clear_ones(stub, stage):
+    stub.routes["/api/calib"] = fx.calib()
+    page = stage()
+    rects = [{"x": 100, "y": 100, "w": 60, "h": 24}, {"x": 110, "y": 105, "w": 60, "h": 24}, {"x": 120, "y": 108, "w": 60, "h": 24}, {"x": 400, "y": 300, "w": 60, "h": 24}]
+    dy = page.eval(f"window.__deoverlap({rects!r})")
+    moved = [{**r, "y": r["y"] + d} for r, d in zip(rects, dy)]
+    assert dy[3] == 0, "a label that collides with nothing stays put"
+    assert not any(overlaps(a, b) for i, a in enumerate(moved) for b in moved[i + 1:]), moved
+    top = [{"x": 10, "y": 2, "w": 60, "h": 24}, {"x": 12, "y": 4, "w": 60, "h": 24}]   # up would leave the stage: the second goes down
+    d2 = page.eval(f"window.__deoverlap({top!r})")
+    assert min(r["y"] + d for r, d in zip(top, d2)) >= 0
+    page.check()
+
+
+def test_servo_labels_on_the_stage_do_not_overlap_in_screen_space(stub, stage):
+    stub.routes["/api/calib"] = fx.calib()
+    page = stage()
+    page.wait_until("!!window.__servos", timeout=30)
+    poll(stub, page, tele([52, 66, 48, 61, 40, 55]))
+    page.wait_until("(window.__servoRects||[]).length===6", timeout=10)
+    page.eval("(window.__ctl.autoRotate=false,window.__cam.position.set(0.7,0.5,0.9),window.__ctl.target.set(0.2,0.1,0),window.__ctl.update(),true)")   # the view of the collision screenshot
+    page.wait_until("(window.__servoRects||[]).length===6", timeout=10)
+    rects = page.eval("window.__servoRects")
+    assert not any(overlaps(a, b) for i, a in enumerate(rects) for b in rects[i + 1:]), rects
+    assert all(s["label"] and s["text"].endswith("°C") for s in (servo(page, j) for j in JOINTS)), "the number stays visible"
+    page.check()
