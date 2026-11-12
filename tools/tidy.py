@@ -350,7 +350,7 @@ class Tidy:
             self.settle(0.5); waited += 0.5
 
     def refit_ring(self):
-        r = fit_ring(self.fetch_top(), self.cc, self.table)
+        r = sl.fit_ring_multi(self.fetch_top, self.cc, self.table)
         if r is None: raise SystemExit("tape ring not found in the top frame")
         self.rig.set_ring(r); return r
 
@@ -873,7 +873,7 @@ def main(argv=None):
         gr.start_caffeinate()
     al = load_al(); pl = load_pl(); cc = pl.cam_calib(); table = json.load(open(os.path.join(ROOT, "jetson", "calib", "top_table.json")))
     if not (table.get("arm_fit") and table.get("arm_base_mm")): raise SystemExit("tidy needs the arm fit in jetson/calib/top_table.json")
-    ring = fit_ring(pl.fetch_top(), cc, table)
+    ring = sl.fit_ring_multi(pl.fetch_top, cc, table)
     if ring is None: raise SystemExit("tape ring not found in the top frame (fewer than 150 blue pixels)")
     rig = Rig(pl, cc, table, ring)
     if a.cmd == "plan":

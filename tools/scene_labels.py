@@ -79,6 +79,14 @@ def ring_band(img, cc, table, min_px=150, r_mm=(30.0, 65.0), band_r_mm=RING_BAND
     return None
 
 
+def fit_ring_multi(fetch, cc, table, n=5, min_ok=3, min_px=100):
+    """The ring's centre (x_in, y_in) as the median of up to n single-frame fits (fetch() -> a top frame), or None with fewer than min_ok good fits.
+    why: 12 Nov 2026 the band was 200-227 px, near the old 150 px floor, so a frame now and then fell short and stopped a reset; single fits jittered 4 mm."""
+    fits = [f for f in (fit_ring(fetch(), cc, table, min_px) for _ in range(n)) if f is not None]
+    if len(fits) < min_ok: return None
+    return (float(np.median([f[0] for f in fits])), float(np.median([f[1] for f in fits])))
+
+
 def fit_ring(jpeg, cc, table, min_px=150, r_mm=(30.0, 65.0)):
     """(x_in, y_in) of the ring's centre from one top frame (ring_band), pixel -> mat. None when no ring-shaped blue band is seen.
     why: 11 Nov 22:4x two blue toy frogs pulled the old all-blue-pixels fit 4 in off the ring."""

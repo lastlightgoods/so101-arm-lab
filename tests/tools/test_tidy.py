@@ -593,3 +593,11 @@ def test_the_camera_alone_needs_a_strong_ring_score_to_pass_a_wing_nut(td):
     """12 Nov 2026: gripper 0.54 (empty) but the camera said held at score 0.37, and the arm carried nothing to the ring; earlier false positives 0.388, 0.395."""
     for fp in (0.37, 0.388, 0.395): assert td.grip_decision(0.54, True, "wing nut", fp) is False
     assert td.grip_decision(0.54, True, "wing nut", 0.6) is True and td.grip_decision(4.5, None, "nut", None) is True and td.grip_decision(0.54, True, "nut", 0.9) is False
+
+
+def test_the_ring_is_the_median_of_several_frames_and_one_bad_frame_does_not_stop_a_run(td, cc, table):
+    """12 Nov 2026: a single frame with the thin band under the pixel floor stopped a reset with "tape ring not found"."""
+    import cv2
+    good = synth_frame(cc, table, (9.0, 6.0)); blank = cv2.imencode(".png", np.full((360, 640, 3), 190, np.uint8))[1].tobytes(); frames = iter([blank, good, good, blank, good])
+    got = td.sl.fit_ring_multi(lambda: next(frames), cc, table); assert got is not None and np.hypot(got[0] - 9.0, got[1] - 6.0) * 25.4 < 3.0
+    frames2 = iter([blank, blank, good, blank, good]); assert td.sl.fit_ring_multi(lambda: next(frames2), cc, table) is None, "fewer than 3 good frames: not found"
