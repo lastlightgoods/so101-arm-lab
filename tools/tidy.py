@@ -518,16 +518,26 @@ def lift_height_mm(reach_mm, max_free_mm, want_bottom=MIN_BOTTOM_MM, grip_h_mm=R
     cmd = min(cap, max_free_mm); return cmd, ring_bottom_mm(cmd, reach_mm, grip_h_mm)
 
 
-def sample_ring_spot(rng, box_in, cur_in, pile_in, others_in, markers_mm, feasible=None, ring_r_mm=RING_R_MM, clear_mm=1.5 * IN, edge_mm=30.0, marker_mm=35.0, min_move_mm=60.0, mat_mm=(457.2, 304.8), tries=400):
+RING_MARKER_MM = 61.0   # ring wall to marker centre: the marker's half-diagonal 36 (50.8 mm square) + ~10 of white border + 15 of set-down error (12 Nov 09:2x: the ring landed 13 mm off and covered marker 2, the camera lost it and the guard stopped the run)
+
+
+def ring_spot_ok(p, cur_in, pile_in, others_in, markers_mm, ring_r_mm=RING_R_MM, clear_mm=1.5 * IN, edge_mm=30.0, marker_mm=RING_MARKER_MM, min_move_mm=60.0, mat_mm=(457.2, 304.8)):
+    """None when p (mat inches) is a fine new ring centre, else why not: mat edges, clearance to the pile and every toy, markers, and a real move."""
+    px, py = p[0] * IN, p[1] * IN
+    if min(px, py, mat_mm[0] - px, mat_mm[1] - py) < ring_r_mm + edge_mm: return "too close to the mat edge"
+    if any(dist_mm(p, q) < ring_r_mm + clear_mm for q in list(pile_in) + list(others_in)): return "too close to a toy or the pile"
+    if any(math.hypot(px - m[0], py - m[1]) < ring_r_mm + marker_mm for m in markers_mm): return "would cover or crowd a marker"
+    if cur_in is not None and dist_mm(p, cur_in) < min_move_mm: return "not a real move"
+    return None
+
+
+def sample_ring_spot(rng, box_in, cur_in, pile_in, others_in, markers_mm, feasible=None, ring_r_mm=RING_R_MM, clear_mm=1.5 * IN, edge_mm=30.0, marker_mm=RING_MARKER_MM, min_move_mm=60.0, mat_mm=(457.2, 304.8), tries=400):
     """A new centre (mat inches) for the ring inside `box_in`: >= clear_mm (1.5 in) of free space between the ring's wall and the pile and every other toy, ring wall >= edge_mm from the mat edges and
     marker_mm from every marker centre, >= min_move_mm from where it stands, and `feasible(p)` true (the arm can grip and set it down there). None when `tries` draws find none."""
     x0, y0, x1, y1 = box_in
     for _ in range(tries):
-        p = [round(rng.uniform(x0, x1), 3), round(rng.uniform(y0, y1), 3)]; px, py = p[0] * IN, p[1] * IN
-        if min(px, py, mat_mm[0] - px, mat_mm[1] - py) < ring_r_mm + edge_mm: continue
-        if any(dist_mm(p, q) < ring_r_mm + clear_mm for q in list(pile_in) + list(others_in)): continue
-        if any(math.hypot(px - m[0], py - m[1]) < ring_r_mm + marker_mm for m in markers_mm): continue
-        if cur_in is not None and dist_mm(p, cur_in) < min_move_mm: continue
+        p = [round(rng.uniform(x0, x1), 3), round(rng.uniform(y0, y1), 3)]
+        if ring_spot_ok(p, cur_in, pile_in, others_in, markers_mm, ring_r_mm, clear_mm, edge_mm, marker_mm, min_move_mm, mat_mm): continue
         if feasible is not None and not feasible(p): continue
         return p
     return None
@@ -747,6 +757,7 @@ def reset_mat(t, dest=None):
     if spot is None: return {"ok": False, "stop": "no free spot for the ring"}
     if dest is not None and not (all(dist_mm(dest, (k["x_in"], k["y_in"])) >= RING_R_MM + k["r_mm"] + 10.0 for k in kos) and ko.segment_clear(rig.ring, dest, kos, RING_R_MM + 10.0)):
         return {"ok": False, "stop": "--ring-to spot or path too close to a keep-out"}
+    if dest is not None and (why := ring_spot_ok(dest, rig.ring, pile, others, t.markers_mm)): return {"ok": False, "stop": f"--ring-to spot refused: {why}"}   # why: 12 Nov the explicit spot skipped these checks and the ring covered marker 2
     t.say({"event": "ring_dest", "from_in": [round(v, 3) for v in rig.ring], "to_in": spot})
     with_trip = None
     try: mv = mover.lift_ring(spot)

@@ -537,3 +537,14 @@ def test_a_short_arc_of_the_band_still_gives_a_steady_centre(td, cc, table):
         cv2.ellipse(img, (int(round(u)), int(round(v))), (R, R), 0, start, start + 100, (200, 60, 40), 4)   # a 100 deg arc, 4 px thick, BGR blue
         got = td.fit_ring(cv2.imencode(".png", img)[1].tobytes(), cc, table)
         assert got is not None and np.hypot(got[0] - ring[0], got[1] - ring[1]) * 25.4 < 2.5, (ring, got)
+
+
+def test_a_ring_spot_keeps_clear_of_the_markers_and_an_explicit_ring_to_is_checked_too(td, mk):
+    """12 Nov 09:2x: --ring-to (11.5, 4.3) skipped the spot checks; the ring landed 13 mm off, 78 mm from marker 2's centre, covered it, and the guard stopped the run."""
+    markers = [(381.0, 101.6)]
+    assert td.ring_spot_ok((11.5, 4.3), (6.2, 7.4), [], [], markers) == "would cover or crowd a marker"
+    assert td.ring_spot_ok((9.0, 6.0), (6.2, 7.4), [], [], markers) is None
+    rng = random.Random(5); spots = [td.sample_ring_spot(rng, (5.5, 3.3, 12.0, 8.7), (6.2, 7.4), [], [], markers) for _ in range(20)]
+    assert all(s is None or np.hypot(s[0] * 25.4 - 381.0, s[1] * 25.4 - 101.6) >= td.RING_R_MM + td.RING_MARKER_MM for s in spots) and any(spots)
+    m = mk([]); m.t.markers_mm = markers; out = td.reset_mat(m.t, (11.5, 4.3))
+    assert out["ok"] is False and out["stop"].startswith("--ring-to spot refused") and m.w.names == [], "refused before any motion"
