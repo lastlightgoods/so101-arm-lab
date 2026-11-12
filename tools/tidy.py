@@ -59,9 +59,16 @@ sl = load(os.path.join(ROOT, "tools", "scene_labels.py"), "scene_labels_for_tidy
 fit_circle, blue_pixels, ring_band, fit_ring, toy_kind, on_ring_wall = sl.fit_circle, sl.blue_pixels, sl.ring_band, sl.fit_ring, sl.toy_kind, sl.on_ring_wall
 
 
+TOY_MIN_SIDE_MM, MAT_EDGE_IN, MAT_IN = 6.0, 0.8, (18.0, 12.0)   # why: 12 Nov 2026 a 1-2 mm mat shift against the stored background gave ghost blobs along the mat's edges, mostly 4 mm-thin strips (18 x 4, 66 x 4 mm) and one nut-sized one at the top edge by the arm's base; real toys are >= 6 mm across (a standing spacer)
+
+
 def is_toy(o, area_max=2000.0, long_max=60.0, ring=None):
-    """A scene blob that is a toy: not the whole ring (104 mm across) and, with `ring`, not a piece of the ring's wall (on_ring_wall)."""
+    """A scene blob that is a toy: not the whole ring (104 mm across), not a thin strip or a blob at the mat's border (background ghosts after the mat
+    shifts), and, with `ring`, not a piece of the ring's wall (on_ring_wall)."""
     if not ("x_in" in o and "y_in" in o and float(o.get("area_mm2") or 0) < area_max and max(float(o.get("w_mm") or 0), float(o.get("h_mm") or 0)) <= long_max): return False
+    if min(float(o.get("w_mm") or 0), float(o.get("h_mm") or 0)) < TOY_MIN_SIDE_MM: return False
+    x, y = float(o["x_in"]), float(o["y_in"])
+    if not (MAT_EDGE_IN <= x <= MAT_IN[0] - MAT_EDGE_IN and MAT_EDGE_IN <= y <= MAT_IN[1] - MAT_EDGE_IN): return False
     return ring is None or not on_ring_wall(o, ring)
 
 

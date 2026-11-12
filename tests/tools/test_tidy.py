@@ -579,3 +579,11 @@ def test_a_ring_spot_in_the_arms_way_home_is_refused(td, mk, pl):
     m = mk([]); mover = td.RingMover(m.t); tip = m.rig.points(pl.REST)[-1]
     with pytest.raises(SystemExit, match="way home|no grip side"): mover.plan(RING, (tip[0] - 0.3, tip[1] + 0.6))
     P = mover.plan(RING, (6.5, 6.8)); assert P["grip_side_deg"] is not None and m.rig.ring == tuple(RING), "a clear spot still plans, and the check leaves the rig's ring as it was"
+
+
+def test_thin_strips_and_blobs_at_the_mat_border_are_not_toys(td):
+    """12 Nov 2026: after the mat shifted 1-2 mm against the stored background, the scene map listed ghosts along the edges (18 x 4, 66 x 4 mm strips, a
+    nut-sized blob at (11.96, 0.52) by the arm's base) and tidy planned to pick them."""
+    assert not td.is_toy(toy(13.98, 2.16, 18, 4, 72)) and not td.is_toy(toy(13.54, 5.0, 66, 4, 264)), "4 mm-thin strips"
+    assert not td.is_toy(toy(11.96, 0.52, 11.8, 11.8, 80)) and not td.is_toy(toy(17.5, 6.0, 14, 8, 84)) and not td.is_toy(toy(0.47, 6.0, 14, 8, 56)), "at the mat's border"
+    assert td.is_toy(toy(9.0, 6.0, 12, 10, 88)) and td.is_toy(toy(9.0, 6.0, 7, 7, 40)) and td.is_toy(toy(9.0, 6.0, 24, 10, 180)), "a nut, a standing spacer, a lying spacer"
