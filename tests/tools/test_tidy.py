@@ -602,3 +602,14 @@ def test_the_ring_is_the_median_of_several_frames_and_one_bad_frame_does_not_sto
     got = td.sl.fit_ring_multi(lambda: next(frames), cc, table, sleep=naps.append); assert len(naps) == 5 and all(n >= 0.25 for n in naps), "spaced so they are different frames"
     assert got is not None and np.hypot(got[0] - 9.0, got[1] - 6.0) * 25.4 < 3.0
     frames2 = iter([blank, blank, good, blank, good, blank]); assert td.sl.fit_ring_multi(lambda: next(frames2), cc, table, sleep=lambda s: None) is None, "fewer than 3 good frames: not found"
+
+
+def test_a_big_plain_blob_inside_the_ring_is_the_ring_but_a_big_colourful_one_is_a_frog(td, cc, table):
+    """12 Nov 2026: the scene map segmented the ring itself 75 x 58 mm (under the 80 mm ring rule), 25 mm off the band fit, colour 0.06; it became a
+    'big' keep-out inside the ring and stopped a reset."""
+    import cv2
+    ring = (9.0, 6.0); img = cv2.imdecode(np.frombuffer(World(cc, table, None, None, [], frogs=[(9.0, 6.0 + 10 / 25.4)]).frame(ring), np.uint8), cv2.IMREAD_COLOR)
+    plain = cv2.imdecode(np.frombuffer(synth_frame(cc, table, ring, thick=2), np.uint8), cv2.IMREAD_COLOR)   # the live band is thin (~200 px); the live blob read colour 0.06
+    ring_blob = toy(9.0 + 0.5, 6.0 + 0.8, 75.2, 57.6, 2152)
+    assert td.ko.find_keepouts([ring_blob], plain, cc, table, ring) == [], "the ring's own blob, plain, inside: not a keep-out"
+    k = td.ko.find_keepouts([frog(9.0, 6.0 + 10 / 25.4)], img, cc, table, ring); assert len(k) == 1, "a colourful frog inside the ring still is"
