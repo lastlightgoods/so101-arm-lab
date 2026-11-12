@@ -166,11 +166,12 @@ def test_marker_centres_come_from_the_layout_file_or_the_table(pl, table):
 
 
 def test_reset_mode_picks_from_wherever_and_places_inside_the_safe_box(pl, cc, table, monkeypatch, capsys, tmp_path):
-    others = [BIG_OBJ, {"id": 3, "x_in": 9.0, "y_in": 6.0, "w_mm": 25.0, "h_mm": 25.0}, {"id": 4, "x_in": 7.0, "y_in": 7.0, "w_mm": 15.0, "h_mm": 15.0}]
+    others = [BIG_OBJ, {"id": 3, "x_in": 9.0, "y_in": 6.0, "w_mm": 25.0, "h_mm": 25.0}, {"id": 4, "x_in": 7.0, "y_in": 7.0, "w_mm": 25.0, "h_mm": 25.0}]   # why: not nut-sized: the scene search takes the nut-like object nearest the hint (9, 6), and a 15 mm one at (7, 7) would be nearer than the nut
+
     monkeypatch.setattr(pl, "fetch_wrist", frame_feed(jaw_frame(ring=True))); arm = ShortArm(cc, table, scene=[NUT_OBJ, *others])
     out = drive(pl, monkeypatch, capsys, arm, ["--reset", "--seed", "3", "--runs", "9", "--state", str(tmp_path / "s.json")]); rec, = records(out); head, = [o for o in out if o.get("reset")]
     assert [n for n, _ in arm.calls] == [HOVER, POSE, LIFT, CARRY], "one closed-loop pick, jaw check included; --runs is not a loop in reset mode"
-    assert rec["mode"] == "reset" and rec["control"] == "closed" and rec["safe_box"] == [6.0, 4.0, 13.0, 8.0] and rec["nut_source"] == "near" and rec["picked"] is True and rec["in_jaws"] is True
+    assert rec["mode"] == "reset" and rec["control"] == "closed" and rec["safe_box"] == [6.0, 4.0, 13.0, 8.0] and rec["nut_source"] == "scene" and rec["picked"] is True and rec["in_jaws"] is True
     t = rec["target_in"]; assert t == head["target_in"] and 6.0 <= t[0] <= 13.0 and 4.0 <= t[1] <= 8.0 and math.hypot(t[0] - PROBE_NUT_IN[0], t[1] - PROBE_NUT_IN[1]) * 25.4 >= 60.0
     assert all(math.hypot(t[0] - o["x_in"], t[1] - o["y_in"]) * 25.4 >= 40.0 for o in others) and head["avoid"] == 3, "the nut itself is not in the avoid list; the other three are"
     assert all(math.hypot(t[0] - m[0], t[1] - m[1]) * 25.4 >= 50.0 for m in pl.marker_centres_in(table)) and head["nut_in"] == [round(v, 3) for v in PROBE_NUT_IN]
@@ -236,8 +237,8 @@ def test_find_nut_anywhere_falls_back_to_the_masked_whole_mat_search(pl, cc, tab
 
 def test_the_loop_uses_the_finder_when_the_near_search_fails_and_stops_lost_after_three_misses(pl, cc, table, monkeypatch, capsys, tmp_path):
     arm = ShortArm(cc, table, found=False, scene=[BIG_OBJ, NUT_OBJ]); out = drive(pl, monkeypatch, capsys, arm, ["--runs", "1", "--no-jaw-check", "--state", str(tmp_path / "s.json")])
-    note, = [o for o in out if o.get("note")]; rec, = records(out)
-    assert note["source"] == "scene" and note["nut_in"] == [round(v, 3) for v in PROBE_NUT_IN] and rec["nut_source"] == "scene" and rec["picked"] is True and len(arm.calls) == 3
+    rec, = records(out); assert not [o for o in out if o.get("note")], "since 11 Nov 2026 the near search asks the scene map first (find_nut_near), so the whole-mat finder is not needed here"
+    assert rec["nut_in"] == [round(v, 2) for v in PROBE_NUT_IN] and rec["nut_source"] == "scene" and rec["picked"] is True and len(arm.calls) == 3
     sleeps = []; monkeypatch.setattr(pl.time, "sleep", sleeps.append)
     arm2 = ShortArm(cc, table, found=False, scene=[BIG_OBJ]); out2 = drive(pl, monkeypatch, capsys, arm2, ["--runs", "4", "--state", str(tmp_path / "s2.json")])   # the header-only top JPEG decodes to nothing: the image search misses too
     misses = [o for o in out2 if "miss" in o]; s, = stops(out2)

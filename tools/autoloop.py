@@ -494,6 +494,7 @@ def main(argv=None):
     if a.dry_run:
         world = FakeWorld(cc, table, gr.fk_mat_mm, nut_in=(6.0, 8.0), rng=rng, miss_p=a.dry_miss); arm = DryArm(cc, table, world)
         pl.api, pl.run_plan, pl.find_nut, pl.fetch_top, pl.fetch_wrist = arm.api, arm.run_plan, world.find_nut, (lambda: b""), (lambda: None)
+        pl.fetch_scene_state = lambda: (world.api_scene()["objects"], 0)   # why: the dry run never asks a live dashboard for the scene (11 Nov 2026)
         ctx = gr.Ctx(world.api_state, world.api_scene, time.time, lambda s: None, lambda d: print(json.dumps(d), flush=True)); track = lt.LabTrack(EXPERIMENT + "-dry")
         if a.record_demos: world.in_jaws = True; demo = make_dry_demo(a, cfg, lt)   # why: the fake wrist camera has no frame, so the jaw check would read "unknown"; the fake world says the nut is held
     else:

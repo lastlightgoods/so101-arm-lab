@@ -197,7 +197,7 @@ def test_frames_are_saved_and_attached_when_on_and_every_locate_logs_its_candida
     r = autorig(); s, out = r.run(capsys, cycles=1, max_retries=0, save_frames=True); c, = events(out, "cycle")
     d = os.path.join(r.tmp, "out", "autoloop_t_frames"); assert sorted(os.listdir(d)) == ["c1_reset.jpg", "c1_try1.jpg"]
     run, = [x for x in r.track.runs if x.name.endswith("-c1")]; assert {"frames/c1_try1.jpg", "frames/c1_reset.jpg"} <= set(run.files)
-    loc, reset_loc = c["locates"]; assert loc["n_candidates"] == 1 and loc["chosen_in"] == pytest.approx(c["nut_in"], abs=1e-3) and loc["source"] == "scene"
+    loc, reset_loc = c["locates"]; assert loc["n_candidates"] == 1 and loc["chosen_in"] == pytest.approx(c["nut_in"], abs=1e-3) and loc["source"] == "dark"
     assert loc["candidates"][0]["w_mm"] == 12.0 and reset_loc["near_in"] is not None, "the try's locate, then the reset's"
 
 
@@ -250,7 +250,7 @@ def test_learned_biases_are_read_from_the_pick_state_and_passed_to_every_pick(au
 
 
 def test_pick_loop_find_nut_anywhere_is_called_with_near_in_and_its_xy_source_pair_is_used(autorig, capsys):
-    r = autorig(); seen = []; r.pl.find_nut_anywhere = lambda cc, table, scene_objects=None, near_in=None, jpeg=None, markers_in=None: seen.append((len(scene_objects), near_in)) or ([6.0, 8.0], "scene")
+    r = autorig(); seen = []; r.pl.find_nut_near = lambda *a, **k: None; r.pl.find_nut_anywhere = lambda cc, table, scene_objects=None, near_in=None, jpeg=None, markers_in=None: seen.append((len(scene_objects), near_in)) or ([6.0, 8.0], "scene")
     s, out = r.run(capsys, cycles=1, max_retries=0); assert seen and seen[0] == (1, None) and events(out, "cycle")[0]["nut_in"] == [6.0, 8.0]
     r2 = autorig(); r2.pl.find_nut = lambda *a, **k: None   # without find_nut_anywhere: the overhead search sees nothing; the dashboard's scene still has the nut
     if hasattr(r2.pl, "find_nut_anywhere"): delattr(r2.pl, "find_nut_anywhere") if "find_nut_anywhere" in vars(r2.pl) else None

@@ -21,7 +21,7 @@ State (biases, place offset, history) persists in --state so later sessions star
 Every pick is also one MLflow run in experiment `so101-picks` (jetson/labtrack.py: params, landing error, per-waypoint sag, the stage
 corrections, the overhead frame at landing, the jaw-check frames, the plan and the state file); with no tracking server the loop runs as before.
 """
-import argparse, json, math, os, random, subprocess, time, urllib.request
+import argparse, json, math, os, random, subprocess, sys, time, urllib.request
 import cv2, numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -143,8 +143,8 @@ def find_nut_near(cc, table, near_in, radius_px=70, radius_mm=None, wait_s=3.0, 
     sleep = sleep or time.sleep
     try:
         if radius_mm is None:
-            u, v = cc.table_to_pixel(table, near_in[0] * 25.4, near_in[1] * 25.4); (x0, y0), (x1, y1) = cc.pixel_to_table(table, u, v), cc.pixel_to_table(table, u + 1.0, v)
-            radius_mm = radius_px * math.hypot(x1 - x0, y1 - y0)
+            try: u, v = cc.table_to_pixel(table, near_in[0] * 25.4, near_in[1] * 25.4); (x0, y0), (x1, y1) = cc.pixel_to_table(table, u, v), cc.pixel_to_table(table, u + 1.0, v); radius_mm = radius_px * math.hypot(x1 - x0, y1 - y0)
+            except Exception: radius_mm = radius_px * 2.0   # the mat camera's nominal 0.5 px/mm
         objs, pend = fetch_scene_state(); waited = 0.0
         while pend > 0 and waited < wait_s: sleep(0.5); waited += 0.5; objs, pend = fetch_scene_state()
         c = [(math.hypot(float(o["x_in"]) - near_in[0], float(o["y_in"]) - near_in[1]) * 25.4, o) for o in nut_candidates(objs) if "x_in" in o and "y_in" in o]
@@ -152,8 +152,8 @@ def find_nut_near(cc, table, near_in, radius_px=70, radius_mm=None, wait_s=3.0, 
         if c:
             o = min(c, key=lambda t: t[0])[1]; xy = [float(o["x_in"]), float(o["y_in"])]; u, v = cc.table_to_pixel(table, xy[0] * 25.4, xy[1] * 25.4)
             f = Found((xy, [float(u), float(v)], None)); f.source = "scene"; return f
-    except Exception as e: print(json.dumps({"find_nut_near": "scene failed", "err": f"{type(e).__name__}: {e}"}), flush=True)
-    kw = {"jpeg": jpeg} if jpeg is not None else {}; kw.update({"joints": joints} if joints != "live" else {})
+    except Exception as e: print(json.dumps({"find_nut_near": "scene failed", "err": f"{type(e).__name__}: {e}"}), file=sys.stderr, flush=True)
+    kw ={"jpeg": jpeg} if jpeg is not None else {}; kw.update({"joints": joints} if joints != "live" else {})
     d = find_nut(cc, table, near_in, radius_px=radius_px, **kw)
     if d is None: return None
     f = Found(d); f.source = "dark"; return f

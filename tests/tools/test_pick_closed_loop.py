@@ -35,7 +35,7 @@ def test_two_readback_corrections_converge_on_an_arm_that_reaches_7mm_short(pl, 
     assert np.dot(np.array(c1) / np.linalg.norm(c1), d) > 0.98
     # the history record carries the stage numbers and the sag of the final stage only
     assert rec["mode"] == "closed" and rec["jaw_open"] == 35 and rec["corr1_mm"] == c1 and rec["corr2_mm"] == c2 and rec["grasp_h_mm"] == st["grasp_pose"]["h_mm"] and rec["grasp_lowered_mm"] == st["grasp_pose"]["lowered_mm"]   # (the tilt puts the stage-2 tip a mm under the IK height, so the raise rule may fire: the record carries whatever the rule decided)
-    assert set(rec["sag_deg"]) == set(FINAL) and rec["picked"] is True and rec["in_jaws"] is None and rec["reason"] is None and rec["nut_source"] == "near"
+    assert set(rec["sag_deg"]) == set(FINAL) and rec["picked"] is True and rec["in_jaws"] is None and rec["reason"] is None and rec["nut_source"] == "dark"
     saved = json.load(open(state)); assert set(saved["biases"]) == set(FINAL) - GRIPPER_ONLY - {"pregrasp_up"}, "sag is learned on the final stages' waypoints, never on the jaw moves"
     assert saved["history"][-1]["corr1_mm"] == c1
     # and MLflow gets them as metrics through the (faked) labtrack
