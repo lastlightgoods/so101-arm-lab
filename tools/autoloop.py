@@ -365,7 +365,7 @@ class Runner:
     def run(self):
         try: return self._run()
         finally:
-            if self.opt("unattended", False) and self.torque_off is not None:   # after the park, whatever ended the session
+            if getattr(self, "torque_off", None) is not None and self.opt("unattended", False):   # after the park, whatever ended the session
                 self.guard.release_torque(self.ctx, dict(self.pl.REST), getattr(self.pl, "close_session", lambda: None), self.torque_off, self.say)
             getattr(self.pl, "close_session", lambda: None)()   # why: 12 Nov 2026 the persistent pick_seq ssh (pick_loop.PickSession) ends with the session, on any exit
 
