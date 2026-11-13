@@ -579,6 +579,13 @@ def sample_ring_spot(rng, box_in, cur_in, pile_in, others_in, markers_mm, feasib
     return None
 
 
+def ring_interior_in(c, r_mm=RING_R_MM - 12.0, n=8):
+    """The ring's centre and n points r_mm out (mat inches): where its toys can be. reset_mat counts them as the pile because the scene map can merge
+    the toys into the ring's own blob. why: 12 Nov 2026 after the nuts went in, the map showed one 130 x 106 mm "ring" blob and no toy inside it,
+    and the set-down spot was then only kept 60 mm from where the ring stood, close enough to put the new wall on the pile."""
+    return [tuple(c)] + [(c[0] + r_mm / IN * math.cos(k * 2 * math.pi / n), c[1] + r_mm / IN * math.sin(k * 2 * math.pi / n)) for k in range(n)]
+
+
 def pick_ring_spot(rng, box_in, cur_in, pile_in, others_in, markers_mm, feasible=None, hidden=None):
     """(spot, seen): a spot whose whole footprint (wall + 10 mm) the top camera sees when sample_ring_spot finds one, else any spot it finds; seen is None without `hidden`.
     Only a preference: the parked arm hides most of the ring box, so requiring it would often leave no spot."""
@@ -835,11 +842,12 @@ def reset_mat(t, dest=None):
         if any(dist_mm(p, (k["x_in"], k["y_in"])) < RING_R_MM + k["r_mm"] + 10.0 for k in kos) or not ko.segment_clear(rig.ring, p, kos, RING_R_MM + 10.0): return False
         try: mover.plan(rig.ring, p); return True
         except (SystemExit, Exception): return False
-    spot, seen = (dest, None) if dest else pick_ring_spot(t.rng, t.a.ring_box, rig.ring, pile, others, t.markers_mm, feasible, t.hidden_fn())
+    pile_pts = pile + ring_interior_in(rig.ring)
+    spot, seen = (dest, None) if dest else pick_ring_spot(t.rng, t.a.ring_box, rig.ring, pile_pts, others, t.markers_mm, feasible, t.hidden_fn())
     if spot is None: return {"ok": False, "stop": "no free spot for the ring"}
     if dest is not None and not (all(dist_mm(dest, (k["x_in"], k["y_in"])) >= RING_R_MM + k["r_mm"] + 10.0 for k in kos) and ko.segment_clear(rig.ring, dest, kos, RING_R_MM + 10.0)):
         return {"ok": False, "stop": "--ring-to spot or path too close to a keep-out"}
-    if dest is not None and (why := ring_spot_ok(dest, rig.ring, pile, others, t.markers_mm)): return {"ok": False, "stop": f"--ring-to spot refused: {why}"}   # why: 12 Nov the explicit spot skipped these checks and the ring covered marker 2
+    if dest is not None and (why := ring_spot_ok(dest, rig.ring, pile_pts, others, t.markers_mm)): return {"ok": False, "stop": f"--ring-to spot refused: {why}"}   # why: 12 Nov the explicit spot skipped these checks and the ring covered marker 2
     t.say({"event": "ring_dest", "from_in": [round(v, 3) for v in rig.ring], "to_in": spot, "footprint_seen": seen})
     with_trip = None
     try: mv = mover.lift_ring(spot)

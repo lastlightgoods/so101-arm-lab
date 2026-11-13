@@ -640,3 +640,14 @@ def test_the_ring_prefers_a_spot_the_camera_sees_but_does_not_require_one(td):
     p, seen = td.pick_ring_spot(rng(), box, cur, [], [], [])
     assert p is not None and seen is None, "no shadow function: not judged"
     assert td.pick_ring_spot(rng(), box, cur, [], [], [], feasible=lambda q: False, hidden=shade) == (None, None), "nothing feasible: no spot"
+
+
+def test_the_new_ring_clears_the_old_rings_inside_when_the_map_merges_the_pile_into_the_ring(td):
+    """12 Nov 2026: the scene map showed one 130 x 106 mm ring blob and no toy inside; the pile list was empty and the spot only had to be 60 mm away."""
+    old = (12.28, 7.39); pts = td.ring_interior_in(old); r_in = (td.RING_R_MM - 12.0) / 25.4
+    assert len(pts) == 9 and all(abs(td.dist_mm(q, old) - (0.0 if i == 0 else r_in * 25.4)) < 1e-6 for i, q in enumerate(pts))
+    near = (old[0] - 3.0, old[1])   # 76 mm: a real move, but the new wall would cover the old inside
+    assert td.ring_spot_ok(near, old, [], [], []) is None and td.ring_spot_ok(near, old, pts, [], []) == "too close to a toy or the pile"
+    for s in range(10):
+        p = td.sample_ring_spot(random.Random(s), td.RING_BOX_IN, old, pts, [], [])
+        assert p is None or td.dist_mm(p, old) >= td.RING_R_MM + 1.5 * 25.4 + td.RING_R_MM - 12.0 - 1e-6
