@@ -492,7 +492,7 @@ class Tidy:
         except Exception: return None
         t = temp_trip(st, self.a.temp_limit, self.guard.trip)
         if t: return t
-        if "temp" not in self.noted and not has_temp(st): self.noted.add("temp"); self.say({"note": "temperature not checked: /api/state publishes none"})
+        if "temp" not in self.noted and not has_temp(st): self.noted.add("temp"); self.say({"note": "no temperature in /api/state (servo heat is checked from /api/tele by the guard)"})
         for e in self.eps.values():
             if e.rec is not None and hasattr(e.rec, "alive") and not e.rec.alive(): return self.guard.trip("recorder", {"err": "the demo recorder does not answer"})
         return t
@@ -782,7 +782,10 @@ def spread_pile(t, pile_in, box_in, nudge=True, max_attempts=None):
     while s["attempts"] < cap:
         if tr := t.before(): s["stop"] = tr.reason; break
         objs = t.settled_objects(); t.refresh_keepouts(objs); pile = [o for o in t.toys(objs) if dist_mm((o["x_in"], o["y_in"]), pile_in) < PILE_R_MM]
-        if not pile: break
+        if not pile:
+            big = [o for o in objs if "x_in" in o and dist_mm((o["x_in"], o["y_in"]), pile_in) < PILE_R_MM and not is_toy(o, ring=rig.ring) and (float(o.get("area_mm2") or 0) >= 2000.0 or max(float(o.get("w_mm") or 0), float(o.get("h_mm") or 0)) > 60.0)]
+            if big: s["stop"] = f"pile unreadable: one {max(float(o.get('w_mm') or 0) for o in big):.0f} mm blob where the ring stood, no toy-sized pieces (background?)"   # why: 12 Nov 2026 the background had been learned with the ring there; lifting it left a ring-shaped ghost that swallowed the toys, and the reset reported ok with nothing spread
+            break
         blob = max(pile, key=lambda o: (blob_count(o), -dist_mm((o["x_in"], o["y_in"]), pile_in))); key = (round(blob["x_in"], 1), round(blob["y_in"], 1))
         if fails.get(key, 0) >= 2 and nudge and key not in nudged and dist_mm((blob["x_in"], blob["y_in"]), rig.ring) > RING_R_MM + 90.0 and all(dist_mm((blob["x_in"], blob["y_in"]), (k["x_in"], k["y_in"])) > k["r_mm"] + 90.0 for k in rig.keepouts):
             nudged.add(key); s["nudged"] += 1; do_nudge(t, blob); continue

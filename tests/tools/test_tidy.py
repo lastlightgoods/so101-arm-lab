@@ -651,3 +651,12 @@ def test_the_new_ring_clears_the_old_rings_inside_when_the_map_merges_the_pile_i
     for s in range(10):
         p = td.sample_ring_spot(random.Random(s), td.RING_BOX_IN, old, pts, [], [])
         assert p is None or td.dist_mm(p, old) >= td.RING_R_MM + 1.5 * 25.4 + td.RING_R_MM - 12.0 - 1e-6
+
+
+def test_a_pile_seen_as_one_big_blob_stops_the_spread_instead_of_passing(td, mk):
+    """12 Nov 2026 day1k: the background held the ring at its old spot; lifting it left a 110 x 105 mm ghost with the toys in it, and the reset said ok with nothing spread."""
+    pile = (12.2, 6.9); m = mk([toy(pile[0], pile[1], 110.0, 105.0, 6484.0)], ring=(6.1, 5.4))
+    s = td.spread_pile(m.t, pile, td.SPREAD_BOX_IN, nudge=False)
+    assert s["moved"] == 0 and s["stop"] and s["stop"].startswith("pile unreadable") and m.w.names == [], s
+    m2 = mk([], ring=(6.1, 5.4)); s2 = td.spread_pile(m2.t, pile, td.SPREAD_BOX_IN, nudge=False)
+    assert s2["stop"] is None and s2["moved"] == 0, "an empty pile spot is a clean finish"
