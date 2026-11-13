@@ -793,6 +793,7 @@ SCENE_DETECT_PY = os.path.join(HERE, "scene_detect.py")
 SCENE_BG_NAME = "top_mat_bg.png"
 SCENE_PERIOD_S = 0.5            # detect period (the module costs 5-8 ms per frame)
 SCENE_BG_EVERY = 10             # update_background (module defaults) every Nth detect
+SCENE_RING_KEEP_MM = 15.0       # margin around the tape ring's radius that update_background leaves alone (scene_ring_keep)
 SCENE_SHIFT_PX = 3.0            # markers further than this from the stored solve -> live solve
 SCENE_NOTE_S = 30.0             # LOG line rate limit
 SCENE_PERSIST_S = 60.0          # write-back rate limit
@@ -1007,12 +1008,18 @@ def scene_step(now=None):
     with _scene_lock:
         res = sc.detect(frame, t=now, arm_px=arm_px)
         SCENE["n"] += 1; SCENE["arm_px"] = arm_px
-        if SCENE["n"] % SCENE_BG_EVERY == 0: sc.update_background(frame)
+        if SCENE["n"] % SCENE_BG_EVERY == 0: sc.update_background(frame, keep_mm=scene_ring_keep())
         try: scene_heal(sc, res, tab, now, frame)
         except Exception as e: log("scene: heal:", repr(e))
         scene_label_step(res, frame, tab, now)
         SCENE.update(res=res, t=now, err=None)
     return res
+def scene_ring_keep():
+    """The tape ring's footprint as never-adapt discs for update_background: [(x_mm, y_mm, r_mm + SCENE_RING_KEEP_MM)] from the last labels, [] without a ring.
+    why: 12 Nov 2026 a ring that stood still for minutes was absorbed into the adaptive background; lifted, it left a ring-shaped ghost that swallowed the pile."""
+    r = (SCENE.get("labels") or {}).get("ring")
+    try: return [(float(r["x_in"]) * 25.4, float(r["y_in"]) * 25.4, float(r.get("r_mm") or 52.0) + SCENE_RING_KEEP_MM)] if r else []
+    except (KeyError, TypeError, ValueError): return []
 def scene_loop():
     while True:
         try: scene_step()

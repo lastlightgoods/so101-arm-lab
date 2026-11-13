@@ -206,6 +206,16 @@ def test_update_background_keeps_objects_and_tracks_light(scene_a, frames):
     assert len(scene_a.detect(f)["objects"]) == 1
 
 
+def test_update_background_never_adapts_inside_a_keep_disc(scene_a, frames):
+    """12 Nov 2026: parts of the tape ring's wall are not flagged as object; a ring standing still was absorbed in minutes and left a ghost when lifted."""
+    bright = np.clip(frames["bg"].astype(np.float32) * 1.2, 0, 255).astype(np.uint8); before = scene_a.bg.copy()
+    for _ in range(5): scene_a.update_background(bright, alpha=0.5, keep_mm=[(200.0, 150.0, 40.0)])
+    c, r = (int(round(v)) for v in scene_a.mm_to_warp(200.0, 150.0)); k = int(25 * scene_a.ppm)   # a square inside the 40 mm disc
+    assert np.array_equal(scene_a.bg[r - k:r + k, c - k:c + k], before[r - k:r + k, c - k:c + k]), "inside the disc: untouched"
+    fc, fr = (int(round(v)) for v in scene_a.mm_to_warp(320.0, 230.0))
+    assert scene_a.bg[fr, fc].mean() > before[fr, fc].mean() * 1.1, "outside it the free mat followed the light"
+
+
 def test_update_background_alpha_busy_absorbs_eventually(scene_a, frames):
     f = paste_square(scene_a, frames["bg"], 200, 150, 30)
     assert len(scene_a.detect(f)["objects"]) == 1

@@ -256,7 +256,7 @@ class MatScene:
         if img.shape[:2] != (self.Hh, self.W): img = cv2.resize(img, (self.W, self.Hh), interpolation=cv2.INTER_AREA)
         self.set_background(img, check_markers=False); self.bg_source = str(path)
 
-    def update_background(self, frame_bgr, alpha=0.02, alpha_busy=0.0, arm_px=None):
+    def update_background(self, frame_bgr, alpha=0.02, alpha_busy=0.0, arm_px=None, keep_mm=()):
         """Slow adaptation: bg <- (1-alpha)*bg + alpha*current on pixels NOT currently flagged as object/arm (with a halo);
         flagged pixels adapt at `alpha_busy` (default 0 = never). Trade-off: with alpha_busy = 0 an object left on the
         mat stays reported indefinitely, but a persistent false detection (a shadow the suppression missed, a spot
@@ -264,12 +264,16 @@ class MatScene:
         updates (8 minutes at 2 Hz and 0.002), making them vanish from the map. Lighting drift is tracked through the
         exposure gain in detect() as well, so alpha can stay small. No-op without a background.
         arm_px: the arm silhouette for this frame (see detect); None reuses the last detect()'s, which is right when
-        the caller updates with the frame it has just detected on (the server does)."""
+        the caller updates with the frame it has just detected on (the server does).
+        keep_mm: discs [(x_mm, y_mm, r_mm)] that never adapt, like object pixels. The server passes the tape ring's footprint: parts of its wall are not
+        flagged as object, and 12 Nov 2026 a ring that stood still was absorbed in minutes, then left a ring-shaped ghost that swallowed the pile when it was lifted."""
         if self.bg is None: return
         cur = self._to_warp(frame_bgr)
         kin = self.kinematic_mask(arm_px) if arm_px is not None else self._last_kin
         fg, arm, _ = self._foreground(cur, kin)
         busy = cv2.dilate(cv2.bitwise_or(fg, arm), np.ones((3, 3), np.uint8), iterations=self.arm_halo_px)
+        for x, y, r in keep_mm:
+            c, row = self.mm_to_warp(float(x), float(y)); cv2.circle(busy, (int(round(c)), int(round(row))), int(math.ceil(float(r) * self.ppm)), 255, -1)
         a = np.where(busy > 0, float(alpha_busy), float(alpha)).astype(np.float32)[:, :, None]
         self.bg = (1.0 - a) * self.bg + a * cur.astype(np.float32)
         self.bg_gray = cv2.cvtColor(self.bg, cv2.COLOR_BGR2GRAY)

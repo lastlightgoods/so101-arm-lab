@@ -174,7 +174,15 @@ def test_background_adapts_every_tenth_detect(srv, http, lab, monkeypatch):
     sc = srv.SCENE["scene"]; calls = []
     monkeypatch.setattr(sc, "update_background", lambda frame, **kw: calls.append(kw))
     for _ in range(19): srv.scene_step()
-    assert srv.SCENE["n"] == 20 and calls == [{}, {}], "detects 10 and 20, module defaults"
+    assert srv.SCENE["n"] == 20 and calls == [{"keep_mm": []}, {"keep_mm": []}], "detects 10 and 20, module defaults, no ring to keep"
+
+
+def test_the_tape_rings_footprint_is_never_absorbed_into_the_background(srv, monkeypatch):
+    """12 Nov 2026: a ring standing still was absorbed in minutes and left a ring-shaped ghost that swallowed the pile when it was lifted."""
+    monkeypatch.setitem(srv.SCENE, "labels", {"ring": {"x_in": 9.0, "y_in": 6.0, "r_mm": 52.0, "h_mm": 51.0}})
+    assert srv.scene_ring_keep() == [(9.0 * 25.4, 6.0 * 25.4, 52.0 + srv.SCENE_RING_KEEP_MM)]
+    for labels in ({"ring": None}, {}, None, {"ring": {"x_in": "?"}}):
+        monkeypatch.setitem(srv.SCENE, "labels", labels); assert srv.scene_ring_keep() == []
 
 
 def test_scene_is_rebuilt_when_the_table_file_changes(srv, http, lab):
