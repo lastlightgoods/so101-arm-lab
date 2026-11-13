@@ -210,6 +210,43 @@ if not getattr(_orig_connect, "_busheal", False):
     FeetechMotorsBus.connect = _connect
 
 
+# --- disconnect(): torque off motor by motor; one refusing servo must not abort the program ----------
+# why: 12 Nov 2026 lerobot-record crashed with a core dump on disconnect, after the episode had been saved: "Failed to write
+# 'Torque_Enable' on id_=2 with '0' after 6 tries". LeRobot disables all motors in one call, so the first refusal raised and the
+# motors after it kept their torque: the follower was left half on, half off. Here each motor is disabled on its own (with the
+# same retries), refusals are logged by name, and the port is closed in every case.
+DISCONNECT_TRIES = 3
+_orig_disconnect = FeetechMotorsBus.disconnect
+if not getattr(_orig_disconnect, "_busheal", False):
+
+    def _disconnect(self, disable_torque: bool = True):
+        if not disable_torque:
+            return _orig_disconnect(self, False)
+        refused, last = [], None
+        try:
+            self.port_handler.clearPort()
+            self.port_handler.is_using = False
+        except Exception:  # nosec B110 - the per-motor writes below report what matters
+            pass
+        for motor in self.motors:
+            for attempt in range(DISCONNECT_TRIES):   # LeRobot retries timeouts, not error statuses (the 12 Nov refusal was a status)
+                try:
+                    self.disable_torque(motor, num_retry=5)
+                    break
+                except Exception as e:
+                    last = e
+                    time.sleep(0.05)
+            else:
+                refused.append(motor)
+        if refused:
+            logger.error(f"[busheal] {self.port}: torque-off refused at disconnect by {', '.join(refused)} ({last}); the others are off; closing the port")
+        return _orig_disconnect(self, False)
+
+    _disconnect._busheal = True
+    _disconnect.__name__ = "disconnect"
+    FeetechMotorsBus.disconnect = _disconnect
+
+
 # --- gripper squeeze force cap -------------------------------------------------------------
 # LeRobot's SOFollower.configure() writes Max_Torque_Limit=500 to the gripper on every connect.
 # On this arm that stalls at ~540 current units against a bottle, above the 250 protection

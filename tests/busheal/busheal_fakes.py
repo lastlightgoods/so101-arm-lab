@@ -38,6 +38,7 @@ class Sim:
         self.sync_fail_count = 0        # the next N sync transactions time out whatever the stall state
         self.read_fail_addrs = set()    # single-register reads at these addresses time out
         self.overload_ids = set()       # motors whose status packets carry the overload error bit
+        self.sticky_error_ids = set()   # motors whose every status packet carries an error bit that cycling torque does not clear (12 Nov 2026: servo 2 refused torque-off at disconnect)
         self.error_text = "[RxPacketError] Overload error!"
         self.firmware = {i: (3, 9) for i in self.ids}
         self.reg = {(i, PRESENT_POSITION): 2000 + i for i in self.ids}
@@ -51,7 +52,7 @@ class Sim:
         return COMM_RX_TIMEOUT if self.stalled else COMM_SUCCESS
 
     def error(self, id_):
-        return OVERLOAD_BIT if id_ in self.overload_ids else 0
+        return OVERLOAD_BIT if (id_ in self.overload_ids or id_ in self.sticky_error_ids) else 0
 
     def register_write(self, id_, addr, value):
         self.writes.append((id_, addr, value))
