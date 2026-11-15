@@ -3,6 +3,7 @@
 // Built by dashboard/mac/build.sh into ~/Applications/SO-101 Panel.app; launched by `so101-dash app`.
 //   SO101_PANEL_URL       page to load (default http://127.0.0.1:8765/)
 //   SO101_PANEL_WINDOWED  1 = stay a normal window instead of going full screen
+//   SO101_REVIEW_URL      TC Review page for Cmd-2 (default http://127.0.0.1:8790/, the private lab-board review server)
 // Agent hooks (replacing cdp.js for this window): `kill -USR1 <app pid>` writes a PNG of the page to
 // /tmp/so101-panel.png; the page's WebContent process id is in /tmp/so101-panel.webpid (for memory sampling).
 // Safari's Develop menu can attach Web Inspector to it (isInspectable).
@@ -11,6 +12,7 @@ import WebKit
 
 let env = ProcessInfo.processInfo.environment
 let pageURL = URL(string: env["SO101_PANEL_URL"] ?? "http://127.0.0.1:8765/")!
+let reviewURL = URL(string: env["SO101_REVIEW_URL"] ?? "http://127.0.0.1:8790/")!   // TC Review (REQ 012): Cmd-2; Cmd-1 back to the arm panel
 let shotPath = "/tmp/so101-panel.png"
 let webPidPath = "/tmp/so101-panel.webpid"
 
@@ -20,6 +22,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     var usr1: DispatchSourceSignal?
     var activity: NSObjectProtocol?
     var retryPending = false
+    var current = pageURL
 
     // The vertical (portrait) screen first, else any screen without the menu bar, else the only one.
     func targetScreen() -> NSScreen {
@@ -65,7 +68,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         load()
     }
 
-    func load() { web.load(URLRequest(url: pageURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)) }
+    func load() { web.load(URLRequest(url: current, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)) }
+    @objc func showArmPanel(_ s: Any?) { current = pageURL; load() }
+    @objc func showReview(_ s: Any?) { current = reviewURL; load() }
 
     // server.py not up yet (or restarting): keep retrying every 3 s instead of showing a dead page.
     func retrySoon() {
@@ -129,6 +134,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         let main = NSMenu()
         let appItem = NSMenuItem(); main.addItem(appItem)
         let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Arm Panel", action: #selector(showArmPanel(_:)), keyEquivalent: "1").target = self
+        appMenu.addItem(withTitle: "TC Review", action: #selector(showReview(_:)), keyEquivalent: "2").target = self
         appMenu.addItem(withTitle: "Reload Panel", action: #selector(reloadPage(_:)), keyEquivalent: "r").target = self
         appMenu.addItem(withTitle: "Toggle Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
             .keyEquivalentModifierMask = [.command, .control]

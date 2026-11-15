@@ -44,6 +44,7 @@ def test_panel_app_source_keeps_the_panel_alive():
     assert "didFailProvisionalNavigation" in s and "retrySoon" in s   # server not up yet -> keep retrying
     assert "frame.height > $0.frame.width" in s                   # prefers the vertical monitor
     assert "toggleFullScreen" in s
+    assert "showReview" in s and 'keyEquivalent: "2"' in s   # Cmd-2 = TC Review (REQ 012), Cmd-1 = arm panel
     # the page calls alert(); a WKWebView without an alert panel delegate drops it silently
     if "alert(" in _src(INDEX):
         assert "runJavaScriptAlertPanelWithMessage" in s
