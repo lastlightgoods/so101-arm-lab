@@ -7,4 +7,4 @@ scipy==1.18.1
 psutil==7.2.2
 pytest==9.2.0
 ruff==0.17.4
-mlflow==3.17.2   # registry/tracking tests (tests/tools); skipped when absent
+mlflow==3.18.0   # registry/tracking tests (tests/tools); skipped when absent
