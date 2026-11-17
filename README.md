@@ -52,7 +52,7 @@ Started 5 October 2026 by [Lastlight Goods](https://lastlightgoods.com) in Bend,
   dashboard draws from.
 - [`docs/mlops/README.md`](docs/mlops/README.md): the map of the MLOps stack (tracking, registry, deployment,
   containers, Terraform), the five day-to-day sequences, how it maps to standard practice and what is deliberately
-  not done; with a glossary, an evening of hands-on exercises and résumé notes beside it.
+  not done; with a glossary and an evening of hands-on exercises beside it.
 - [`docs/mlops/registry-and-deploy.md`](docs/mlops/registry-and-deploy.md): checkpoints into the MLflow Model
   Registry (`so101-policy register`, local or from the Hub), `candidate` and `jetson` aliases, versioned deployment to
   `~/so101/policies/<name>/v<N>/` with a `current` symlink and `DEPLOYED.json`, one-command rollback, and what
