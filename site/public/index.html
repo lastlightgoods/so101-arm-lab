@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SO-101 Arm Lab</title>
-<meta name="description" content="Notes from five weeks of building a robot arm lab at home: an SO-101 arm, a Jetson, three cameras at a locked exposure, a cutting mat with four ArUco markers, a calibration that re-solves itself when bumped, a map of the mat, and a pick loop that is not finished yet.">
+<meta name="description" content="Notes from six weeks of building a robot arm lab at home: an SO-101 arm on a Jetson, three cameras, a cutting mat with four ArUco markers, and the platform around it: every pick an MLflow run, a model registry, checked deploys to the edge, 1,651 tests that never touch the robot, and a few agents that share the work.">
 <link rel="canonical" href="https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="SO-101 Arm Lab">
 <meta property="og:title" content="SO-101 Arm Lab">
-<meta property="og:description" content="Notes from five weeks of building a robot arm lab at home: an SO-101 arm, a Jetson, three cameras, and a cutting mat with four ArUco markers on it.">
+<meta property="og:description" content="Six weeks of building a robot arm lab at home: an SO-101 arm on a Jetson, three cameras, a mat with four ArUco markers, and the tracking, deploy and test platform around it.">
 <meta property="og:url" content="https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/">
 <meta property="og:image" content="https://so101-arm-lab.c-thomas-clark-pdx.workers.dev/img/hero_stage.jpg">
 <meta property="og:image:width" content="1200">
@@ -39,6 +39,7 @@
     </a>
     <nav aria-label="Sections">
       <a href="#built">Built</a>
+      <a href="#platform">Platform</a>
       <a href="#notes">Notes</a>
       <a href="#gallery">Gallery</a>
       <a href="#status">Status</a>
@@ -57,8 +58,8 @@
       <div class="hero-top">
         <div>
           <h1 id="h-hero">SO-101 Arm Lab</h1>
-          <p class="lede">Notes from five weeks of building a robot arm lab at home: an SO-101 arm, a Jetson, three cameras, and a cutting mat with four ArUco markers on it.</p>
-          <p class="status"><span class="dot" aria-hidden="true"></span><span>snapshot from 9 Nov 2026, 23:06 &middot; cameras locked &middot; 30.00 fps</span></p>
+          <p class="lede">Notes from six weeks of building a robot arm lab at home: an SO-101 arm on a Jetson, three cameras, a cutting mat with four ArUco markers, and the platform around them that records, tracks, tests and ships everything the arm does.</p>
+          <p class="status"><span class="dot" aria-hidden="true"></span><span>snapshot from 16 Nov 2026 &middot; 1,651 tests &middot; CI green on main</span></p>
         </div>
       </div>
 
@@ -70,10 +71,10 @@
       </figure>
 
       <ul class="stats" aria-label="Key numbers">
-        <li><div class="num">600</div><div class="what">tests, no hardware</div></li>
+        <li><div class="num">1,651</div><div class="what">tests, no hardware</div></li>
+        <li><div class="num">24<small>of 29</small></div><div class="what">into the ring, 11 Nov</div></li>
         <li><div class="num">0.19<small>mm</small></div><div class="what">worst marker residual</div></li>
-        <li><div class="num">30.00<small>fps</small></div><div class="what">both C920s, locked</div></li>
-        <li><div class="num">36<small>days</small></div><div class="what">since 5 October</div></li>
+        <li><div class="num">42<small>days</small></div><div class="what">since 5 October</div></li>
       </ul>
     </div>
   </section>
@@ -84,26 +85,26 @@
       <div class="sec-head">
         <p class="eyebrow">How it is built</p>
         <h2 id="h-built">What runs where</h2>
-        <p>The Jetson runs the arms and cameras and records the datasets. The Mac runs the wall dashboard. Training runs locally on the Mac or the Jetson, or on Hugging Face Jobs for the bigger runs.</p>
+        <p>The Jetson runs the arm and the cameras and records the datasets. The Mac runs the wall panel, the MLflow server and the model registry, and ships code and models to the Jetson. Training runs on Hugging Face Jobs or on the Jetson, never on the Mac.</p>
       </div>
 
       <figure class="diagram">
         <!-- wide layout -->
         <svg class="wide" viewBox="0 0 960 330" role="img" aria-labelledby="dg-t dg-d">
           <title id="dg-t">System diagram</title>
-          <desc id="dg-d">The Mac runs the wall dashboard and local training, reaching the Jetson tc-nano over SSH. The Jetson runs the SO-ARM101 arm, three cameras, dataset recording and the camera lock guard. The arm works over an 18 by 12 inch cutting mat with four ArUco markers.</desc>
+          <desc id="dg-d">The Mac runs the wall panel, MLflow tracking and the model registry, and deploys code and models to the Jetson tc-nano over SSH. The Jetson runs the SO-ARM101 arm, three cameras, dataset recording and the camera lock guard. The arm works over an 18 by 12 inch cutting mat with four ArUco markers.</desc>
 
           <!-- Mac -->
           <rect class="box" x="20" y="40" width="240" height="250" rx="2"/>
-          <text class="t-label" x="36" y="68">01 &middot; DASHBOARD + TRAINING</text>
+          <text class="t-label" x="36" y="68">01 &middot; CONTROL + MLOPS</text>
           <text class="t-title" x="36" y="96">MAC</text>
-          <text class="t-sub" x="36" y="116">M1 Max &middot; Python 3.12 &middot; MPS</text>
+          <text class="t-sub" x="36" y="116">M1 Max &middot; Python 3.12 &middot; MLflow</text>
           <line class="hair" x1="36" y1="134" x2="244" y2="134"/>
           <g class="t-sub">
-            <circle class="node" cx="40" cy="158" r="2"/><text x="52" y="162">ACT and SmolVLA training</text>
-            <circle class="node" cx="40" cy="184" r="2"/><text x="52" y="188">datasets and checkpoints</text>
-            <circle class="node" cx="40" cy="210" r="2"/><text x="52" y="214">wall dashboard, 3D arm, map</text>
-            <circle class="node" cx="40" cy="236" r="2"/><text x="52" y="240">600 tests against fakes</text>
+            <circle class="node" cx="40" cy="158" r="2"/><text x="52" y="162">MLflow runs, model registry</text>
+            <circle class="node" cx="40" cy="184" r="2"/><text x="52" y="188">deploys to the Jetson, rollback</text>
+            <circle class="node" cx="40" cy="210" r="2"/><text x="52" y="214">wall panel, 3D arm, map</text>
+            <circle class="node" cx="40" cy="236" r="2"/><text x="52" y="240">1651 tests against fakes</text>
           </g>
 
           <!-- link Mac <-> Jetson -->
@@ -167,18 +168,18 @@
         <!-- tall layout for phones -->
         <svg class="tall" viewBox="0 0 360 870" role="img" aria-labelledby="dg-t2 dg-d2">
           <title id="dg-t2">System diagram</title>
-          <desc id="dg-d2">The Mac runs the wall dashboard and local training, reaching the Jetson tc-nano over SSH. The Jetson runs the SO-ARM101 arm, three cameras, dataset recording and the camera lock guard. The arm works over an 18 by 12 inch cutting mat with four ArUco markers.</desc>
+          <desc id="dg-d2">The Mac runs the wall panel, MLflow tracking and the model registry, and deploys code and models to the Jetson tc-nano over SSH. The Jetson runs the SO-ARM101 arm, three cameras, dataset recording and the camera lock guard. The arm works over an 18 by 12 inch cutting mat with four ArUco markers.</desc>
 
           <rect class="box" x="10" y="10" width="340" height="200" rx="2"/>
-          <text class="t-label" x="30" y="38">01 &middot; DASHBOARD + TRAINING</text>
+          <text class="t-label" x="30" y="38">01 &middot; CONTROL + MLOPS</text>
           <text class="t-title" x="30" y="66">MAC</text>
-          <text class="t-sub" x="30" y="86">M1 Max &middot; Python 3.12 &middot; Apple MPS</text>
+          <text class="t-sub" x="30" y="86">M1 Max &middot; Python 3.12 &middot; MLflow</text>
           <line class="hair" x1="30" y1="102" x2="330" y2="102"/>
           <g class="t-sub">
-            <circle class="node" cx="34" cy="124" r="2"/><text x="46" y="128">ACT and SmolVLA training</text>
-            <circle class="node" cx="34" cy="148" r="2"/><text x="46" y="152">datasets and checkpoints</text>
-            <circle class="node" cx="34" cy="172" r="2"/><text x="46" y="176">wall dashboard, 3D arm, mat map</text>
-            <circle class="node" cx="34" cy="196" r="2"/><text x="46" y="200">600 tests against fakes</text>
+            <circle class="node" cx="34" cy="124" r="2"/><text x="46" y="128">MLflow runs, model registry</text>
+            <circle class="node" cx="34" cy="148" r="2"/><text x="46" y="152">deploys to the Jetson, rollback</text>
+            <circle class="node" cx="34" cy="172" r="2"/><text x="46" y="176">wall panel, 3D arm, mat map</text>
+            <circle class="node" cx="34" cy="196" r="2"/><text x="46" y="200">1651 tests against fakes</text>
           </g>
 
           <line class="hair-accent" x1="60" y1="210" x2="60" y2="280"/>
@@ -258,7 +259,68 @@
             <li>Fiskars 18&times;12 in cutting mat <span class="k">&middot; printed inch grid</span></li>
             <li>Four 2 in ArUco markers <span class="k">&middot; DICT_4X4_50</span></li>
             <li>Jetson Orin Nano, tc-nano <span class="k">&middot; 8 GB, 25 W</span></li>
-            <li>Mac, M1 Max <span class="k">&middot; wall dashboard, local training on MPS</span></li>
+            <li>Mac, M1 Max <span class="k">&middot; wall panel, MLflow, registry, deploys</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2b. PLATFORM ============ -->
+  <section id="platform" aria-labelledby="h-platform">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow">Platform</p>
+        <h2 id="h-platform">The platform around the arm</h2>
+        <p>The arm is the fun part. Most of the work is the plumbing that lets me trust what it did. Every attempt is a tracked run. Every model and every file on the Jetson has a version I can roll back to. Every change goes through tests that never touch the hardware, and nothing runs on its own without guards. This is where that stood on 16 Nov.</p>
+      </div>
+      <div class="spec">
+        <div>
+          <h3>Data</h3>
+          <ul>
+            <li>Scripted closed-loop picks record their own episodes <span class="k">&middot; LeRobot v3, kept and rejected tries in separate datasets</span></li>
+            <li>Each dataset gets a content hash and its own MLflow run</li>
+            <li>First recorded toy-to-ring episode, 11 Nov <span class="k">&middot; 454 frames, three cameras</span></li>
+          </ul>
+        </div>
+        <div>
+          <h3>Tracking</h3>
+          <ul>
+            <li>Every pick and every session cycle is an MLflow run <span class="k">&middot; stages, servo telemetry, judge frames</span></li>
+            <li>Model registry with aliases <span class="k">&middot; candidate, jetson</span></li>
+            <li>Postgres + S3-compatible container stack; AWS mirror in Terraform <span class="k">&middot; written, never applied</span></li>
+          </ul>
+        </div>
+        <div>
+          <h3>Training</h3>
+          <ul>
+            <li>Hugging Face Jobs or the Jetson, never the Mac <span class="k">&middot; the cost is printed before a job starts</span></li>
+            <li>Object detector, YOLO11n, on HF Jobs <span class="k">&middot; 2 runs on a T4, about $0.13</span></li>
+            <li>Record &rarr; train &rarr; register &rarr; deploy &rarr; evaluate as one resumable routine <span class="k">&middot; tested on fakes, first live pass next</span></li>
+          </ul>
+        </div>
+        <div>
+          <h3>Deploy</h3>
+          <ul>
+            <li>Code to the Jetson with md5 checks, backups and one-command rollback <span class="k">&middot; DEPLOYED.json records the commit</span></li>
+            <li>Models checked by sha256 from registry to edge <span class="k">&middot; deploy, rollback, status</span></li>
+            <li>Refuses to deploy while the arm is busy</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Tests + CI</h3>
+          <ul>
+            <li>1,651 tests with no robot plugged in <span class="k">&middot; fake bus, fake cameras, fake world</span></li>
+            <li>GitHub Actions on every push <span class="k">&middot; about 7 minutes</span></li>
+            <li>A root guard so no test can reach the real lab <span class="k">&middot; added after a test moved the arm</span></li>
+          </ul>
+        </div>
+        <div>
+          <h3>Safety</h3>
+          <ul>
+            <li>Servo trips <span class="k">&middot; 65 &deg;C stop, 60 &deg;C start gate, 2.7 A a joint, 5 A on the bus, 10 V floor, stall, error bits</span></li>
+            <li>Fails closed if telemetry goes missing <span class="k">&middot; caps of 60 tries, 240 min</span></li>
+            <li>Torque off only after a confirmed park; the wall STOP writes a stop file</li>
           </ul>
         </div>
       </div>
@@ -270,7 +332,7 @@
     <div class="wrap">
       <div class="sec-head">
         <p class="eyebrow">Field notes</p>
-        <h2 id="h-notes">Seven notes from five weeks</h2>
+        <h2 id="h-notes">Twelve notes from six weeks</h2>
         <p>The source files for each note are listed at the end of it.</p>
       </div>
 
@@ -375,7 +437,7 @@
           <div class="note-body">
             <p class="eyebrow">Field note <span class="n">07</span></p>
             <h3>Testing without the robot</h3>
-            <p>Most evenings the arm is busy, or the Jetson is training, or the cameras are being re-aimed. The code still has to be checked, so the test suite does not touch any of it. <code>python -m pytest tests -q</code> collects 600 tests and takes about 3 minutes with nothing plugged in.</p>
+            <p>Most evenings the arm is busy, or the Jetson is training, or the cameras are being re-aimed. The code still has to be checked, so the test suite does not touch any of it. <code>python -m pytest tests -q</code> collected 600 tests when I first wrote this, about 3 minutes with nothing plugged in. By 16 Nov it collects 1,651, and GitHub Actions runs the whole suite on every push in about 7 minutes.</p>
             <p>The calibration tests render checkerboards and ArUco tables through a synthetic camera with known intrinsics, distortion and pose, then check what the tool gets back: the lens model within 1.5 px, the camera position within 6 mm, pixel-to-mat within 1.5 mm, and that the arm fit refuses a mirror image. The hand-eye solver is run on a synthetic wrist camera placed on the real kinematics and must come back within 2 mm, 0.5 degrees and 2 percent of focal length. The camera lock is driven against a fake <code>v4l2-ctl</code> that reproduces every behaviour I measured on the real C920, the gain reset included. The bus plugin runs on a fake Feetech bus that drops packets on cue.</p>
             <p>The dashboard page gets the same treatment with no framework and no npm: a Python stub server answers every API route from objects a test can mutate, a small Node driver opens the page in headless Chrome, blocks every external request, freezes the page's timers, and fails any test whose page threw or logged an error. Forty-five of those run in about 35 s. The camera frames in the fixtures are from 9 Nov: an empty mat, one hex nut at (10.97, 6.94) in, and the arm raised.</p>
             <p class="src">tests/, tests/ui/README.md, README.md</p>
@@ -383,6 +445,110 @@
           <figure class="note-fig">
             <div class="frame"><img src="/img/fixture_arm_raised.jpg" width="640" height="360" loading="lazy" alt="Camera frame from the top camera with the arm raised over the mat: the forearm leaves the mat edge through the air, the frame that exposed the edge-only arm rule."></div>
             <figcaption>Camera frame (top camera), one of the test fixtures from 9 Nov: the arm raised over the mat, the forearm leaving the edge through the air. The kinematic mask was written for this case.</figcaption>
+          </figure>
+        </article>
+
+        <article class="note" id="note-8">
+          <div class="note-body">
+            <p class="eyebrow">Field note <span class="n">08</span></p>
+            <h3>Every pick is a run</h3>
+            <p>I kept arguing with my own memory about which change had helped, so every pick and every session cycle now logs itself to MLflow: the plan, the waypoints, each stage with its timing, the servo telemetry along the way, the frame the judge looked at, and the verdict. The Jetson and the Mac write to the same server. The learning loop is wired the same way, so far only on fakes: an evaluation trial points to a registry version, which points to a training run, which points to a dataset hash.</p>
+            <p>It paid for itself on 10 Nov. My first ten-cycle session, first10b, landed 5 of 10, and from the wall it looked like a sloppy grasp. Reading the stage lines run by run showed three separate causes. The fixed jaw was aimed at the nut's centre, so it landed on top of the nut; it now aims 10 mm behind it. A reset that the wrist camera said had failed was never checked, so the next cycle went looking where the nut wasn't; resets are judged now. And the jaws were closing 3.4 to 7 mm above a nut about 3 mm tall, so the grasp now corrects its height from the servo readback and closes about 1 mm below the mat's surface reading.</p>
+            <p>The frame here is the check that runs after every lift. The wrist camera looks at a fixed window between the jaws and fits a ring to the nut; no ring means the pick missed, and the arm gets one retry before the cycle counts as a miss.</p>
+            <p class="src">tools/pick_loop.py, tools/autoloop.py, jetson/labtrack.py, docs/autoloop-explained.md, docs/mlops/tracking.md</p>
+          </div>
+          <figure class="note-fig">
+            <div class="frame"><img src="/img/wrist_jaw_check.jpg" width="640" height="480" loading="lazy" alt="Camera frame from the wrist camera after a lift on 11 Nov: the jaws close over a hex nut on the mat grid, a yellow box marks the jaw window and a red circle marks the ring the detector fitted to the nut, with the score printed at the bottom."></div>
+            <figcaption>Camera frame (wrist camera), 11 Nov 20:56: the jaw check after a lift. The yellow box is the jaw window, the red circle the ring fitted to the nut. The overlay is the software's own.</figcaption>
+          </figure>
+        </article>
+
+        <article class="note" id="note-9">
+          <div class="note-body">
+            <p class="eyebrow">Field note <span class="n">09</span></p>
+            <h3>Naming what's on the mat</h3>
+            <p>Once the arm could pick one hex nut, I put out a mix: hex nuts, wing nuts, spacers standing and lying, a roll of tape as the target, and some toy frogs it must never touch. The map now gives each blob a kind from its size, shape and colour, and the 3D stage draws the kinds: nuts and spacers as small boxes, the tape ring as a cylinder, and the frogs as red KEEP OUT cylinders that every route, target and reset spot has to clear.</p>
+            <p>Lying spacers need the jaws to close across them, so the wrist now rolls to the spacer's long axis. On 11 Nov it turned 62 degrees for one lying the wrong way, and the arm cleared the mat: all seven toys into the roll in eight tries.</p>
+            <p>The rules are brittle where things touch or sit on the dark squares, so I tried a learned detector. A zero-shot model, OWLv2, found the frogs and the ring but was weak on nuts. A fine-tuned YOLO11n, trained twice on Hugging Face Jobs for about 13 cents, found 82% of hex nuts, 19% of wing nuts, 58% of spacers and 100% of the rings on 20 held-out frames. My bar is 95% for every class, so it is not switched on. The data is the problem: 304 frames, 70% of them one layout. The fix is a ten-minute capture session with the mat rearranged about forty times.</p>
+            <p class="src">tools/scene_labels.py, tools/keepout.py, dashboard/scene_detect.py, the mat-detector training script, docs/mat-scene.md</p>
+          </div>
+          <figure class="note-fig">
+            <div class="frame"><img src="/img/stage_labels.jpg" width="774" height="598" loading="lazy" alt="Dashboard screenshot of the 3D stage: the follower arm with a temperature label in degrees Celsius on each servo, the mat with its four markers, small boxes labelled NUT, WING NUT and SPACER, red cylinders labelled KEEP OUT around the toy frogs, and a servo temperature scale marked 60, 65 and 70."></div>
+            <figcaption>Dashboard screenshot of the 3D stage, 16 Nov, showing the last state it received: each object labelled by kind, the frogs as red KEEP OUT cylinders, and every servo tinted and labelled with its temperature.</figcaption>
+          </figure>
+        </article>
+
+        <article class="note" id="note-10">
+          <div class="note-body">
+            <p class="eyebrow">Field note <span class="n">10</span></p>
+            <h3>Guards before anything runs alone</h3>
+            <p>I want the arm to practise overnight. Before it does, it has to stop itself. The servos report their temperature, load, current, voltage and error bits on the same bus they are driven on, and until 11 Nov the lab read only position. Now all of it is on the wall, in MLflow, and wired to trips: 65 &deg;C stops a session and 60 &deg;C won't let one start, from measured idle temperatures of 52 to 57 &deg;C. There are also current limits per joint and for the bus, a supply-voltage floor, a stall timer, and caps on tries and minutes. If the telemetry feed goes quiet, the session stops rather than guessing. Torque comes off only after a park the servos confirm, and the wall STOP writes a stop file that every loop checks.</p>
+            <p>The scariest bug so far wasn't on the arm. On 11 Nov a test in my own suite drove the real arm through a full recorded pick and moved the tape roll about 2.7 inches. A feature had landed underneath it, and the test's old assumption turned a dry run into a live one over SSH. Now a root guard swaps SSH, SCP and remote rsync in every test for a command that fails like an unreachable host, and the live dashboard answers as down. Every attempt is logged.</p>
+            <p>None of this has run unattended yet. The first supervised session with the guards on is the real test of stall loads, heat over time, and torque-off at rest.</p>
+            <p class="src">tools/guardrails.py, jetson/servo_telemetry.py, tests/conftest.py, docs/telemetry.md, docs/autoloop.md</p>
+          </div>
+          <figure class="note-fig">
+            <div class="panel">
+              <h3>Trips &middot; as built 11 Nov</h3>
+              <dl class="kv">
+                <dt>heat</dt><dd>stop at <span class="num">65 &deg;C</span>, no start above <span class="num">60 &deg;C</span></dd>
+                <dt>current</dt><dd><span class="num">2.7 A</span> a joint, <span class="num">5 A</span> on the bus</dd>
+                <dt>supply</dt><dd>floor at <span class="num">10 V</span></dd>
+                <dt>motion</dt><dd>stall timer, servo error bits, 8&deg; readback watchdog</dd>
+                <dt>caps</dt><dd><span class="num">60</span> tries, <span class="num">240</span> min, 3 misses in a row</dd>
+                <dt>telemetry</dt><dd>missing feed fails closed</dd>
+                <dt>end</dt><dd>park, confirm, then torque off</dd>
+              </dl>
+              <p class="src" style="margin-top:1rem">tools/guardrails.py</p>
+            </div>
+          </figure>
+        </article>
+
+        <article class="note" id="note-11">
+          <div class="note-body">
+            <p class="eyebrow">Field note <span class="n">11</span></p>
+            <h3>Shipping code and models to the edge</h3>
+            <p>For a while I copied files to the Jetson by hand, and fixes that were already on <code>main</code> sat undeployed: one had never reached it, another file was missing outright. Now <code>jetson_deploy.py</code> does it. It works out which files changed and which running programs import them, refuses if the arm is busy, backs up what it replaces, copies, checks every file's md5, restarts only what needs restarting, and writes the commit into a <code>DEPLOYED.json</code> on the Jetson. <code>status</code> compares the Jetson with <code>main</code> file by file, and <code>rollback</code> puts the last backup back.</p>
+            <p>The night it first ran, 11 Nov, it deployed twice: 9 files, then 2 more once the overnight guards had landed and the full suite had passed on that exact commit. The status afterwards was 37 files matching, 0 different and 0 missing. In review it also caught two of its own bugs: its restart would have killed its own shell, and it missed imports wrapped in <code>try:</code>.</p>
+            <p>Models go through the same kind of path. A checkpoint is registered in MLflow with the alias <code>candidate</code>, deployed to a versioned folder on the Jetson with a <code>current</code> link and a sha256 check from end to end, then given the alias <code>jetson</code>. <code>so101-policy status</code> exits non-zero if the registry and the Jetson disagree, for example when someone moves an alias by hand.</p>
+            <p class="src">tools/jetson_deploy.py, tools/so101_policy.py, docs/jetson-deploy.md, docs/mlops/registry-and-deploy.md</p>
+          </div>
+          <figure class="note-fig">
+            <div class="panel">
+              <h3>Deploy &middot; 11 Nov, 23:32 and 23:51</h3>
+              <dl class="kv">
+                <dt>first</dt><dd><span class="num">9</span> files, md5 verified</dd>
+                <dt>second</dt><dd><span class="num">2</span> files, after the guards and a green suite</dd>
+                <dt>status</dt><dd><span class="num">37</span> match &middot; 0 differ &middot; 0 missing</dd>
+                <dt>record</dt><dd><code>DEPLOYED.json</code> at the commit</dd>
+                <dt>undo</dt><dd><code>jetson_deploy.py rollback</code></dd>
+              </dl>
+              <p class="src" style="margin-top:1rem">tools/jetson_deploy.py</p>
+            </div>
+          </figure>
+        </article>
+
+        <article class="note" id="note-12">
+          <div class="note-body">
+            <p class="eyebrow">Field note <span class="n">12</span></p>
+            <h3>Running the lab with a few agents</h3>
+            <p>A lot of the code here was written by Claude agents working from my notes, and the lab has grown past one agent at a time. Now there are several: a Coordinator in Claude Code that owns the arm lab and watches the others, a laser agent for the CO2 laser jobs, a 3D-print agent that designs and prints parts on a Bambu P2S, and a purchasing agent. I write requests as numbered notes in a shared folder. Each agent works its own folder, renames a note DONE or BLOCKED when it finishes, and keeps a status document current.</p>
+            <p>A small poller runs every 5 minutes with no model calls. It reads each agent's heartbeat and flags any agent that leaves a request unread for 30 minutes. It also merges every agent's experiment entries into one shared log and writes a board summary. Decisions come to me in one place: a review panel where I approve or deny a print or a laser file next to a 3D view of the STL with its dimensions, and record results against each experiment. A click there only records a decision; the agent does the work. Anything that leaves the building waits for me at the terminal: every git push, every permissions change, every order.</p>
+            <p>The wall panel had to change too. On 14 Nov the Chrome the panel ran in hung, taking the agents' browser with it, and the Mac had to be rebooted. The panel now runs in its own native macOS window, full screen on the vertical monitor, sharing nothing with any browser. Cmd-2 switches it to the review panel.</p>
+            <p class="src">dashboard/mac/PanelApp.swift, docs/mac-panel.md; the coordinator, poller and review panel live in a separate private repo</p>
+          </div>
+          <figure class="note-fig">
+            <div class="panel">
+              <h3>Who does what &middot; 16 Nov</h3>
+              <dl class="kv">
+                <dt>Coordinator</dt><dd>arm lab, heartbeats, alerts, the status doc</dd>
+                <dt>3D print</dt><dd>designs, slices and prints on the P2S</dd>
+                <dt>Laser</dt><dd>LightBurn jobs for the CO2 laser</dd>
+                <dt>Purchasing</dt><dd>prices and carts, never orders</dd>
+                <dt>Poller</dt><dd>every <span class="num">5</span> min, no model calls</dd>
+                <dt>Me</dt><dd>approvals, results, every push and order</dd>
+              </dl>
+            </div>
           </figure>
         </article>
 
@@ -444,33 +610,36 @@
     <div class="wrap">
       <div class="sec-head">
         <p class="eyebrow">Status</p>
-        <h2 id="h-status">The pick loop isn't finished yet</h2>
+        <h2 id="h-status">Where the pick loop stands</h2>
       </div>
       <div class="status-grid">
         <div class="prose">
-          <p>The arm reaches within about 3 mm of a commanded point. The hex nut still lands 10 to 40 mm from where it was meant to go. The reason is the gripper: the SO-101 has one moving jaw, and a 10 mm nut shifts inside it during the grasp, so the part is no longer where the fingertip is. Sag learning does not fix that. In the first four runs the joint errors converged in one run and the landing error did not.</p>
-          <p>The parts underneath do work. The table calibration holds to a fifth of a millimetre and re-solves itself when the stand is bumped. Both C920s stream at 30.00 frames per second with frozen settings, and a guard puts them back within a second if anything changes them. The mat map runs in under 8 ms a frame and no longer lists the gripper as an object. Six hundred tests cover all of it without a robot plugged in.</p>
-          <p>Open items, in order: look at the part in the jaws with the wrist camera before placing, using the hand-eye pose solved on 9 Nov; account for the wrist camera pacing itself at about 22 fps by firmware, so one frame in four is a repeat in a 30 Hz recording; and keep working on the real-robot learned policies, which are still early. The first one learned to reach and then hover, because every training frame showed the leader arm and a hand.</p>
-          <p>The arm now runs ten-cycle sessions with me at the STOP control. On 10 Nov the first one landed 5 of 10 within 15 mm. <a href="/notes/practising-alone">Practising alone</a> has the recording, the cycle, the guardrails and the numbers.</p>
+          <p>The first autonomy milestone I set is ten pick-and-place cycles in a row with me at the STOP control: at least 9 of 10 landing within 15 mm of the target, and no guardrail trips. It isn't met yet. The first session, first10b on 10 Nov, landed 5 of 10 with a median error of 5.4 mm, and the guardrails ended it after three misses in a row, as designed. Note 08 has what the logs showed.</p>
+          <p>With those fixes in, an evening session on 11 Nov put 24 of 29 tries into a roll of tape used as the target. That's 83% by the overhead map's count, which probably reads one or two high because the map can mistake pieces of the roll's wall for toys. The same evening the arm cleared the mat: hex nuts, wing nuts and spacers, standing or lying, seven toys into the roll in eight tries.</p>
+          <p>Spacers rolled away when a late correction slid the open jaws across the mat, so corrections over 1.5 mm now lift, move over and come straight down: 2 of 2 since. The arm can also pick up the tape roll and move it to reset the task, lifting it with its bottom 83 mm in the air, but it sets it down 13 to 29 mm from where it was told, and I don't know why yet.</p>
+          <h3 style="margin-top:2rem">Next</h3>
+          <ul>
+            <li>Ten in a row, attended. Then the same task through a learned policy: the record, train, register, deploy and evaluate loop's first live pass.</li>
+            <li>A parallel gripper. The SO-101 gripper has one moving jaw, and a nut shifts inside it during the grasp. Robonine's print-at-home parallel gripper runs on one STS3215 on the same bus. The first jaws are printed, with a 6.05 mm rod seat chosen from three bore testers.</li>
+            <li>A second arm, a printed SO-ARM102 follower, and two arms working on one mat.</li>
+            <li>The tracking stack in the cloud. The Postgres and S3 container stack runs locally; the AWS mirror is written in Terraform and has never been applied.</li>
+          </ul>
+          <p><a href="/notes/practising-alone">Practising alone</a> has the 10 Nov recording, the cycle and the guardrails in detail.</p>
         </div>
         <aside class="panel" aria-labelledby="h-runs">
-          <h3 id="h-runs">First four runs &middot; 10 Nov, about 00:03</h3>
-          <dl class="kv">
-            <dt>picks</dt><dd><span class="num">4 of 4</span> succeeded, about 18.3 s each</dd>
-            <dt>reach</dt><dd>within about <span class="num">3 mm</span> of a commanded point</dd>
-            <dt>landing</dt><dd><span class="num">10&ndash;40 mm</span> off, the nut shifting in the jaws</dd>
-          </dl>
+          <h3 id="h-runs">Sessions, measured</h3>
           <table class="runs">
-            <caption class="eyebrow" style="text-align:left;margin:1.25rem 0 0.5rem">Per run</caption>
-            <thead><tr><th scope="col">run</th><th scope="col">hover err &deg;</th><th scope="col">lift err &deg;</th><th scope="col">landing mm</th></tr></thead>
+            <thead><tr><th scope="col">date</th><th scope="col">session</th><th scope="col">result</th></tr></thead>
             <tbody>
-              <tr><td>1</td><td>3.17</td><td>4.58</td><td>31.2</td></tr>
-              <tr><td>2</td><td>1.07</td><td>0.99</td><td>10.4</td></tr>
-              <tr><td>3</td><td>1.02</td><td>1.07</td><td>39.3</td></tr>
-              <tr><td>4</td><td>0.97</td><td>0.97</td><td>21.2</td></tr>
+              <tr><td>10 Nov</td><td>first runs</td><td>4 of 4 picked; landed 10&ndash;40 mm off</td></tr>
+              <tr><td>10 Nov</td><td>first10b</td><td>5 of 10 within 15 mm; median 5.4 mm</td></tr>
+              <tr><td>11 Nov</td><td>ten cycles</td><td>stopped after 4 (phantom objects on the map); 2 landed</td></tr>
+              <tr><td>11 Nov</td><td>tape ring</td><td>24 of 29 into the ring (83%)</td></tr>
+              <tr><td>11 Nov</td><td>clear the mat</td><td>7 toys in 8 tries</td></tr>
+              <tr><td>12 Nov</td><td>spacers, lift fix</td><td>2 of 2</td></tr>
             </tbody>
           </table>
-          <p class="src" style="margin-top:1rem">jetson/calib/pick_state.json, tools/pick_loop.py</p>
+          <p class="src" style="margin-top:1rem">MLflow so101-picks and autoloop runs, outputs/run/autoloop_*.json, docs/autoloop-explained.md</p>
         </aside>
       </div>
     </div>
@@ -481,7 +650,7 @@
     <div class="wrap">
       <div class="sec-head">
         <p class="eyebrow">Timeline</p>
-        <h2 id="h-timeline">5 October to 10 November 2026</h2>
+        <h2 id="h-timeline">5 October to 16 November 2026</h2>
       </div>
       <ol class="timeline">
         <li><time datetime="2026-10-05">5 Oct</time><div class="ev"><b>Both arms on the bus.</b> Port mapping confirmed with a wiggle test. The cause of the bus dropouts found the same night: cameras and servo boards shared one USB 2.0 hub, and opening a stream stalled the serial chip in 0.3 s.</div></li>
@@ -495,7 +664,13 @@
         <li><time datetime="2026-10-28">28 Oct</time><div class="ev"><b>Two C920s installed</b> as top and front cameras; three-camera recording config.</div></li>
         <li><time datetime="2026-10-29">29 Oct</time><div class="ev"><b>Grippers recalibrated;</b> teleop repaired after the calibration JSON drifted from servo EEPROM.</div></li>
         <li><time datetime="2026-11-09">9 Nov</time><div class="ev"><b>Calibration day.</b> Arm base jog-and-fit with joint zero offsets, the camera settings lock with guard and udev rule, camera health and drift tools, the kinematic arm mask, camera poses that re-solve themselves, the wrist camera hand-eye solve, and the single-session waypoint runner.</div></li>
-        <li><time datetime="2026-11-10">10 Nov</time><div class="ev"><b>First pick-loop runs.</b> Mat-map persistence filter, wrist pose on the 3D stage, and the iterative pick-and-place learner with its first four runs. This page.</div></li>
+        <li><time datetime="2026-11-10">10 Nov</time><div class="ev"><b>First pick-loop runs.</b> Mat-map persistence filter, wrist pose on the 3D stage, the iterative pick-and-place learner with its first four runs, and the first version of this page. That night the first ten-cycle session, first10b, landed 5 of 10.</div></li>
+        <li><time datetime="2026-11-11">11 Nov</time><div class="ev"><b>The big day.</b> Flicker bands traced to the room lights at 120 Hz; the cameras now expose for about one 8.3 ms period. Servo telemetry on the wall and in MLflow. 24 of 29 into the tape roll, and the mat cleared, 7 toys in 8 tries. Overnight guards, the Jetson deploy tool, object labels and keep-outs, the virtual arm on the 3D stage, and the first detector trained on Hugging Face Jobs.</div></li>
+        <li><time datetime="2026-11-12">12 Nov</time><div class="ev"><b>Tidy and reset.</b> The arm lifts the tape roll and moves it to reset the task. Spacer grasps fixed by lifting before a correction. Late that night, a leader-arm demo recorded: 1,342 frames from three cameras.</div></li>
+        <li><time datetime="2026-11-13">13 Nov</time><div class="ev"><b>The bus plugin now turns torque off motor by motor,</b> so one servo that refuses can't leave the arm half torqued. Shipped to the Jetson with the deploy tool.</div></li>
+        <li><time datetime="2026-11-14">14 Nov</time><div class="ev"><b>The wall panel leaves Chrome</b> for its own native window. The agents get heartbeats and a coordinator.</div></li>
+        <li><time datetime="2026-11-15">15 Nov</time><div class="ev"><b>One place for decisions:</b> a review panel with an STL viewer, and one experiment log for every agent's tests.</div></li>
+        <li><time datetime="2026-11-16">16 Nov</time><div class="ev"><b>This update.</b></div></li>
       </ol>
     </div>
   </section>
@@ -507,7 +682,7 @@
     <div>
       <div class="mark">A Lastlight Goods project</div>
       <div>Bend, Oregon</div>
-      <p class="fine">Figures as of 10 November 2026.</p>
+      <p class="fine">Figures as of 16 November 2026.</p>
     </div>
     <ul>
       <li><a href="https://github.com/lastlightgoods/so101-arm-lab">github.com/lastlightgoods/so101-arm-lab</a> <span class="k">(repo)</span></li>
