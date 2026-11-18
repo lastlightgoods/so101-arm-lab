@@ -27,9 +27,9 @@
   --focus: var(--gold);
   --shadow: 0 1px 0 rgba(253, 251, 246, 0.04) inset;
 
-  --serif: "Fraunces", "Iowan Old Style", Georgia, serif;
-  --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --serif: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;   /* headings: engineering mono (TC, REQ 018) */
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
   --measure: 72ch;
   --wide: 1120px;
@@ -116,10 +116,9 @@ code, kbd {
 
 h1, h2, h3 {
   font-family: var(--serif);
-  font-weight: 300;
-  font-variation-settings: "opsz" 144;
+  font-weight: 500;
   color: var(--heading);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   line-height: 1.1;
   margin: 0;
   text-wrap: balance;

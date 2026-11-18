@@ -21,7 +21,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1.5' y='1.5' width='29' height='29' rx='3' fill='%231a191f' stroke='%23aeb4bb' stroke-width='1.5'/%3E%3Ccircle cx='9.5' cy='9.5' r='3' fill='%23fdfbf6'/%3E%3Ccircle cx='22.5' cy='9.5' r='3' fill='%23fdfbf6'/%3E%3Ccircle cx='9.5' cy='22.5' r='3' fill='%23fdfbf6'/%3E%3Ccircle cx='22.5' cy='22.5' r='3' fill='%23b98526'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/style.css">
 <script>
   // Apply a remembered theme before first paint. Falls back to the system theme.
@@ -65,9 +65,9 @@
 
       <figure class="hero-figure">
         <div class="frame">
-          <img src="/img/hero_stage.jpg" width="1200" height="758" alt="Render from the dashboard's 3D stage, front view: the SO-101 arm standing behind the 18 by 12 inch mat with its four ArUco markers, the overhead and front camera frustums drawn as thin wireframes above it, and the wrist camera's view cone at the gripper." fetchpriority="high">
+          <img src="/img/stage_labels.jpg" width="774" height="598" alt="Dashboard screenshot of the 3D stage: the follower arm with a temperature label in degrees Celsius on each servo, the mat with its four markers, small boxes labelled NUT, WING NUT and SPACER, red cylinders labelled KEEP OUT around the toy frogs, and a servo temperature scale marked 60, 65 and 70." fetchpriority="high">
         </div>
-        <figcaption><b>Render from the dashboard's 3D stage</b>, front view, 10 Nov. Not a photo. The arm is posed from the follower's joint readings at the time, the mat from the overhead solve, and the three camera frustums from their measured poses. The wrist camera's cone hangs off the gripper.</figcaption>
+        <figcaption><b>The dashboard's 3D stage</b>, 16 Nov. Not a photo: the arm is posed from the follower's joint readings, every servo tinted and labelled with its temperature, each object on the mat labelled by kind, and the toy frogs drawn as red KEEP OUT cylinders that every route has to clear.</figcaption>
       </figure>
 
       <ul class="stats" aria-label="Key numbers">
@@ -380,8 +380,8 @@
             <p class="src">docs/camera-calibration.md "Joint zero offsets", jetson/calib/top_table.json, jetson/calib/top_armfit.json</p>
           </div>
           <figure class="note-fig">
-            <div class="frame"><img src="/img/dashboard.png" width="1200" height="758" loading="lazy" alt="Dashboard screenshot, default tempest skin: turntable header, MISSION STATUS reading IDLE READY with tc-nano up 3 days, six Jetson gauges for GPU, bus, CPU, RAM, temperature and power, the three camera feeds with a CAL chip reading 0.2 mm and arm fit 1.1 mm, and the self-playing Tempest attract screen."></div>
-            <figcaption>Dashboard screenshot, default <code>tempest</code> skin, landscape window. The CAL chip over the top feed reads 0.2 mm for the table and 1.1 mm for the arm fit; the portrait wall kiosk shows more rows below this.</figcaption>
+            <a href="/img/panel.jpg"><div class="frame"><img src="/img/panel_top.jpg" width="1440" height="960" loading="lazy" alt="SO-101 Panel screenshot, top of the portrait wall screen, default tempest skin: turntable header, MISSION STATUS reading IDLE READY with the Jetson up 4 days, six Jetson gauges for GPU, bus, CPU, RAM, temperature and power, and the three camera feeds with a CAL chip reading 0.1 mm, arm fit 1.1 mm, roll 0.5 degrees."></div></a>
+            <figcaption>SO-101 Panel screenshot, default <code>tempest</code> skin, the top of the portrait wall screen (18 Nov). The CAL chip over the top feed reads 0.1 mm for the table and 1.1 mm for the arm fit; the full panel is in the gallery below.</figcaption>
           </figure>
         </article>
 
@@ -594,12 +594,16 @@
           <figcaption><b>Fixture: one nut</b> &middot; camera frame (top camera) with a hex nut at (10.97, 6.94) in, the frame the object tests measure.</figcaption>
         </figure></li>
         <li><figure>
-          <a href="/img/dashboard.png"><div class="frame"><img src="/img/thumb/dashboard.jpg" width="480" height="303" loading="lazy" alt="Dashboard screenshot, default tempest skin: gauges, camera feeds and the Tempest attract screen."></div></a>
-          <figcaption><b>Dashboard, tempest</b> &middot; dashboard screenshot of the default skin in a landscape window: mission status, the six Jetson gauges, three camera feeds, the attract screen.</figcaption>
+          <a href="/img/panel.jpg"><div class="frame"><img src="/img/thumb/panel.jpg" width="480" height="303" loading="lazy" alt="SO-101 Panel screenshot, default tempest skin, portrait wall screen: header, mission status, Jetson gauges and camera feeds; the full image continues with the attract screen, the 3D arm and joint table, training loss, datasets and policies."></div></a>
+          <figcaption><b>Panel, tempest</b> &middot; the SO-101 Panel on the portrait wall screen, default skin (18 Nov): mission status, the six Jetson gauges, three camera feeds, the attract screen, the 3D arm with joint temperatures, the joint table, training loss, datasets and policies. The two terminal panels are blurred for the web.</figcaption>
         </figure></li>
         <li><figure>
-          <a href="/img/dashboard_dystopian.png"><div class="frame"><img src="/img/thumb/dashboard_dystopian.jpg" width="480" height="303" loading="lazy" alt="Dashboard screenshot, Lastlight Goods DYSTOPIAN skin: silver only, JetBrains Mono, facility signage, and the card ARM BAY. IDLE."></div></a>
-          <figcaption><b>Dashboard, dystopian</b> &middot; dashboard screenshot of the Lastlight Goods DYSTOPIAN skin: silver only, JetBrains Mono, facility signage, and the follower pose at the time as a silhouette.</figcaption>
+          <a href="/img/panel_dystopian.jpg"><div class="frame"><img src="/img/thumb/panel_dystopian.jpg" width="480" height="303" loading="lazy" alt="SO-101 Panel screenshot, Lastlight Goods DYSTOPIAN skin: silver only, JetBrains Mono, facility signage, and the card TRANSPORT. IDLE."></div></a>
+          <figcaption><b>Panel, dystopian</b> &middot; the same panel in the Lastlight Goods DYSTOPIAN skin: silver only, JetBrains Mono, facility signage, and the follower pose at the time as a silhouette. Terminal panels blurred.</figcaption>
+        </figure></li>
+        <li><figure>
+          <a href="/img/panel_telemetry.jpg"><div class="frame"><img src="/img/thumb/panel_telemetry.jpg" width="480" height="303" loading="lazy" alt="SO-101 Panel servo telemetry view: per-joint temperature, load and current charts, bus current against the 5 A board limit, supply voltage, commanded versus actual, a joint table and the error-flag list."></div></a>
+          <figcaption><b>Servo telemetry</b> &middot; the panel's live servo telemetry view (M key): temperature, load and current per joint, bus current against the 5 A board limit, supply voltage, commanded versus actual, and error flags as they happen. Captured 18 Nov while idle; the flag list still shows the gripper's temperature warnings from a teleop session that morning.</figcaption>
         </figure></li>
       </ul>
     </div>
