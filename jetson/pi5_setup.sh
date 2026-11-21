@@ -8,7 +8,7 @@
 # Adding dataset recording later (scripted_record.py): pip install 'lerobot[feetech,dataset]==0.6.1' + ffmpeg + cameras.
 set -euo pipefail
 echo "== $(tr -d '\0' </proc/device-tree/model 2>/dev/null) / $(. /etc/os-release; echo "$PRETTY_NAME") / python $(python3 -V | cut -d' ' -f2) =="
-sudo -v
+sudo true   # not `sudo -v`: with sudoers verifypw=all it still wants a password while %sudo has no NOPASSWD
 # -- 1. OS up to date + build/runtime packages --
 sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y
