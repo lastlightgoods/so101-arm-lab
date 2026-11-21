@@ -31,7 +31,7 @@ SYSTEM_FILES = {   # never copied by a normal deploy: need root or change the ne
     "99-so101-cams.rules": ["sudo install -m 644 ~/so101/99-so101-cams.rules /etc/udev/rules.d/99-so101-cams.rules", "sudo udevadm control --reload && sudo udevadm trigger   # briefly re-enumerates the cameras: only with no arm or camera job running"],
     "so101-cam-lock.service": ["sudo install -m 644 ~/so101/so101-cam-lock.service /etc/systemd/system/so101-cam-lock.service", "sudo systemctl daemon-reload   # then restart the unit only when .cams_busy is absent"],
 }
-SETUP_ONLY = {"jetson_setup.sh"}      # deployed as a file (it is in the repo), never run by this tool
+SETUP_ONLY = {"jetson_setup.sh", "pi5_setup.sh"}   # deployed as a file (it is in the repo), never run by this tool
 ROOTS = {   # long-running (or per-session) entry points: file -> (what it is, how a new version gets picked up, --restart name or None)
     "arm_state.py": ("arm_state.py (the Mac dashboard starts it over ssh)", "nothing to do: the next poller start loads it; to force it, restart the dashboard (so101-dash) on the Mac", None),
     "camd.py": ("camd.py serve (camera daemon)", "idle only: `deploy --restart camd` (refuses while a recorder is configured); the dashboard camera tiles reconnect", "camd"),
